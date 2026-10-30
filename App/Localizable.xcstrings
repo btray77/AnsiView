@@ -1,0 +1,637 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@  ·  click to skip" : {
+
+    },
+    "%lld baud" : {
+
+    },
+    "%lld seconds" : {
+
+    },
+    "%lld x %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld x %2$lld"
+          }
+        }
+      }
+    },
+    "A PNG the exact pixel size of a display, the art centred or tiled; it can be set as the desktop picture." : {
+
+    },
+    "A ```ansi code block in the 8 colours Discord shows (bold for bright). Discord's phone apps show it without colour." : {
+
+    },
+    "A menu bar item showing one piece from your library each day (16colo.rs can be added in its window; off by default)." : {
+
+    },
+    "A strip at the right of tall art showing the whole piece; click or drag in it to jump." : {
+
+    },
+    "ANSI (24 bit colour)" : {
+
+    },
+    "ANSI (256 colours)" : {
+
+    },
+    "ANSI (escape codes, for terminals)" : {
+
+    },
+    "ANSI Music Editor" : {
+
+    },
+    "About ANSI Music..." : {
+
+    },
+    "Actual Size" : {
+
+    },
+    "Add Layer" : {
+
+    },
+    "Add folders to the Library (Window > Library) to see your own art here." : {
+
+    },
+    "Also show a piece from 16colo.rs" : {
+
+    },
+    "Animated GIF" : {
+
+    },
+    "Animation Timeline" : {
+
+    },
+    "Art" : {
+
+    },
+    "Art File" : {
+
+    },
+    "Art of the Day" : {
+
+    },
+    "Art's Own Colours" : {
+
+    },
+    "At Instant speed the art appears at once; this plays its music once from the start." : {
+
+    },
+    "Auto Advance" : {
+
+    },
+    "Auto Scroll" : {
+
+    },
+    "Batch Export..." : {
+
+    },
+    "Box and Shapes" : {
+
+    },
+    "Browse 16colo.rs..." : {
+
+    },
+    "Brush" : {
+
+    },
+    "CP437 Text" : {
+
+    },
+    "CRT Effect" : {
+
+    },
+    "Cancel Transfer" : {
+
+    },
+    "Canvas Size..." : {
+
+    },
+    "Capture Session..." : {
+
+    },
+    "Character Picker..." : {
+
+    },
+    "Check for Updates..." : {
+
+    },
+    "Clear Scrollback" : {
+
+    },
+    "Click to continue" : {
+
+    },
+    "Compare With..." : {
+
+    },
+    "Component Library..." : {
+
+    },
+    "Connect to BBS..." : {
+
+    },
+    "Convert ${file} to ${format}" : {
+
+    },
+    "Convert ANSI Art to Text" : {
+
+    },
+    "Convert Images to ANSI..." : {
+
+    },
+    "Convert to Text" : {
+
+    },
+    "Copies of the same art across the library's folders and packs, to review and move to the Trash." : {
+
+    },
+    "Copy As" : {
+
+    },
+    "Crop to Selection" : {
+
+    },
+    "Delete Column" : {
+
+    },
+    "Delete Frame" : {
+
+    },
+    "Delete Line" : {
+
+    },
+    "Dialing Directory" : {
+
+    },
+    "Dialing...  ·  click to skip" : {
+
+    },
+    "Disconnect" : {
+
+    },
+    "Discord (ANSI colour code block)" : {
+
+    },
+    "Done" : {
+
+    },
+    "Download..." : {
+
+    },
+    "Draw (Half Blocks)" : {
+
+    },
+    "Draws an ANSI, ASCII, BIN or XBin art file with its original font and colours, as a PNG or JPEG of the finished art or an animated GIF of it being drawn." : {
+
+    },
+    "Duplicate Frame" : {
+
+    },
+    "Duplicates in Library" : {
+
+    },
+    "Dwell Time" : {
+
+    },
+    "Edit Art" : {
+
+    },
+    "Edit SAUCE..." : {
+
+    },
+    "Editor Shortcuts..." : {
+
+    },
+    "Every file transfer with this BBS: protocol details, retries, results and SHA-256 checksums." : {
+
+    },
+    "Export Animation..." : {
+
+    },
+    "Export Image..." : {
+
+    },
+    "Export Profiles..." : {
+
+    },
+    "Export Text..." : {
+
+    },
+    "Export Wallpaper..." : {
+
+    },
+    "Export to BBS..." : {
+
+    },
+    "Eyedropper" : {
+
+    },
+    "Faster" : {
+
+    },
+    "Fill" : {
+
+    },
+    "Fill Selection with Character" : {
+
+    },
+    "Fill Selection with Colour" : {
+
+    },
+    "Find" : {
+
+    },
+    "Find Next" : {
+
+    },
+    "Find Previous" : {
+
+    },
+    "Find..." : {
+
+    },
+    "Fit to Window" : {
+
+    },
+    "Flatten Layers" : {
+
+    },
+    "Font Manager..." : {
+
+    },
+    "Format" : {
+
+    },
+    "Full Screen Editing" : {
+
+    },
+    "Get Info" : {
+
+    },
+    "HTML" : {
+
+    },
+    "Hands AnsiView's screen saver to macOS, which asks before adding it to System Settings > Screen Saver." : {
+
+    },
+    "Hold Final Frame" : {
+
+    },
+    "Image" : {
+
+    },
+    "Image Format" : {
+
+    },
+    "Import Animation..." : {
+
+    },
+    "Import Image..." : {
+
+    },
+    "In a gallery: the pack's FILE_ID.DIZ and NFO files beside the pieces." : {
+
+    },
+    "Insert Column" : {
+
+    },
+    "Insert Display Code..." : {
+
+    },
+    "Insert Line" : {
+
+    },
+    "Install Screen Saver..." : {
+
+    },
+    "Integer Fit" : {
+
+    },
+    "JASC .pal, GIMP .gpl, Adobe .act, or an XBin, ADF or IDF file's own palette." : {
+
+    },
+    "JPEG" : {
+
+    },
+    "Library" : {
+
+    },
+    "Line" : {
+
+    },
+    "Load Palette File..." : {
+
+    },
+    "Log In" : {
+
+    },
+    "Merge Layer Down" : {
+
+    },
+    "Mirror Horizontally" : {
+
+    },
+    "Mirror Vertically" : {
+
+    },
+    "Modem Sounds" : {
+
+    },
+    "Move Selection" : {
+
+    },
+    "Music muted in this window" : {
+
+    },
+    "Music on" : {
+
+    },
+    "Mute Music in This Window" : {
+
+    },
+    "New ANSI Art" : {
+
+    },
+    "New Frame" : {
+
+    },
+    "New from Template..." : {
+
+    },
+    "Next Art" : {
+
+    },
+    "Next Frame" : {
+
+    },
+    "Next Palette" : {
+
+    },
+    "Off by default. When on, AnsiView asks 16colo.rs for one piece a day: at most four requests, a second apart, cached." : {
+
+    },
+    "Onion Skin" : {
+
+    },
+    "Open" : {
+
+    },
+    "Open Folder or Art Pack..." : {
+
+    },
+    "Open Project..." : {
+
+    },
+    "Open Sample" : {
+
+    },
+    "Open with BBS Codes..." : {
+
+    },
+    "PNG" : {
+
+    },
+    "Palette" : {
+
+    },
+    "Paused" : {
+
+    },
+    "Pixels per font pixel (1 is 640 pixels wide for 80 columns)." : {
+
+    },
+    "Play / Pause" : {
+
+    },
+    "Play ANSI Music" : {
+
+    },
+    "Play Animation" : {
+
+    },
+    "Play Music at Instant Speed" : {
+
+    },
+    "Playback" : {
+
+    },
+    "Plays the BASIC PLAY tunes some ANSI art carries, as BBS terminals did. Foreground music pauses the drawing until it ends." : {
+
+    },
+    "Presentation Mode" : {
+
+    },
+    "Preview as Caller..." : {
+
+    },
+    "Previous Art" : {
+
+    },
+    "Previous Frame" : {
+
+    },
+    "Receives files from the BBS. ZMODEM and Kermit downloads usually start by themselves." : {
+
+    },
+    "Reconnect" : {
+
+    },
+    "Remove Loaded Palettes" : {
+
+    },
+    "Render ${file} as ${format}" : {
+
+    },
+    "Render ANSI Art to Image" : {
+
+    },
+    "Render to Image" : {
+
+    },
+    "Replace..." : {
+
+    },
+    "Replay from Start" : {
+
+    },
+    "Reveal Concealed Text" : {
+
+    },
+    "Rotate 180" : {
+
+    },
+    "Rotate 90 Clockwise" : {
+
+    },
+    "Sample Values Preview" : {
+
+    },
+    "Sample Values..." : {
+
+    },
+    "Save Project..." : {
+
+    },
+    "Save Selection as Component..." : {
+
+    },
+    "Scale" : {
+
+    },
+    "Screen" : {
+
+    },
+    "Screen Set..." : {
+
+    },
+    "Scrolls tall art smoothly down the window. While it runs: + and - change speed, Space pauses, Escape stops." : {
+
+    },
+    "Select" : {
+
+    },
+    "Send Password" : {
+
+    },
+    "Send Username" : {
+
+    },
+    "Sends files to the BBS with XMODEM, YMODEM, ZMODEM or Kermit. Start the upload on the BBS first." : {
+
+    },
+    "Share Animation..." : {
+
+    },
+    "Share Image..." : {
+
+    },
+    "Show Art of the Day in Menu Bar" : {
+
+    },
+    "Show Minimap" : {
+
+    },
+    "Show or Hide Pack Info" : {
+
+    },
+    "Shows this piece next to another one with the cells that differ tinted red." : {
+
+    },
+    "Silences this window's ANSI music, or turns it back on. Other windows are not affected." : {
+
+    },
+    "Size" : {
+
+    },
+    "Skip to End" : {
+
+    },
+    "Slack (plain code block)" : {
+
+    },
+    "Slack code blocks have no colour, so this is the art's characters in a ``` block." : {
+
+    },
+    "Slideshow" : {
+
+    },
+    "Slower" : {
+
+    },
+    "Speed" : {
+
+    },
+    "Start Slideshow" : {
+
+    },
+    "Stop Capture" : {
+
+    },
+    "Stops the running file transfer and tells the BBS to stop (Escape does the same)." : {
+
+    },
+    "Swap Colours in Selection" : {
+
+    },
+    "Swap Foreground and Background" : {
+
+    },
+    "Teletext and Viewdata: shows or hides text the page conceals, such as quiz answers." : {
+
+    },
+    "Terminal" : {
+
+    },
+    "Terminal Type" : {
+
+    },
+    "Text" : {
+
+    },
+    "Text Art..." : {
+
+    },
+    "Text Format" : {
+
+    },
+    "Text to ASCII" : {
+
+    },
+    "Text to ASCII..." : {
+
+    },
+    "Toggle Grid" : {
+
+    },
+    "Toggle Insert Mode" : {
+
+    },
+    "Toggle Retro Theme" : {
+
+    },
+    "Toggle iCE Colours" : {
+
+    },
+    "Tools" : {
+
+    },
+    "Transfer Log" : {
+
+    },
+    "Turns an art file into UTF-8 or CP437 text, ANSI for modern terminals, or HTML with its colours." : {
+
+    },
+    "UTF-8 Text" : {
+
+    },
+    "Unlimited" : {
+
+    },
+    "Upload File(s)..." : {
+
+    },
+    "Your art folders in one place: search, tags, ratings, favourites, smart folders, artist and group pages." : {
+
+    },
+    "Zoom 2x" : {
+
+    },
+    "Zoom 3x" : {
+
+    },
+    "Zoom In" : {
+
+    },
+    "Zoom Out" : {
+
+    },
+    "Zoom: %@" : {
+
+    }
+  },
+  "version" : "1.0"
+}

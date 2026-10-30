@@ -2,6 +2,9 @@ import AnsiCore
 import AppKit
 import ScreenSaver
 
+/// Text from the saver's own String Catalog (the host app is `Bundle.main`).
+private let saverBundle = Bundle(for: AnsiSaverView.self)
+
 /// The saver's options, kept in its own ScreenSaverDefaults (plan 10 ruling 13).
 struct SaverSettings {
     static let bauds = [2400, 9600, 19200, 38400, 0]
@@ -152,23 +155,23 @@ final class SaverOptionsSheet: NSObject {
         self.done = done
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 250), styleMask: [.titled], backing: .buffered, defer: true)
         super.init()
-        speed.addItems(withTitles: SaverSettings.bauds.map { $0 == 0 ? "Instant" : "\($0) baud" })
+        speed.addItems(withTitles: SaverSettings.bauds.map { $0 == 0 ? String(localized: "Instant", bundle: saverBundle) : String(localized: "\(String($0)) baud", bundle: saverBundle) })
         speed.selectItem(at: SaverSettings.bauds.firstIndex(of: settings.baud) ?? 1)
-        hold.addItems(withTitles: SaverSettings.holds.map { "\(Int($0)) seconds" })
+        hold.addItems(withTitles: SaverSettings.holds.map { String(localized: "\(String(Int($0))) seconds", bundle: saverBundle) })
         hold.selectItem(at: SaverSettings.holds.firstIndex(of: settings.holdSeconds) ?? 1)
         updateFolderLabel()
-        let choose = NSButton(title: "Choose Folder...", target: self, action: #selector(chooseFolder))
-        let samples = NSButton(title: "Use Samples", target: self, action: #selector(useSamples))
-        let note = NSTextField(wrappingLabelWithString: "macOS runs screen savers in a sandbox, so a folder outside it may not be readable; the samples inside the screen saver play instead.")
+        let choose = NSButton(title: String(localized: "Choose Folder...", bundle: saverBundle), target: self, action: #selector(chooseFolder))
+        let samples = NSButton(title: String(localized: "Use Samples", bundle: saverBundle), target: self, action: #selector(useSamples))
+        let note = NSTextField(wrappingLabelWithString: String(localized: "macOS runs screen savers in a sandbox, so a folder outside it may not be readable; the samples inside the screen saver play instead.", bundle: saverBundle))
         note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         note.textColor = .secondaryLabelColor
-        let ok = NSButton(title: "OK", target: self, action: #selector(close))
+        let ok = NSButton(title: String(localized: "OK", bundle: saverBundle), target: self, action: #selector(close))
         ok.keyEquivalent = "\r"
         let grid = NSGridView(views: [
-            [NSTextField(labelWithString: "Art:"), folderLabel],
+            [NSTextField(labelWithString: String(localized: "Art:", bundle: saverBundle)), folderLabel],
             [NSView(), NSStackView(views: [choose, samples])],
-            [NSTextField(labelWithString: "Speed:"), speed],
-            [NSTextField(labelWithString: "Hold each piece:"), hold],
+            [NSTextField(labelWithString: String(localized: "Speed:", bundle: saverBundle)), speed],
+            [NSTextField(labelWithString: String(localized: "Hold each piece:", bundle: saverBundle)), hold],
             [NSView(), note],
         ])
         grid.column(at: 0).xPlacement = .trailing
@@ -183,14 +186,14 @@ final class SaverOptionsSheet: NSObject {
     }
 
     private func updateFolderLabel() {
-        folderLabel.stringValue = settings.folder?.path ?? "The samples inside the screen saver"
+        folderLabel.stringValue = settings.folder?.path ?? String(localized: "The samples inside the screen saver", bundle: saverBundle)
     }
 
     @objc private func chooseFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        panel.prompt = "Play This Folder"
+        panel.prompt = String(localized: "Play This Folder", bundle: saverBundle)
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url, let self else { return }
             self.settings.folder = url

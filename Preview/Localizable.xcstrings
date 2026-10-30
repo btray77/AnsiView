@@ -1,0 +1,27 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@  ·  click to skip" : {
+
+    },
+    "Click to continue" : {
+
+    },
+    "Dialing...  ·  click to skip" : {
+
+    },
+    "Music muted in this window" : {
+
+    },
+    "Music on" : {
+
+    },
+    "Paused" : {
+
+    },
+    "Zoom: %@" : {
+
+    }
+  },
+  "version" : "1.0"
+}

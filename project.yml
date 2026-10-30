@@ -26,6 +26,9 @@ settings:
     MARKETING_VERSION: "2.0.0"
     CURRENT_PROJECT_VERSION: "82"
     SWIFT_VERSION: "5.0"
+    # Localization (plan 10 item 56): String Catalogs, filled from the compiler's extraction.
+    SWIFT_EMIT_LOC_STRINGS: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
     DEVELOPMENT_TEAM: ""
@@ -236,7 +239,14 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.ConvertPNG
-    sources: [QuickAction, Shared, App/AnsiExport.swift, App/ArtActions.swift]
+    sources:
+      - path: QuickAction
+        excludes: [PNG, GIF]
+      # The Quick Action's localizable name (InfoPlist.xcstrings).
+      - QuickAction/PNG
+      - Shared
+      - App/AnsiExport.swift
+      - App/ArtActions.swift
     dependencies:
       - package: AnsiCore
       - package: libwebp
@@ -276,7 +286,14 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.ConvertGIF
-    sources: [QuickAction, Shared, App/AnsiExport.swift, App/ArtActions.swift]
+    sources:
+      - path: QuickAction
+        excludes: [PNG, GIF]
+      # The Quick Action's localizable name (InfoPlist.xcstrings).
+      - QuickAction/GIF
+      - Shared
+      - App/AnsiExport.swift
+      - App/ArtActions.swift
     dependencies:
       - package: AnsiCore
       - package: libwebp
