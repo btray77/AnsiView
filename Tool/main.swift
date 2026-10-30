@@ -17,6 +17,9 @@ import UniformTypeIdentifiers
 // ansirender --roundtrip <input>...   (checks that ANSI conversion reads back as the same cells)
 // ansirender --from-image <image> [--width N] [--mode half|full|shade] [--palette vga|truecolor]
 //   [--dither none|fs|ordered] [--ice|--no-ice] [--no-aspect] [-o out.ans]   (stdout without -o, or -o -)
+// ansirender --music [--mode off|pipe|bananacom|all] <input>...   (lists ANSI music sequences with byte offsets)
+// ansirender --music-wav [--soft] [--mode M] <input> | --play "<PLAY string>" <out.wav>
+// ansirender --music-midi [--mode M] <input> | --play "<PLAY string>" <out.mid>
 // ansirender --version
 let args = CommandLine.arguments
 func fail(_ message: String, _ code: Int32) -> Never {
@@ -268,6 +271,80 @@ if args[1] == "--roundtrip" {
         }
     }
     exit(failures == 0 ? 0 : 1)
+}
+
+// MARK: ANSI music
+
+func musicMode(_ name: String) -> MusicMode {
+    switch name.lowercased() {
+    case "off": return .off
+    case "pipe": return .pipe
+    case "bananacom": return .bananaCom
+    case "all": return .all
+    default: fail("unknown music mode \(name); use off, pipe, bananacom or all", 2)
+    }
+}
+
+if args[1] == "--music" || args[1] == "--music-wav" || args[1] == "--music-midi" {
+    var rest = Array(args.dropFirst(2))
+    var mode = MusicMode.all
+    var waveform = Waveform.square
+    var playString: String?
+    var positional: [String] = []
+    while !rest.isEmpty {
+        let arg = rest.removeFirst()
+        switch arg {
+        case "--mode": mode = musicMode(rest.isEmpty ? "" : rest.removeFirst())
+        case "--soft": waveform = .soft
+        case "--play": playString = rest.isEmpty ? "" : rest.removeFirst()
+        default: positional.append(arg)
+        }
+    }
+    func seconds(_ value: Double) -> String { String(format: "%.3f", value) }
+
+    if args[1] == "--music" {
+        guard !positional.isEmpty else { fail("usage: ansirender --music [--mode M] <input>...", 2) }
+        for path in positional {
+            let source = loadArt(path)
+            let scan = AnsiMusic.scan(source.stream, mode: mode)
+            let total = scan.playable.reduce(0) { $0 + $1.duration }
+            print("\((path as NSString).lastPathComponent): \(scan.sequences.count) sequences, \(seconds(total)) s")
+            for sequence in scan.sequences {
+                let preview = sequence.body.count > 60 ? String(sequence.body.prefix(60)) + "..." : sequence.body
+                print("  @\(sequence.offset) len=\(sequence.length) ESC[\(sequence.introducer.rawValue) "
+                    + "\(sequence.blocksDisplay ? "fg" : "bg") \(sequence.isTerminated ? "terminated" : "unterminated") "
+                    + "notes=\(sequence.notes.count) duration=\(seconds(sequence.duration)) s  \"\(preview)\"")
+            }
+        }
+        exit(0)
+    }
+
+    let notes: [TimedNote]
+    let output: String
+    if let playString {
+        guard positional.count == 1 else { fail("usage: ansirender \(args[1]) --play \"<PLAY string>\" <output>", 2) }
+        notes = PlayString.schedule(PlayString.parse(playString).items)
+        output = positional[0]
+    } else {
+        guard positional.count == 2 else { fail("usage: ansirender \(args[1]) [--soft] [--mode M] <input> <output>", 2) }
+        notes = AnsiMusic.timeline(AnsiMusic.scan(loadArt(positional[0]).stream, mode: mode).playable)
+        output = positional[1]
+    }
+    guard !notes.isEmpty else { fail("no ANSI music found", 1) }
+    let data: Data
+    var summary: String
+    if args[1] == "--music-wav" {
+        let samples = MusicSynth(waveform: waveform).render(notes)
+        data = WAVFile.data(samples)
+        summary = "\(samples.count) samples at 44100 Hz, \(seconds(Double(samples.count) / 44100)) s"
+    } else {
+        data = MIDIFile.data(notes)
+        summary = "\(notes.filter { $0.semitone != nil }.count) notes, \(seconds(notes.last?.end ?? 0)) s"
+    }
+    do { try data.write(to: URL(fileURLWithPath: output)) } catch { fail("could not write \(output)", 1) }
+    summary = "wrote \(output): \(data.count) bytes, " + summary
+    print(summary)
+    exit(0)
 }
 
 if args[1] == "--still", args.count >= 6, let scale = Int(args[3]) {
