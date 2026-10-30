@@ -169,6 +169,7 @@ public struct RIPTerminal: TerminalEngine {
     public mutating func resize(columns: Int, rows: Int) { ansi.resize(columns: columns, rows: rows) }
     public mutating func clearScrollback() { ansi.clearScrollback() }
     public func screen(scrollOffset: Int) -> AnsiScreen { ansi.screen(scrollOffset: scrollOffset) }
+    public func images(scrollOffset: Int) -> [PlacedTerminalImage] { ansi.images(scrollOffset: scrollOffset) }
     public func overlay() -> CGImage? { canvas.image() }
 
     /// Indexes (in creation order) of the buttons drawn selected.

@@ -28,6 +28,7 @@ public struct AvatarTerminal: TerminalEngine {
     public mutating func resize(columns: Int, rows: Int) { ansi.resize(columns: columns, rows: rows) }
     public mutating func clearScrollback() { ansi.clearScrollback() }
     public func screen(scrollOffset: Int) -> AnsiScreen { ansi.screen(scrollOffset: scrollOffset) }
+    public func images(scrollOffset: Int) -> [PlacedTerminalImage] { ansi.images(scrollOffset: scrollOffset) }
 
     public mutating func feed(_ bytes: [UInt8]) {
         guard !bytes.isEmpty else { return }

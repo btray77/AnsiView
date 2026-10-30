@@ -37,6 +37,8 @@ public protocol TerminalEngine {
     func overlay() -> CGImage?
     /// A mouse click at a position in the overlay's pixels: the bytes to send (RIP buttons).
     mutating func click(x: Int, y: Int) -> [UInt8]
+    /// Pictures the BBS sent (sixel, iTerm2), drawn over the text cells they cover.
+    func images(scrollOffset: Int) -> [PlacedTerminalImage]
 }
 
 public extension TerminalEngine {
@@ -49,6 +51,7 @@ public extension TerminalEngine {
     func control(_ character: Character) -> [UInt8]? { TerminalInput.control(character) }
     func overlay() -> CGImage? { nil }
     mutating func click(x: Int, y: Int) -> [UInt8] { [] }
+    func images(scrollOffset: Int) -> [PlacedTerminalImage] { [] }
 }
 
 extension TerminalEmulator: TerminalEngine {

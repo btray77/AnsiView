@@ -84,6 +84,16 @@ public struct TerminalEmulator {
     private var vt52Row = 0
     private var vt52Background = false
     private var vt52Graphics = false
+    /// Control strings that may be pictures (DCS for sixel, OSC for iTerm2), kept while they arrive.
+    private var controlKind: UInt8 = 0
+    private var controlBuffer: [UInt8] = []
+    private var controlOverflow = false
+    /// Pictures from the BBS, anchored to absolute lines (`scrolledLines` counts every line that
+    /// ever scrolled into the scrollback).
+    private var placedImages: [PlacedTerminalImage] = []
+    private var scrolledLines = 0
+    /// The character cell in pixels, for sizing pictures (the app sets it from its font).
+    public var imageCellSize = (width: 8, height: 16)
 
     private enum ParseState { case ground, escape, charset, csi, controlString, controlStringEscape, vt52Row, vt52Column, vt52Colour }
     private var state = ParseState.ground
@@ -142,6 +152,7 @@ public struct TerminalEmulator {
 
     public mutating func clearScrollback() {
         scrollback.removeAll()
+        placedImages.removeAll { $0.line < scrolledLines }
         changeCount &+= 1
     }
 
@@ -184,12 +195,25 @@ public struct TerminalEmulator {
         case .csi:
             csiByte(byte)
         case .controlString:
-            // APC, OSC, DCS, PM and SOS strings (window titles, SyncTERM probes) are skipped,
-            // up to ST (ESC \) or BEL. Nothing is kept, so a string that never ends costs nothing.
+            // APC, PM and SOS strings (SyncTERM probes) are skipped up to ST (ESC \) or BEL. DCS
+            // and OSC strings are kept, up to a limit, for sixel and iTerm2 pictures.
             switch byte {
             case 0x1B: state = .controlStringEscape
-            case 0x07, 0x18, 0x1A: state = .ground
-            default: break
+            case 0x07:
+                state = .ground
+                finishControlString()
+            case 0x18, 0x1A:
+                state = .ground
+                controlBuffer.removeAll()
+            default:
+                if controlKind != 0, !controlOverflow {
+                    if controlBuffer.count < TerminalImageLimits.maxPayloadBytes {
+                        controlBuffer.append(byte)
+                    } else {
+                        controlOverflow = true
+                        controlBuffer = []
+                    }
+                }
             }
         case .vt52Row:
             vt52Row = Int(byte) - 32
@@ -208,7 +232,9 @@ public struct TerminalEmulator {
         case .controlStringEscape:
             if byte == UInt8(ascii: "\\") {
                 state = .ground
+                finishControlString()
             } else {
+                controlBuffer.removeAll()
                 escape(byte)
             }
         }
@@ -290,6 +316,9 @@ public struct TerminalEmulator {
             state = .charset
         case UInt8(ascii: "_"), UInt8(ascii: "]"), UInt8(ascii: "P"), UInt8(ascii: "^"), UInt8(ascii: "X"):
             state = .controlString
+            controlKind = byte == UInt8(ascii: "P") || byte == UInt8(ascii: "]") ? byte : 0
+            controlBuffer.removeAll(keepingCapacity: false)
+            controlOverflow = false
         case UInt8(ascii: "7"): saved = (row, column, attributes)
         case UInt8(ascii: "8"):
             row = saved.row; column = saved.column; attributes = saved.attributes
@@ -301,6 +330,65 @@ public struct TerminalEmulator {
         case 0x1B: state = .escape
         default: break
         }
+    }
+
+    // MARK: Pictures
+
+    /// Pictures on the screen (or `scrollOffset` lines back): `line` is the row relative to the top
+    /// of what is shown (negative when the picture starts above it).
+    public func images(scrollOffset: Int) -> [PlacedTerminalImage] {
+        let offset = min(max(0, scrollOffset), scrollback.count)
+        let top = scrolledLines - offset
+        return placedImages.compactMap { placed in
+            var visible = placed
+            visible.line = placed.line - top
+            return visible.line + placed.rows > 0 && visible.line < rows ? visible : nil
+        }
+    }
+
+    private mutating func finishControlString() {
+        let kind = controlKind, body = controlBuffer, overflow = controlOverflow
+        controlKind = 0
+        controlBuffer = []
+        controlOverflow = false
+        guard !overflow, !body.isEmpty else { return }
+        if kind == UInt8(ascii: "P"), let image = SixelDecoder.decode(body) {
+            place(image, columns: nil, rows: nil)
+        } else if kind == UInt8(ascii: "]"), let request = ITerm2Image.parse(body), request.inline,
+                  let image = ITerm2Image.decode(request.data) {
+            let cw = max(1, imageCellSize.width), ch = max(1, imageCellSize.height)
+            func pixels(_ size: ITerm2Image.Size, natural: Int, cell: Int, cells: Int) -> Int? {
+                switch size {
+                case .auto: return nil
+                case .cells(let n): return n * cell
+                case .pixels(let n): return n
+                case .percent(let n): return cells * cell * n / 100
+                }
+            }
+            var w = pixels(request.width, natural: image.width, cell: cw, cells: columns)
+            var h = pixels(request.height, natural: image.height, cell: ch, cells: rows)
+            if w == nil, h == nil { w = image.width; h = image.height }
+            if w == nil, let h { w = h * image.width / max(1, image.height) }
+            if h == nil, let w { h = w * image.height / max(1, image.width) }
+            place(image, columns: (w! + cw - 1) / cw, rows: (h! + ch - 1) / ch)
+        }
+    }
+
+    /// Puts a picture at the cursor and moves the cursor to the start of the line below it.
+    private mutating func place(_ image: TerminalImage, columns wanted: Int?, rows tall: Int?) {
+        let cw = max(1, imageCellSize.width), ch = max(1, imageCellSize.height)
+        let spanColumns = max(1, min(columns, wanted ?? (image.width + cw - 1) / cw))
+        let spanRows = max(1, min(1000, tall ?? (image.height + ch - 1) / ch))
+        placedImages.append(PlacedTerminalImage(image: image, line: scrolledLines + row, column: column,
+                                                columns: spanColumns, rows: spanRows))
+        var total = placedImages.reduce(0) { $0 + $1.image.width * $1.image.height }
+        while total > TerminalImageLimits.maxTotalPixels, placedImages.count > 1 {
+            let dropped = placedImages.removeFirst()
+            total -= dropped.image.width * dropped.image.height
+        }
+        pendingWrap = false
+        column = 0
+        for _ in 0..<min(spanRows, rows) { lineFeed() }
     }
 
     private mutating func vt52Escape(_ byte: UInt8) {
@@ -719,8 +807,13 @@ public struct TerminalEmulator {
         for _ in 0..<min(n, bottom - top + 1) {
             let line = grid.remove(at: top)
             if top == 0 {
+                scrolledLines += 1
                 scrollback.append(line)
-                if scrollback.count > Self.maxScrollback { scrollback.removeFirst(scrollback.count - Self.maxScrollback) }
+                if scrollback.count > Self.maxScrollback {
+                    scrollback.removeFirst(scrollback.count - Self.maxScrollback)
+                    let oldest = scrolledLines - scrollback.count
+                    if !placedImages.isEmpty { placedImages.removeAll { $0.line + $0.rows <= oldest } }
+                }
             }
             grid.insert(blank, at: bottom)
         }
@@ -745,12 +838,14 @@ public struct TerminalEmulator {
             for c in 0...column { grid[row][c] = blank }
         case 2:
             // BBS terminals (like ANSI.SYS) also home the cursor.
+            if !placedImages.isEmpty { placedImages.removeAll { $0.line + $0.rows > scrolledLines } }
             grid = Array(repeating: blankRow, count: rows)
             row = 0
             column = 0
             pendingWrap = false
         case 3:
             scrollback.removeAll()
+            placedImages.removeAll { $0.line < scrolledLines }
         default:
             break
         }
@@ -771,11 +866,14 @@ public struct TerminalEmulator {
     private mutating func reset() {
         let kept = scrollback
         let changes = changeCount, bellCount = bells, keptProfile = profile, ice = entryIceColors
+        let lines = scrolledLines, cell = imageCellSize
         self = TerminalEmulator(columns: columns, rows: rows, encoding: encoding)
         profile = keptProfile
         iceColors = ice
         entryIceColors = ice
         scrollback = kept
+        scrolledLines = lines
+        imageCellSize = cell
         changeCount = changes
         bells = bellCount
     }
