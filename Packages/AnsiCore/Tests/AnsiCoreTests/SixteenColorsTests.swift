@@ -104,6 +104,13 @@ struct SixteenColorsTests {
         #expect(SixteenColors.cacheName(for: "SUB/A.ANS") == "A.ANS")
     }
 
+    @Test func packCacheName() {
+        #expect(SixteenColors.packCacheName("0196ciph") == "0196ciph.zip")
+        #expect(SixteenColors.packCacheName("!1madoom") == "!1madoom.zip")
+        #expect(SixteenColors.packCacheName("../x") == "x.zip")
+        #expect(SixteenColors.packCacheName("..") == nil)
+    }
+
     @Test func notViewable() {
         for name in ["SETUP.EXE", "X.COM", "PIC.PNG", "a.gif", "SONG.MOD", "inner.zip", "x.JPG"] {
             #expect(!SixteenColors.isViewable(name), "\(name)")

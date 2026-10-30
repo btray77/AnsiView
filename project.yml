@@ -12,7 +12,7 @@ packages:
 settings:
   base:
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "46"
+    CURRENT_PROJECT_VERSION: "47"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -45,6 +45,9 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.application-groups: [47HEHK53W5.com.traynham.ansiview]
+        # Outgoing connections only: File > Browse 16colo.rs (API and downloads) and Sparkle's
+        # update checks. The extensions do not get it.
+        com.apple.security.network.client: true
     info:
       path: App/Info.plist
       properties:

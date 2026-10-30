@@ -71,6 +71,18 @@ struct AnsiViewApp: App {
             CommandGroup(after: .newItem) {
                 Button("Open Folder or Art Pack...") { GalleryWindowController.chooseAndOpen() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
+                Button("Browse 16colo.rs...") {
+                    SixteenColorsWindowController.show(
+                        openPack: { url, _ in
+                            do { GalleryWindowController.open(collection: try ArtCollection.open(url, scoped: false)) }
+                            catch { NSAlert(error: error).runModal() }
+                        },
+                        openFile: { url in
+                            NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
+                                if let error { NSAlert(error: error).runModal() }
+                            }
+                        })
+                }
                 Menu("Open Sample") {
                     ForEach(SampleArt.all(), id: \.url) { sample in
                         Button(sample.title) { SampleArt.open(sample) }

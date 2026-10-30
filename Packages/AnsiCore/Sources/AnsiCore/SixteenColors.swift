@@ -123,12 +123,22 @@ public enum SixteenColors {
     /// separators and leading dots removed, plus `.ans` when AnsiView would not otherwise open it
     /// (group extensions such as `.CIP` are ANSI). Nil when nothing usable is left.
     public static func cacheName(for file: String) -> String? {
-        var name = String(file.split(separator: "/").last ?? "")
-        name = name.replacingOccurrences(of: ":", with: "_")
-        while name.hasPrefix(".") { name.removeFirst() }
-        guard !name.isEmpty else { return nil }
+        guard let name = safeName(file) else { return nil }
         let ext = (name as NSString).pathExtension.lowercased()
         return ArtFiles.extensions.contains(ext) ? name : name + ".ans"
+    }
+
+    /// The cache file name for a pack's ZIP.
+    public static func packCacheName(_ pack: String) -> String? {
+        safeName(pack).map { $0 + ".zip" }
+    }
+
+    /// The last path component with `:` replaced and leading dots removed; nil when empty.
+    static func safeName(_ text: String) -> String? {
+        var name = String(text.split(separator: "/").last ?? "")
+        name = name.replacingOccurrences(of: ":", with: "_")
+        while name.hasPrefix(".") { name.removeFirst() }
+        return name.isEmpty ? nil : name
     }
 
     // MARK: Decoding
