@@ -81,6 +81,8 @@ struct AnsiViewApp: App {
     @AppStorage(SlideshowSettings.dwellKey, store: PlaybackSpeed.defaults)
     private var dwell = SlideshowSettings.defaultDwell
     @AppStorage(ViewerTools.minimapKey) private var showMinimap = true
+    @AppStorage(ArtOfTheDaySettings.showKey) private var showArtOfTheDay = false
+    @StateObject private var artOfTheDay = ArtOfTheDayModel()
     @ObservedObject private var palettes = PaletteLibrary.shared
     /// The focused art window's speed; speed commands change that file's remembered speed.
     @FocusedObject private var focusedSpeed: PlayerSpeed?
@@ -236,6 +238,8 @@ struct AnsiViewApp: App {
                 Button("Show or Hide Pack Info") { send(#selector(GalleryContainerViewController.togglePackInfo(_:))) }
                     .keyboardShortcut("i", modifiers: [.command, .option])
                     .help("In a gallery: the pack's FILE_ID.DIZ and NFO files beside the pieces.")
+                Toggle("Show Art of the Day in Menu Bar", isOn: $showArtOfTheDay)
+                    .help("A menu bar item showing one piece from your library each day (16colo.rs can be added in its window; off by default).")
                 Toggle("Show Minimap", isOn: $showMinimap)
                     .help("A strip at the right of tall art showing the whole piece; click or drag in it to jump.")
                 Menu("Palette") {
@@ -388,6 +392,10 @@ struct AnsiViewApp: App {
                 }
             }
         }
+        MenuBarExtra("Art of the Day", systemImage: "photo.artframe", isInserted: $showArtOfTheDay) {
+            ArtOfTheDayView(model: artOfTheDay)
+        }
+        .menuBarExtraStyle(.window)
     }
 }
 
