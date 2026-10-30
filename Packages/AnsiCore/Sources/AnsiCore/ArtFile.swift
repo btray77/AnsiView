@@ -20,12 +20,14 @@ public enum ArtFormat: Equatable {
     case wildcat
     /// Avatar control codes.
     case avatar
+    /// RIPscrip 1.54 vector graphics with ANSI text (RIPterm), shown as a 640x350 picture.
+    case rip
 
     /// True for formats played through the terminal as a byte stream.
     public var isStream: Bool {
         switch self {
         case .ansi, .utf8Ansi, .pcboard, .wildcat, .avatar: return true
-        case .bin, .xbin, .adf, .idf: return false
+        case .bin, .xbin, .adf, .idf, .rip: return false
         }
     }
 
@@ -49,8 +51,11 @@ public enum ArtFormat: Equatable {
         case "idf": return .idf
         case "pcb": return .pcboard
         case "avt": return .avatar
+        case "rip": return .rip
         default: break
         }
+        // A file that starts with a RIPscrip command line is a RIP scene.
+        if fileExtension == nil, bytes.starts(with: Array("!|".utf8)) { return .rip }
         // Art extensions are trusted: an "@" in ASCII art must not turn it into a BBS format.
         let artExtensions: Set<String> = ["ans", "asc", "nfo", "diz", "ice"]
         if !artExtensions.contains(fileExtension?.lowercased() ?? "") {
@@ -167,6 +172,7 @@ public struct ArtFile {
         case .xbin: loaded = try? BinaryFormats.xbin(body)
         case .adf: loaded = (try? BinaryFormats.adf(body)).map { ($0.0, $0.1) }
         case .idf: loaded = try? BinaryFormats.idf(body)
+        case .rip: loaded = (Self.ripScreen(body), BitmapFont.named("IBM EGA"))
         default: loaded = nil
         }
 
@@ -194,5 +200,28 @@ public struct ArtFile {
         }
         self.columns = columns
         self.font = font
+    }
+
+    /// Icons and scenes a RIP file names come from here (the app's icon folder); nil in Quick Look.
+    public static var ripFiles: RIPFileProvider?
+
+    /// Plays a RIP file through the RIPscrip terminal: its text layer, with the picture under it.
+    static func ripScreen(_ body: [UInt8]) -> AnsiScreen {
+        var terminal = RIPTerminal()
+        terminal.files = ripFiles
+        // A file has no screen to keep responsive: the whole of it is drawn, within a bound.
+        terminal.drawingBudget = 400_000_000
+        terminal.feed(body + [0x0D, 0x0A])
+        var rounds = 0
+        while terminal.hasPendingWork, rounds < 64 { terminal.feed([]); rounds += 1 }
+        var screen = terminal.screen(scrollOffset: 0)
+        let canvas = terminal.canvas
+        var rgb = [UInt8](repeating: 0, count: canvas.width * canvas.height * 3)
+        for i in 0..<(canvas.width * canvas.height) {
+            let c = canvas.palette[Int(canvas.pixels[i] & 15)]
+            rgb[i * 3] = c.r; rgb[i * 3 + 1] = c.g; rgb[i * 3 + 2] = c.b
+        }
+        screen.underlay = RasterLayer(width: canvas.width, height: canvas.height, rgb: rgb)
+        return screen
     }
 }

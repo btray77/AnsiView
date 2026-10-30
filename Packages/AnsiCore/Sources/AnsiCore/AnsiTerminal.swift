@@ -31,6 +31,9 @@ public struct AnsiScreen {
     public var font: BitmapFont = .vga
     /// An XBin file's own 16 colour palette (nil for VGA), kept so editing and saving keeps it.
     public var palette: [RGB]?
+    /// A picture drawn under the text where a cell's background is black (a RIPscrip screen),
+    /// stretched over the whole screen.
+    public var underlay: RasterLayer?
 
     public var hasBlink: Bool { rows.contains { $0.contains { $0.blink } } }
 
@@ -38,6 +41,19 @@ public struct AnsiScreen {
         self.columns = columns
         self.rows = rows
         self.title = title
+    }
+}
+
+/// RGB pixels, row major, 3 bytes each.
+public struct RasterLayer: Equatable {
+    public let width: Int
+    public let height: Int
+    public let rgb: [UInt8]
+
+    public init(width: Int, height: Int, rgb: [UInt8]) {
+        self.width = width
+        self.height = height
+        self.rgb = rgb
     }
 }
 

@@ -13,6 +13,7 @@ extension ArtFormat {
         case .pcboard: return "PCBoard"
         case .wildcat: return "Wildcat"
         case .avatar: return "Avatar"
+        case .rip: return "RIPscrip"
         }
     }
 }

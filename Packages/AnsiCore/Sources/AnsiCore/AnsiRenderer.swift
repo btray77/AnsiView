@@ -80,6 +80,8 @@ public enum AnsiRenderer {
         let count = width * height
         let buffer = UnsafeMutablePointer<UInt32>.allocate(capacity: count)
         buffer.initialize(repeating: packed(Palette.vga[0]), count: count)
+        let underlay = screen.underlay.flatMap { $0.rgb.count == $0.width * $0.height * 3 && $0.width > 0 && $0.height > 0 ? $0 : nil }
+        let black = RGB(r: 0, g: 0, b: 0)
         do {
             let out = UnsafeMutableBufferPointer(start: buffer, count: count)
             for (rowIndex, row) in screen.rows.prefix(rowCount).enumerated() {
@@ -92,6 +94,22 @@ public enum AnsiRenderer {
                     let bgPacked = packed(cell.bg)
                     let originX = colIndex * cw
                     let originY = rowIndex * ch
+                    if let underlay, cell.bg == black {
+                        // RIPscrip: black text backgrounds show the picture underneath.
+                        let fullHeight = max(1, screen.rows.count) * ch
+                        for py in 0..<ch {
+                            let rowStart = (originY + py) * width + originX
+                            let maskStart = py * cw
+                            let uy = min(underlay.height - 1, (originY + py) * underlay.height / fullHeight)
+                            for px in 0..<cw {
+                                if mask[maskStart + px] { out[rowStart + px] = fgPacked; continue }
+                                let ux = min(underlay.width - 1, (originX + px) * underlay.width / width)
+                                let k = (uy * underlay.width + ux) * 3
+                                out[rowStart + px] = packed(RGB(r: underlay.rgb[k], g: underlay.rgb[k + 1], b: underlay.rgb[k + 2]))
+                            }
+                        }
+                        continue
+                    }
                     for py in 0..<ch {
                         let rowStart = (originY + py) * width + originX
                         let maskStart = py * cw

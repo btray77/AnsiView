@@ -26,8 +26,8 @@ public enum RIPStrokeFont {
         "\\": "0068", "]": "10303818", "^": "123052", "_": "0969", "`": "1021",
         "a": "13536468 65150607185867", "b": "0008 0413536467581807", "c": "6453130407185867",
         "d": "6068 6453130407185867", "e": "05656453130407185867", "f": "50302128 0343",
-        "g": "636a5b1b0a 6453130406175766", "h": "0008 0413536468", "i": "3338 3132",
-        "j": "434a3b1b0a 4142", "k": "0008 5306 2558", "l": "202738", "m": "0803 0413233438 3443536468",
+        "g": "636a5b1b0a 6453130406175766", "h": "0008 0413536468", "i": "3338 31",
+        "j": "434a3b1b0a 41", "k": "0008 5306 2558", "l": "202738", "m": "0803 0413233438 3443536468",
         "n": "0803 0413536468", "o": "135364675818070413", "p": "030b 0413536467581807",
         "q": "636b 6453130407185867", "r": "0308 05235364", "s": "64531304155667581807",
         "t": "20273858 0343", "u": "0307185867 6368", "v": "033863", "w": "0318355863", "x": "0368 6308",
@@ -91,16 +91,16 @@ public enum RIPStrokeFont {
 
     static func style(font: Int) -> Style {
         switch font {
-        case 1: return Style(weight: 0.45, slant: 0, double: false, narrow: 1)      // Triplex
+        case 1: return Style(weight: 0.6, slant: 0, double: false, narrow: 1)       // Triplex
         case 2: return Style(weight: 0, slant: 0, double: false, narrow: 0.9)       // Small
-        case 3: return Style(weight: 0.25, slant: 0, double: false, narrow: 1)      // Sans Serif
+        case 3: return Style(weight: 0.35, slant: 0, double: false, narrow: 1)      // Sans Serif
         case 4: return Style(weight: 0.3, slant: 0, double: true, narrow: 1)        // Gothic
         case 5: return Style(weight: 0.15, slant: 0.3, double: false, narrow: 1)    // Script
         case 6: return Style(weight: 0, slant: 0, double: false, narrow: 1)         // Simplex
-        case 7: return Style(weight: 0.4, slant: 0.25, double: false, narrow: 1)    // Triplex Script
+        case 7: return Style(weight: 0.6, slant: 0.25, double: false, narrow: 1)    // Triplex Script
         case 8: return Style(weight: 0.2, slant: 0, double: true, narrow: 1)        // Complex
         case 9: return Style(weight: 0.2, slant: 0, double: false, narrow: 0.75)    // European
-        default: return Style(weight: 0.7, slant: 0, double: false, narrow: 1.1)    // Bold
+        default: return Style(weight: 1.1, slant: 0, double: false, narrow: 1.1)    // Bold
         }
     }
 }
