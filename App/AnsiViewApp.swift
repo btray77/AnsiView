@@ -72,6 +72,17 @@ struct AnsiViewApp: App {
                 Toggle("CRT Effect", isOn: $crtEffect)
                     .keyboardShortcut("k", modifiers: [.command, .shift])
                 Divider()
+                Button("Fit to Window") { send(#selector(AnsiCanvasView.zoomToFit(_:))) }
+                    .keyboardShortcut("0")
+                Button("Integer Fit") { send(#selector(AnsiCanvasView.zoomIntegerFit(_:))) }
+                    .keyboardShortcut("0", modifiers: [.command, .option])
+                Button("Actual Size") { send(#selector(AnsiCanvasView.zoomActualSize(_:))) }
+                    .keyboardShortcut("1")
+                Button("Zoom 2x") { send(#selector(AnsiCanvasView.zoom2x(_:))) }
+                    .keyboardShortcut("2")
+                Button("Zoom 3x") { send(#selector(AnsiCanvasView.zoom3x(_:))) }
+                    .keyboardShortcut("3")
+                Divider()
             }
             CommandMenu("Playback") {
                 Button("Play / Pause") { send(#selector(AnsiCanvasView.togglePausePlayback(_:))) }

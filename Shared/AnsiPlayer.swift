@@ -203,7 +203,7 @@ final class AnsiPlayerViewController: NSViewController {
         clip.backgroundColor = .black
         scroll.contentView = clip
         scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = false
+        scroll.hasHorizontalScroller = true
         scroll.autohidesScrollers = true
         scroll.scrollerStyle = .overlay
         scroll.backgroundColor = .black
@@ -301,18 +301,26 @@ final class AnsiPlayerViewController: NSViewController {
         fitToWindow()
     }
 
-    /// Scales the art to the window, keeping its proportions. Normal screens fit entirely and are
-    /// centered; scrollers fit the width and scroll vertically.
+    /// Sizes the art for the zoom mode. Fit (the default) scales it to the window keeping its
+    /// proportions: normal screens fit entirely and are centered; scrollers fit the width and scroll.
     private func fitToWindow() {
-        let art = artSize(rows: displayedRows)
-        let available = scroll.contentSize
-        guard art.width > 0, art.height > 0, available.width > 0, available.height > 0 else { return }
-        let widthScale = available.width / art.width
-        let isScroller = displayedRows > Self.scrollerRows && art.height * widthScale > available.height
-        let scale = isScroller ? widthScale : min(widthScale, available.height / art.height)
-        let size = CGSize(width: (art.width * scale).rounded(), height: (art.height * scale).rounded())
-        if canvas.frame.size != size {
+        let cellWidth = renderOptions.font.width + (renderOptions.ninePixel ? 1 : 0)
+        let pixels = CGSize(width: source.columns * cellWidth, height: displayedRows * renderOptions.font.height)
+        let aspect = AnsiRenderer.pixelAspect(for: analysis.finalScreen, ninePixel: renderOptions.ninePixel)
+        let backing = view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+        let size = Zoom.canvasSize(artPixels: pixels, aspect: aspect, available: scroll.contentSize, mode: zoom,
+                                   scroller: displayedRows > Self.scrollerRows, backingScale: backing)
+        if size.width > 0, size.height > 0, canvas.frame.size != size {
             canvas.setFrameSize(size)
+        }
+    }
+
+    /// How this window sizes its art. Not saved: each window starts at Fit.
+    var zoom: ZoomMode = .fit {
+        didSet {
+            guard zoom != oldValue, isViewLoaded else { return }
+            fitToWindow()
+            showHUD("Zoom: \(zoom.label)")
         }
     }
 
@@ -585,6 +593,10 @@ final class CenteringClipView: NSClipView {
         if document.frame.height < proposedBounds.height {
             rect.origin.y = (document.frame.height - proposedBounds.height) / 2
         }
+        // Keep the art on the device pixel grid so integer zoom pixels stay even.
+        let backing = window?.backingScaleFactor ?? 1
+        rect.origin.x = (rect.origin.x * backing).rounded() / backing
+        rect.origin.y = (rect.origin.y * backing).rounded() / backing
         return rect
     }
 }
@@ -638,4 +650,10 @@ final class AnsiCanvasView: NSView {
     @objc func togglePausePlayback(_ sender: Any?) { player?.togglePause() }
     @objc func previousFrame(_ sender: Any?) { player?.stepFrame(-1) }
     @objc func nextFrame(_ sender: Any?) { player?.stepFrame(1) }
+    // View menu zoom presets.
+    @objc func zoomToFit(_ sender: Any?) { player?.zoom = .fit }
+    @objc func zoomIntegerFit(_ sender: Any?) { player?.zoom = .integerFit }
+    @objc func zoomActualSize(_ sender: Any?) { player?.zoom = .scale(1) }
+    @objc func zoom2x(_ sender: Any?) { player?.zoom = .scale(2) }
+    @objc func zoom3x(_ sender: Any?) { player?.zoom = .scale(3) }
 }
