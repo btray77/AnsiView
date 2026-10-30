@@ -20,29 +20,29 @@ public final class CanvasEditor {
     /// Pasteboard type for copied cells (lossless: characters, exact colours and blink).
     public static let cellsPasteboardType = "com.traynham.ansiview.cells"
 
-    public private(set) var canvas: EditCanvas
-    public private(set) var cursor: (x: Int, y: Int) = (0, 0)
-    public private(set) var selection: CellRect?
+    public internal(set) var canvas: EditCanvas
+    public internal(set) var cursor: (x: Int, y: Int) = (0, 0)
+    public internal(set) var selection: CellRect?
     /// VGA indexes of the drawing colours.
-    public private(set) var foreground = 7
-    public private(set) var background = 0
+    public internal(set) var foreground = 7
+    public internal(set) var background = 0
     /// The current character set, 0 to 9.
     public var blockSet = 5 {
         didSet { blockSet = min(9, max(0, blockSet)); changed() }
     }
     /// The block character most recently inserted, used by Fill with Character.
-    public private(set) var lastBlockCharacter: UInt8 = 219
+    public internal(set) var lastBlockCharacter: UInt8 = 219
     public let undoManager: UndoManager
     /// Called after anything changes (cells, cursor, selection, colours).
     public var onChange: (() -> Void)?
 
     public var isModified: Bool { revision != savedRevision }
 
-    private var revision = 0
+    var revision = 0
     private var nextRevision = 1
     private var savedRevision = 0
-    private var selectionAnchor: (x: Int, y: Int)?
-    private var strokeStart: Snapshot?
+    var selectionAnchor: (x: Int, y: Int)?
+    var strokeStart: Snapshot?
 
     public init(canvas: EditCanvas = EditCanvas()) {
         self.canvas = canvas
@@ -125,18 +125,34 @@ public final class CanvasEditor {
         typeCode(code)
     }
 
+    /// Insert mode (ruling 7): typing shifts the rest of the row right; Backspace and Delete
+    /// close the gap. Overwrite mode (the default) replaces and clears.
+    public var insertMode = false {
+        didSet { if insertMode != oldValue { changed() } }
+    }
+
     public func backspace() {
         guard cursor.x > 0 else { return }
         perform("Typing") { editor in
             editor.cursor.x -= 1
-            editor.canvas.set(AnsiCell(), x: editor.cursor.x, y: editor.cursor.y)
+            if editor.insertMode {
+                editor.canvas.deleteCell(x: editor.cursor.x, y: editor.cursor.y)
+            } else {
+                editor.canvas.set(AnsiCell(), x: editor.cursor.x, y: editor.cursor.y)
+            }
         }
     }
 
-    /// Clears the selection, or the cell under the cursor.
+    /// Clears the selection, or the cell under the cursor (insert mode: deletes it, closing the gap).
     public func deleteForward() {
         if selection != nil { clearSelection(); return }
-        perform("Delete") { editor in editor.canvas.set(AnsiCell(), x: editor.cursor.x, y: editor.cursor.y) }
+        perform("Delete") { editor in
+            if editor.insertMode {
+                editor.canvas.deleteCell(x: editor.cursor.x, y: editor.cursor.y)
+            } else {
+                editor.canvas.set(AnsiCell(), x: editor.cursor.x, y: editor.cursor.y)
+            }
+        }
     }
 
     // MARK: Colours
@@ -233,7 +249,21 @@ public final class CanvasEditor {
     }
 
     /// The active layer with the floating block stamped where it is now.
+    /// A shape being dragged out, shown on the active layer but not applied (no undo step).
+    var preview: ((inout EditCanvas) -> Void)?
+
+    /// Shows `change` over the canvas until it is cleared (nil) or the shape is drawn.
+    public func setPreview(_ change: ((inout EditCanvas) -> Void)?) {
+        preview = change
+        changed()
+    }
+
     private var activeWithFloating: EditCanvas {
+        if let preview {
+            var shown = canvas
+            preview(&shown)
+            return shown
+        }
         guard let floating else { return canvas }
         var shown = canvas
         if let source = floating.liftedFrom, !floating.leavesCopy {
@@ -382,7 +412,7 @@ public final class CanvasEditor {
 
     // MARK: Fill and clear
 
-    private var targetRect: CellRect {
+    var targetRect: CellRect {
         selection ?? CellRect(x: 0, y: 0, width: canvas.columns, height: canvas.height)
     }
 
@@ -596,7 +626,7 @@ public final class CanvasEditor {
     // MARK: Helpers
 
     /// Everything one undo step restores.
-    private struct Snapshot {
+    struct Snapshot {
         var canvas: EditCanvas
         var layers: [CanvasLayer]
         var activeLayer: Int
@@ -607,11 +637,11 @@ public final class CanvasEditor {
         }
     }
 
-    private var snapshot: Snapshot { Snapshot(canvas: canvas, layers: layerStore, activeLayer: activeLayer, revision: revision) }
+    var snapshot: Snapshot { Snapshot(canvas: canvas, layers: layerStore, activeLayer: activeLayer, revision: revision) }
 
     /// Runs one undoable change. Nothing is registered when nothing changed. Nothing
     /// runs while a paste floats: it is placed or cancelled first.
-    private func perform(_ name: String, _ change: (CanvasEditor) -> Void) {
+    func perform(_ name: String, _ change: (CanvasEditor) -> Void) {
         guard floating == nil else { return }
         let before = snapshot
         change(self)
@@ -654,6 +684,7 @@ public final class CanvasEditor {
 
     /// Writes a character at the cursor in the current colours and advances, wrapping at the edge.
     private func write(_ code: UInt8) {
+        if insertMode { canvas.insertCell(x: cursor.x, y: cursor.y) }
         canvas.set(AnsiCell(code: code, fg: foregroundColor, bg: backgroundColor), x: cursor.x, y: cursor.y)
         if cursor.x + 1 >= canvas.columns {
             place(x: 0, y: cursor.y + 1)
@@ -663,19 +694,19 @@ public final class CanvasEditor {
     }
 
     /// Moves the cursor, clamped to the width and the row limit; rows are added below as needed.
-    private func place(x: Int, y: Int) {
+    func place(x: Int, y: Int) {
         let row = min(AnsiTerminal.maxRows - 1, max(0, y))
         canvas.ensureHeight(row + 1)
         cursor = (min(canvas.columns - 1, max(0, x)), row)
     }
 
-    private func clampToCanvas() {
+    func clampToCanvas() {
         cursor = (min(canvas.columns - 1, max(0, cursor.x)), min(canvas.height - 1, max(0, cursor.y)))
         if let rect = selection { selection = canvas.clip(rect) }
         if let block = floating, block.x >= canvas.columns { floating?.x = canvas.columns - 1 }
     }
 
-    private func changed() { onChange?() }
+    func changed() { onChange?() }
 
     // MARK: Cell data
 
