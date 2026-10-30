@@ -387,7 +387,7 @@ if args[1] == "--animate", args.count >= 7, let baud = Int(args[3]), let scale =
     let start = Date()
     if args.count >= 8, args[7] == "--with-music" {
         let made = AnsiFrameSequence.make(source, baud: baud, music: format == .mp4)
-        let audio = AnsiFrameSequence.audio(made.music)
+        let audio = AnsiFrameSequence.audio(made.music, frames: made.frames)
         let seconds = made.frames.reduce(0) { $0 + $1.duration }
         try AnsiExporter.writeAnimation(made.frames, format: format, scale: Double(scale), palette: .system,
                                         audio: audio, to: URL(fileURLWithPath: args[6]), progress: { _ in },

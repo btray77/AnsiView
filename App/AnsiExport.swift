@@ -90,9 +90,12 @@ enum AnsiFrameSequence {
         return (frames, played)
     }
 
-    /// The music of an export as mono 44.1 kHz samples from the video's start (empty without music).
-    static func audio(_ music: [ScheduledMusic]) -> [Float] {
-        music.isEmpty ? [] : MusicSynth(waveform: .square).render(MusicPlaybackScheduler.audioNotes(music))
+    /// The music of an export as mono 44.1 kHz samples from the video's start, as long as the
+    /// frames (empty without music). Each tune is rendered on its own, so late tunes keep their sound.
+    static func audio(_ music: [ScheduledMusic], frames: [AnsiFrame]) -> [Float] {
+        guard !music.isEmpty else { return [] }
+        let length = max(frames.reduce(0) { $0 + $1.duration }, music.map(\.end).max() ?? 0)
+        return MusicPlaybackScheduler.audioSamples(music, length: length)
     }
 }
 
@@ -232,7 +235,7 @@ enum AnsiExporter {
                 let made = AnsiFrameSequence.make(source, baud: settings.baud, fps: attempt.fps,
                                                   music: settings.includeMusic && format == .mp4)
                 try writeAnimation(made.frames, format: format, scale: attempt.scale, palette: settings.palette,
-                                   audio: AnsiFrameSequence.audio(made.music),
+                                   audio: AnsiFrameSequence.audio(made.music, frames: made.frames),
                                    to: destination, progress: progress, isCancelled: isCancelled)
             case .text:
                 break
@@ -390,7 +393,7 @@ enum AnsiExporter {
                 try writeGIF(frames, render: render, to: url, progress: progress)
             }
         case .webp: try writeAnimatedWebP(frames, render: render, to: url, progress: progress)
-        case .mp4: try writeMP4(frames, render: render, audio: audio, to: url, progress: progress)
+        case .mp4: try writeMP4(frames, render: render, audio: audio, to: url, progress: progress, isCancelled: isCancelled)
         }
     }
 
@@ -542,7 +545,7 @@ enum AnsiExporter {
 
     private static func writeMP4(
         _ frames: [AnsiFrame], render: (AnsiFrame) throws -> CGImage, audio: [Float] = [], to url: URL,
-        progress: (Double) -> Void
+        progress: (Double) -> Void, isCancelled: () -> Bool = { false }
     ) throws {
         let first = try render(frames[0])
         let width = first.width, height = first.height
@@ -597,6 +600,12 @@ enum AnsiExporter {
         guard writer.startWriting() else { throw AnsiExportError.encodeFailed(writer.error?.localizedDescription ?? "MP4") }
         writer.startSession(atSourceTime: .zero)
 
+        /// A short wait for the writer, giving up if it failed or the export was cancelled.
+        func waitForWriter() throws {
+            if writer.status == .failed { throw AnsiExportError.encodeFailed(writer.error?.localizedDescription ?? "MP4") }
+            if isCancelled() { throw AnsiExportError.cancelled }
+            Thread.sleep(forTimeInterval: 0.005)
+        }
         var milliseconds: Int64 = 0
         var lastBuffer: CVPixelBuffer?
         do {
@@ -607,7 +616,7 @@ enum AnsiExporter {
                     // The writer may want audio past a long held frame before it takes more video;
                     // its own readiness keeps audio from running too far ahead.
                     try feedAudio(upTo: .infinity)
-                    Thread.sleep(forTimeInterval: 0.005)
+                    try waitForWriter()
                 }
                 guard let pool = adaptor.pixelBufferPool else { throw AnsiExportError.encodeFailed("pixel buffer pool") }
                 var buffer: CVPixelBuffer?
@@ -634,7 +643,7 @@ enum AnsiExporter {
             if audioInput != nil, let lastBuffer {
                 while !input.isReadyForMoreMediaData {
                     try feedAudio(upTo: .infinity)
-                    Thread.sleep(forTimeInterval: 0.005)
+                    try waitForWriter()
                 }
                 guard adaptor.append(lastBuffer, withPresentationTime: CMTime(value: milliseconds - 1, timescale: 1000)) else {
                     throw AnsiExportError.encodeFailed(writer.error?.localizedDescription ?? "MP4 last frame")
@@ -646,7 +655,7 @@ enum AnsiExporter {
                     if audioInput.isReadyForMoreMediaData {
                         try feedAudio(upTo: .infinity)
                     } else {
-                        Thread.sleep(forTimeInterval: 0.005)
+                        try waitForWriter()
                     }
                 }
             }

@@ -310,7 +310,7 @@ import Testing
 
     @Test func gateNotPlayingStillRemovesMusic() {
         var gate = TerminalMusicGate(mode: .all)
-        gate.plays = false
+        _ = gate.setPlays(false, at: 0)
         let out = gate.feed(stream, at: 0)
         #expect(out.events.isEmpty)
         #expect(out.visual == AnsiMusic.scan(stream).visual)
@@ -345,5 +345,62 @@ import Testing
             let expected = filter.feed(input).visual
             #expect(result.visual.flatMap(\.bytes) == expected)
         }
+    }
+}
+
+/// Findings from the final review of the playback branch.
+@Suite struct MusicPlaybackReviewTests {
+    private func bytes(_ text: String) -> [UInt8] { Array(text.utf8) }
+    private func plays(_ events: [MusicEvent]) -> [ScheduledMusic] {
+        events.compactMap { if case .play(let music) = $0 { return music } else { return nil } }
+    }
+
+    @Test func gateTurningOffReleasesHold() {
+        var gate = TerminalMusicGate(mode: .all)
+        _ = gate.feed(AnsiMusic.escape("MF C D E") + bytes("after"), at: 0)
+        #expect(gate.isHolding(at: 0.1))
+        #expect(gate.setPlays(false, at: 0.1) == [.stop])
+        #expect(!gate.isHolding(at: 0.1))
+        #expect(gate.feed([], at: 0.1).visual == bytes("after"))
+        // Turning it on again says nothing to the output.
+        #expect(gate.setPlays(true, at: 0.2) == [])
+    }
+
+    @Test func hostileTuneHoldIsCapped() {
+        let tune = "T32 L1 MF " + String(repeating: "P1 ", count: 3000)
+        var scheduler = MusicPlaybackScheduler(AnsiMusic.scan(AnsiMusic.escape(tune)).sequences)
+        let started = plays(scheduler.reached(Int.max, at: 0))
+        #expect(started.count == 1)
+        #expect(started[0].end <= MusicPlaybackScheduler.maxTuneSeconds)
+        #expect(!scheduler.isHolding(at: MusicPlaybackScheduler.maxTuneSeconds + 0.001))
+    }
+
+    @Test func playAllStopsQueueingPastTheCap() {
+        let long = AnsiMusic.escape("T32 L1 MB " + String(repeating: "C ", count: 100))  // 750 s, capped to 600
+        var scheduler = MusicPlaybackScheduler(AnsiMusic.scan(long + long + long).sequences)
+        let started = plays(scheduler.playAll(at: 0))
+        #expect(started.count == 1)
+        #expect(started.map(\.end).max()! <= MusicPlaybackScheduler.maxTuneSeconds)
+    }
+
+    @Test func exportAudioKeepsTunesLateInLongVideos() {
+        let scan = AnsiMusic.scan(AnsiMusic.escape("MF C"))
+        var queue = MusicQueue()
+        let late = queue.add(scan.sequences[0], at: 700)
+        let samples = MusicPlaybackScheduler.audioSamples([late], length: 701)
+        #expect(samples.count == Int((701 * 44100.0).rounded()))
+        let window = samples[(700 * 44100)..<(700 * 44100 + 4410)]
+        #expect(window.contains { $0 != 0 })
+        #expect(samples[0..<(699 * 44100)].allSatisfy { $0 == 0 })
+        // The total is bounded.
+        #expect(MusicPlaybackScheduler.audioSamples([late], length: 1e9).count
+                == Int(MusicPlaybackScheduler.maxExportSeconds * 44100))
+    }
+
+    @Test func pauseWithNothingPlayingLeavesNoPause() {
+        var queue = MusicQueue()
+        let paused = queue.pause(at: 1)
+        #expect(!paused)
+        #expect(queue.pausedAt == nil)
     }
 }

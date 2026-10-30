@@ -239,7 +239,8 @@ final class AnsiPlayerViewController: NSViewController {
 
     /// Music was turned off or muted: silence it and stop holding the drawing.
     private func musicSettingsChanged() {
-        guard !musicOn else { return }
+        // Defaults change often (any setting); only a window with music has anything to stop.
+        guard hasMusicPlayback, !musicOn else { return }
         perform(musicScheduler.stop())
         musicScheduler.skip(to: terminal.position)
     }
@@ -252,6 +253,7 @@ final class AnsiPlayerViewController: NSViewController {
         musicBadge.isHidden = !active
         if active {
             let title = queue.pausedAt != nil ? MusicIndicator.paused
+                : queue.isHolding(at: now) ? MusicIndicator.foreground
                 : queue.playing(at: now)?.holds == false ? MusicIndicator.background : MusicIndicator.foreground
             if musicBadge.title != title { musicBadge.title = title }
             if musicTimer == nil {
@@ -372,8 +374,12 @@ final class AnsiPlayerViewController: NSViewController {
     /// Bytes of the stream played so far.
     var playbackPosition: Int { terminal.position }
     var isPaused: Bool {
-        !isPlaying && ((terminal.position > 0 && !terminal.isFinished) || musicScheduler.queue.pausedAt != nil)
+        !isPlaying && ((terminal.position > 0 && !terminal.isFinished) || pausedAtEnd)
     }
+    /// Paused while the last screen waited for music sent at the very end (the stream is finished,
+    /// so the position alone cannot say "paused"). Kept by the player, not the music queue, so
+    /// muting or stopping the music leaves the pause intact.
+    private var pausedAtEnd = false
 
     /// Art taller than this many lines is a "scroller": it fits the window width and scrolls.
     static let scrollerRows = 50
@@ -555,6 +561,7 @@ final class AnsiPlayerViewController: NSViewController {
         stopPlayback()
         isHolding = false
         terminal = AnsiTerminal(source)
+        pausedAtEnd = false
         perform(musicScheduler.seek(to: 0))
         if speed.baud == 0 {
             showFinal()
@@ -614,6 +621,7 @@ final class AnsiPlayerViewController: NSViewController {
 
     private func showFinal() {
         stopPlayback()
+        pausedAtEnd = false
         isHolding = false
         terminal.runToEnd()
         screen = analysis.finalScreen
@@ -629,6 +637,7 @@ final class AnsiPlayerViewController: NSViewController {
         let wasInProgress = isPlaying || isHolding || isPaused
         stopPlayback()
         isHolding = false
+        pausedAtEnd = false
         terminal.seek(to: position)
         perform(musicScheduler.seek(to: terminal.position))
         if terminal.isFinished {
@@ -702,6 +711,7 @@ final class AnsiPlayerViewController: NSViewController {
             finishHold()
         } else if isPlaying {
             stopPlayback()
+            pausedAtEnd = terminal.isFinished && !screenIsFinal
             perform(musicScheduler.pause(at: clock()))
             showHUD("Paused")
         } else if isPaused {
@@ -724,6 +734,7 @@ final class AnsiPlayerViewController: NSViewController {
     }
 
     private func startTimer() {
+        pausedAtEnd = false
         lastFrameTime = clock()
         byteCredit = 0
         let timer = Timer(timeInterval: Self.frameInterval, repeats: true) { [weak self] _ in

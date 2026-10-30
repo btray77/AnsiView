@@ -26,7 +26,7 @@ final class TerminalMusic {
 
     /// The bytes due on screen (empty to release what waited); returns what the emulator may show.
     func screenBytes(_ bytes: [UInt8]) -> [UInt8] {
-        gate.plays = PlaybackSpeed.ansiMusic && output != nil
+        for event in gate.setPlays(PlaybackSpeed.ansiMusic && output != nil, at: clock()) { perform(event) }
         let out = gate.feed(bytes, at: clock())
         for event in out.events { perform(event) }
         return out.visual

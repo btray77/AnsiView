@@ -12,7 +12,9 @@ public struct ScheduledMusic: Equatable {
     /// True when the display waits for this music (foreground music in a viewer or terminal).
     public var holds: Bool
 
-    public var end: Double { start + sequence.duration }
+    /// Capped at `MusicPlaybackScheduler.maxTuneSeconds`, the longest audio a tune renders, so a
+    /// hostile tune cannot hold the drawing for hours of silence.
+    public var end: Double { start + min(sequence.duration, MusicPlaybackScheduler.maxTuneSeconds) }
     public var notes: [TimedNote] { sequence.notes }
 }
 
@@ -72,10 +74,9 @@ public struct MusicQueue: Equatable {
     /// Freezes the clock for the queue. Returns false when nothing was playing.
     @discardableResult
     public mutating func pause(at now: Double) -> Bool {
-        guard pausedAt == nil else { return false }
-        let active = isActive(at: now)
+        guard pausedAt == nil, isActive(at: now) else { return false }
         pausedAt = now
-        return active
+        return true
     }
 
     /// Moves every time on by the paused span. Returns the span (0 when not paused).
@@ -101,6 +102,13 @@ public struct MusicQueue: Equatable {
 /// The file player's music: which sequence the playback cursor passes next, when its music starts,
 /// and whether the drawing waits for it.
 public struct MusicPlaybackScheduler {
+    /// The longest one tune plays (the synth's render cap).
+    public static let maxTuneSeconds = MusicSynth().maxSeconds
+    /// Music queued ahead of now beyond this is dropped (bounded audio memory).
+    public static let maxQueuedSeconds = maxTuneSeconds
+    /// The longest sound track an export renders.
+    public static let maxExportSeconds = 3600.0
+
     /// Playable (terminated) sequences in stream order.
     public let sequences: [MusicSequence]
     /// The first sequence the cursor has not passed yet.
@@ -129,12 +137,20 @@ public struct MusicPlaybackScheduler {
     public mutating func reached(_ position: Int, at now: Double) -> [MusicEvent] {
         var events: [MusicEvent] = []
         while next < sequences.count, sequences[next].end <= position {
-            let music = queue.add(sequences[next], at: now)
-            started.append(music)
-            events.append(.play(music))
+            if fitsQueue(sequences[next], at: now) {
+                let music = queue.add(sequences[next], at: now)
+                started.append(music)
+                events.append(.play(music))
+            }
             next += 1
         }
         return events
+    }
+
+    /// False when queueing `sequence` would put more than `maxQueuedSeconds` of music ahead of now.
+    private func fitsQueue(_ sequence: MusicSequence, at now: Double) -> Bool {
+        let ahead = max(0, (queue.freeAt ?? now) - (queue.pausedAt ?? now))
+        return ahead == 0 || ahead + min(sequence.duration, Self.maxTuneSeconds) <= Self.maxQueuedSeconds
     }
 
     /// Advances `terminal` by up to `bytes`, stopping at the end of each sequence so its music starts
@@ -172,6 +188,7 @@ public struct MusicPlaybackScheduler {
         started = []
         var events: [MusicEvent] = [.stop]
         for sequence in sequences {
+            guard fitsQueue(sequence, at: now) else { break }
             let music = queue.add(sequence, at: now, holds: false)
             started.append(music)
             events.append(.play(music))
@@ -196,6 +213,23 @@ public struct MusicPlaybackScheduler {
         return [.stop]
     }
 
+    /// Mono samples of `length` seconds (at most `maxExportSeconds`) with each tune mixed in at its
+    /// start, for export. Each tune renders on its own, so a tune late in a long video keeps its sound.
+    public static func audioSamples(_ scheduled: [ScheduledMusic], length: Double,
+                                    sampleRate: Double = 44100) -> [Float] {
+        let seconds = min(max(0, length), maxExportSeconds)
+        var samples = [Float](repeating: 0, count: Int((seconds * sampleRate).rounded()))
+        var synth = MusicSynth(waveform: .square)
+        synth.sampleRate = sampleRate
+        for music in scheduled {
+            let offset = Int((music.start * sampleRate).rounded())
+            guard offset < samples.count else { continue }
+            let tune = synth.render(music.notes)
+            for (k, value) in tune.prefix(samples.count - offset).enumerated() { samples[offset + k] += value }
+        }
+        return samples
+    }
+
     /// Scheduled music as one timeline (note times on the scheduler's clock), for export.
     public static func audioNotes(_ scheduled: [ScheduledMusic]) -> [TimedNote] {
         scheduled.flatMap { music in
@@ -215,8 +249,8 @@ public struct TerminalMusicGate {
     public private(set) var filter: MusicStreamFilter
     public private(set) var queue = MusicQueue()
     /// False when music is silenced: sequences are still removed from the screen but neither
-    /// sound nor hold.
-    public var plays = true
+    /// sound nor hold. Change it with `setPlays`.
+    public private(set) var plays = true
     private var pending: [UInt8] = []
 
     public init(mode: MusicMode) {
@@ -257,6 +291,15 @@ public struct TerminalMusicGate {
 
     private mutating func start(_ sequences: [MusicSequence], at now: Double) -> [MusicEvent] {
         sequences.filter(\.isTerminated).map { .play(queue.add($0, at: now)) }
+    }
+
+    /// Turns music on or off. Turning it off silences queued music and frees a held screen.
+    public mutating func setPlays(_ on: Bool, at now: Double) -> [MusicEvent] {
+        guard on != plays else { return [] }
+        plays = on
+        guard !on else { return [] }
+        queue.clear()
+        return [.stop]
     }
 
     /// A new session: forgets waiting bytes, parser state and queued music.
