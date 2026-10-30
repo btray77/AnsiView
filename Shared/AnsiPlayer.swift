@@ -99,7 +99,13 @@ final class AnsiPlayerViewController: NSViewController {
     let analysis: AnsiAnalysis
     let source: ArtFile
     /// Where the file lives, when the host knows (document windows and folder slideshows).
-    var fileURL: URL?
+    var fileURL: URL? {
+        didSet { if isViewLoaded { updateAccessibility() } }
+    }
+    /// The piece's name when it has no file of its own (an entry in a ZIP art pack).
+    var artName: String? {
+        didSet { if isViewLoaded { updateAccessibility() } }
+    }
     let speed: PlayerSpeed
     /// Frame positions for the scrub bar and stepping; nil for static art, which has no bar.
     let timeline: PlaybackTimeline?
@@ -221,6 +227,7 @@ final class AnsiPlayerViewController: NSViewController {
         canvas.frame = CGRect(origin: .zero, size: contentSize)
         canvas.onClick = { [weak self] in self?.skipOrReplay() }
         canvas.player = self
+        updateAccessibility()
         scroll.documentView = canvas
         container.addSubview(scroll)
 
@@ -254,6 +261,17 @@ final class AnsiPlayerViewController: NSViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.speedMayHaveChanged() }
         }
+    }
+
+    /// VoiceOver reads the art as static text: the finished art's words (not the frame on screen,
+    /// so it does not change during playback), described by its SAUCE title, author and group.
+    /// Set through the setters: AppKit's attribute bridge ignores overridden getters on a plain NSView.
+    private func updateAccessibility() {
+        canvas.setAccessibilityElement(true)
+        canvas.setAccessibilityRole(.staticText)
+        canvas.setAccessibilityRoleDescription("ANSI art")
+        canvas.setAccessibilityValue(ArtText.accessibilityValue(analysis.finalScreen))
+        canvas.setAccessibilityLabel(ArtText.accessibilityLabel(source, fileName: fileURL?.lastPathComponent ?? artName))
     }
 
     /// The scrub bar under the art: a slider over the byte stream and a frame counter.
