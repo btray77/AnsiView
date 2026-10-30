@@ -153,6 +153,7 @@ public final class CanvasEditor {
     }
 
     public func setIceColors(_ on: Bool) {
+        guard floating == nil else { return }
         perform(on ? "iCE Colours On" : "iCE Colours Off") { $0.canvas.setIceColors(on) }
         if !on, background >= 8 { background -= 8 }
         changed()
@@ -198,6 +199,101 @@ public final class CanvasEditor {
                 }
             }
         }
+    }
+
+    // MARK: Floating paste
+
+    /// A pasted block that has not been placed yet (copy and paste plan, ruling 5).
+    public struct FloatingPaste: Equatable {
+        public let region: CanvasRegion
+        public var x: Int
+        public var y: Int
+    }
+
+    /// The block being placed, shown over the canvas until it is stamped or cancelled.
+    public private(set) var floating: FloatingPaste?
+
+    /// Blank characters in a pasted block leave what is underneath (ruling 6).
+    public var transparentPaste = false {
+        didSet { if transparentPaste != oldValue { changed() } }
+    }
+
+    /// The canvas as it looks with the floating block stamped where it is now.
+    public var displayCanvas: EditCanvas {
+        guard let floating else { return canvas }
+        var shown = canvas
+        shown.paste(floating.region, x: floating.x, y: floating.y, transparent: transparentPaste)
+        return shown
+    }
+
+    /// Floats `region` with its top left at (`x`, `y`), or at the cursor. Replaces any floating block.
+    public func beginFloating(_ region: CanvasRegion, x: Int? = nil, y: Int? = nil) {
+        guard region.width > 0, region.height > 0 else { return }
+        // Cells copied from art with other colour rules are converted the way this canvas holds them.
+        let ice = canvas.iceColors
+        let converted = CanvasRegion(cells: region.cells.map { $0.map { EditCanvas.cell($0, iceColors: ice) } })
+        floating = FloatingPaste(region: converted, x: 0, y: 0)
+        moveFloating(toX: x ?? cursor.x, y: y ?? cursor.y)
+    }
+
+    /// Floats cells copied by AnsiView. False when the data is not cell data.
+    @discardableResult
+    public func beginFloating(cells data: Data, x: Int? = nil, y: Int? = nil) -> Bool {
+        guard let region = Self.decode(data) else { return false }
+        beginFloating(region, x: x, y: y)
+        return true
+    }
+
+    /// Floats text as a block in the current colours.
+    public func beginFloating(text: String, x: Int? = nil, y: Int? = nil) {
+        beginFloating(Self.region(fromText: text, fg: foregroundColor, bg: backgroundColor), x: x, y: y)
+    }
+
+    public func moveFloating(dx: Int, dy: Int) {
+        guard let floating else { return }
+        moveFloating(toX: floating.x + dx, y: floating.y + dy)
+    }
+
+    /// Moves the floating block's top left to a cell, kept on the canvas (and above the row limit).
+    public func moveFloating(toX x: Int, y: Int) {
+        guard floating != nil else { return }
+        floating?.x = min(canvas.columns - 1, max(0, x))
+        floating?.y = min(AnsiTerminal.maxRows - 1, max(0, y))
+        changed()
+    }
+
+    /// Places the floating block: one undo step named Paste; the pasted cells become the selection.
+    public func stampFloating() {
+        guard let block = floating else { return }
+        floating = nil
+        let transparent = transparentPaste
+        perform("Paste") { $0.canvas.paste(block.region, x: block.x, y: block.y, transparent: transparent) }
+        selectionAnchor = nil
+        selection = canvas.clip(CellRect(x: block.x, y: block.y, width: block.region.width, height: block.region.height))
+        cursor = (block.x, min(canvas.height - 1, block.y))
+        changed()
+    }
+
+    public func cancelFloating() {
+        guard floating != nil else { return }
+        floating = nil
+        changed()
+    }
+
+    /// Text as a rectangle of cells in the given colours: one row per line (a final line break
+    /// adds none), short lines padded with spaces, tabs as spaces, unmappable characters as "?".
+    public static func region(fromText text: String, fg: RGB, bg: RGB) -> CanvasRegion {
+        var lines = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        if lines.last?.isEmpty == true { lines.removeLast() }
+        let rows = lines.prefix(AnsiTerminal.maxRows).map { line in
+            line.unicodeScalars.prefix(EditCanvas.maxColumns).map { scalar in
+                AnsiCell(code: scalar == "\t" ? 0x20 : (CP437.code(for: scalar) ?? 0x3F), fg: fg, bg: bg)
+            }
+        }
+        let width = rows.map(\.count).max() ?? 0
+        guard width > 0 else { return CanvasRegion(cells: []) }
+        return CanvasRegion(cells: rows.map { $0 + Array(repeating: AnsiCell(code: 0x20, fg: fg, bg: bg), count: width - $0.count) })
     }
 
     // MARK: Fill and clear
@@ -284,8 +380,10 @@ public final class CanvasEditor {
 
     // MARK: Helpers
 
-    /// Runs one undoable change. Nothing is registered when the canvas did not change.
+    /// Runs one undoable change. Nothing is registered when the canvas did not change. Nothing
+    /// runs while a paste floats: it is placed or cancelled first.
     private func perform(_ name: String, _ change: (CanvasEditor) -> Void) {
+        guard floating == nil else { return }
         let before = (canvas, revision)
         change(self)
         clampToCanvas()
@@ -343,6 +441,7 @@ public final class CanvasEditor {
     private func clampToCanvas() {
         cursor = (min(canvas.columns - 1, max(0, cursor.x)), min(canvas.height - 1, max(0, cursor.y)))
         if let rect = selection { selection = canvas.clip(rect) }
+        if let block = floating, block.x >= canvas.columns { floating?.x = canvas.columns - 1 }
     }
 
     private func changed() { onChange?() }

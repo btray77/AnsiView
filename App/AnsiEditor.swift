@@ -25,6 +25,11 @@ final class EditorCanvasView: NSView {
     /// The last half block pixel painted in this stroke (column, half row), to fill gaps on fast drags.
     private var lastPixel: (x: Int, y: Int)?
     private var strokeUsesBackground = false
+    /// A drag of the floating paste: the cell the mouse went down on, the block's origin then,
+    /// and whether the mouse has moved to another cell (a click without movement stamps).
+    private var floatDrag: (start: (x: Int, y: Int), origin: (x: Int, y: Int), moved: Bool)?
+    /// The cell a context menu was opened on, where its Paste puts the block.
+    private var contextCell: (x: Int, y: Int)?
 
     init(editor: CanvasEditor) {
         self.editor = editor
@@ -51,7 +56,7 @@ final class EditorCanvasView: NSView {
 
     /// Resizes to the canvas and redraws; bands whose rows changed are re-rendered when drawn.
     func refresh() {
-        let canvas = editor.canvas
+        let canvas = editor.displayCanvas
         let key = "\(canvas.columns)|\(canvas.fontName)"
         if key != bandKey {
             bandImages.removeAll()
@@ -66,7 +71,7 @@ final class EditorCanvasView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor.black.setFill()
         bounds.fill()
-        let canvas = editor.canvas
+        let canvas = editor.displayCanvas
         NSGraphicsContext.current?.imageInterpolation = .none
         let bandHeight = CGFloat(Self.bandRows) * cellSize.height
         let first = max(0, Int(floor(dirtyRect.minY / bandHeight)))
@@ -79,7 +84,8 @@ final class EditorCanvasView: NSView {
                 NSImage(cgImage: image, size: drawn.size).draw(in: drawn)
             }
         }
-        if let selection = editor.selection {
+        // A floating paste hides the selection, so its colours show as they will be stamped.
+        if editor.floating == nil, let selection = editor.selection {
             let rect = cellRect(column: selection.x, row: selection.y)
                 .union(cellRect(column: selection.x + selection.width - 1, row: selection.y + selection.height - 1))
             NSColor.systemBlue.withAlphaComponent(0.3).setFill()
@@ -88,6 +94,18 @@ final class EditorCanvasView: NSView {
             let path = NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5))
             path.setLineDash([4, 3], count: 2, phase: 0)
             path.stroke()
+        }
+        if let floating = editor.floating {
+            let rect = cellRect(column: floating.x, row: floating.y)
+                .union(cellRect(column: min(canvas.columns - 1, floating.x + floating.region.width - 1),
+                                row: floating.y + floating.region.height - 1))
+            NSColor.black.setStroke()
+            NSBezierPath(rect: rect.insetBy(dx: 1.5, dy: 1.5)).stroke()
+            NSColor.systemYellow.setStroke()
+            let path = NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5))
+            path.setLineDash([6, 3], count: 2, phase: 0)
+            path.stroke()
+            return
         }
         let cursor = cellRect(column: editor.cursor.x, row: editor.cursor.y)
         NSColor.black.setStroke()
@@ -133,6 +151,7 @@ final class EditorCanvasView: NSView {
         guard let characters = event.charactersIgnoringModifiers, let scalar = characters.unicodeScalars.first else { return }
         let shift = event.modifierFlags.contains(.shift)
         let value = Int(scalar.value)
+        if editor.floating != nil { floatingKey(value, shift: shift); return }
         if (NSF1FunctionKey...NSF10FunctionKey).contains(value) {
             let index = value - NSF1FunctionKey
             if event.modifierFlags.contains(.option) { editor.blockSet = index } else { editor.insertBlock(index) }
@@ -161,6 +180,32 @@ final class EditorCanvasView: NSView {
         scrollCursorVisible()
     }
 
+    /// Keys while a paste floats: arrows move it (Shift: 8 cells), Return or Enter places it,
+    /// Escape cancels, T toggles transparency; anything else beeps.
+    private func floatingKey(_ value: Int, shift: Bool) {
+        let step = shift ? 8 : 1
+        switch value {
+        case NSLeftArrowFunctionKey: editor.moveFloating(dx: -step, dy: 0)
+        case NSRightArrowFunctionKey: editor.moveFloating(dx: step, dy: 0)
+        case NSUpArrowFunctionKey: editor.moveFloating(dx: 0, dy: -step)
+        case NSDownArrowFunctionKey: editor.moveFloating(dx: 0, dy: step)
+        case 0x0D, 0x03: editor.stampFloating()
+        case 0x1B: editor.cancelFloating()
+        case 0x74, 0x54: editor.transparentPaste.toggle()
+        default: NSSound.beep()
+        }
+        scrollFloatingVisible()
+    }
+
+    private func scrollFloatingVisible() {
+        guard let floating = editor.floating else { scrollCursorVisible(); return }
+        scrollToVisible(cellRect(column: floating.x, row: floating.y).insetBy(dx: -cellSize.width, dy: -cellSize.height))
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        if editor.floating != nil { editor.cancelFloating() } else { editor.select(nil) }
+    }
+
     // MARK: Mouse
 
     /// The cell and half under a point in this view.
@@ -175,7 +220,15 @@ final class EditorCanvasView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        if event.modifierFlags.contains(.control) {
+            if let menu = menu(for: event) { NSMenu.popUpContextMenu(menu, with: event, for: self) }
+            return
+        }
         let at = location(event)
+        if let floating = editor.floating {
+            floatDrag = ((at.x, at.y), (floating.x, floating.y), false)
+            return
+        }
         if mode == .select {
             dragAnchor = (at.x, at.y)
             editor.setCursor(x: at.x, y: at.y)
@@ -186,6 +239,13 @@ final class EditorCanvasView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         let at = location(event)
+        if let drag = floatDrag {
+            let moved = drag.moved || at.x != drag.start.x || at.y != drag.start.y
+            floatDrag?.moved = moved
+            if moved { editor.moveFloating(toX: drag.origin.x + at.x - drag.start.x, y: drag.origin.y + at.y - drag.start.y) }
+            autoscroll(with: event)
+            return
+        }
         if mode == .select, let anchor = dragAnchor {
             editor.select(CellRect.spanning(anchor, (at.x, at.y)))
             autoscroll(with: event)
@@ -196,21 +256,52 @@ final class EditorCanvasView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let drag = floatDrag {
+            floatDrag = nil
+            if !drag.moved { editor.stampFloating() }
+            return
+        }
         if mode == .select { dragAnchor = nil; return }
         editor.endStroke()
         lastPixel = nil
     }
 
+    /// Right button: paints the background colour in Draw mode; opens the context menu in
+    /// Select mode or while a paste floats (Control-click opens it in any mode).
     override func rightMouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        if mode == .select || editor.floating != nil {
+            if let menu = menu(for: event) { NSMenu.popUpContextMenu(menu, with: event, for: self) }
+            return
+        }
         startStroke(location(event), background: true)
     }
 
-    override func rightMouseDragged(with event: NSEvent) { continueStroke(location(event)) }
+    override func rightMouseDragged(with event: NSEvent) {
+        guard lastPixel != nil else { return }
+        continueStroke(location(event))
+    }
 
     override func rightMouseUp(with event: NSEvent) {
+        guard lastPixel != nil else { return }
         editor.endStroke()
         lastPixel = nil
+    }
+
+    /// Cut, Copy, Copy As, Paste (at the clicked cell) and Select All.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let at = location(event)
+        contextCell = (at.x, at.y)
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Cut", action: #selector(cut(_:)), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "").target = self
+        let copyAs = NSMenuItem(title: "Copy As", action: nil, keyEquivalent: "")
+        copyAs.submenu = ArtPasteboard.copyAsMenu(target: self)
+        menu.addItem(copyAs)
+        menu.addItem(withTitle: "Paste", action: #selector(pasteAtContextCell(_:)), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Select All", action: #selector(selectAll(_:)), keyEquivalent: "").target = self
+        return menu
     }
 
     private func startStroke(_ at: (x: Int, y: Int, half: HalfBlock), background: Bool) {
@@ -242,31 +333,64 @@ final class EditorCanvasView: NSView {
 
     // MARK: Edit menu
 
-    @objc func copy(_ sender: Any?) {
-        guard let copied = editor.copySelection() else { NSSound.beep(); return }
-        write(copied)
+    /// The selection as clipboard data, drawn with the canvas's font as the editor shows it.
+    private var selectionClipboard: CellClipboard? {
+        guard let selection = editor.selection else { return nil }
+        return CellClipboard(region: editor.canvas.region(selection), font: editor.canvas.font)
     }
+
+    private func copySelection(_ kind: CellClipboard.Kind) {
+        guard editor.floating == nil, let clip = selectionClipboard, ArtPasteboard.write(clip, kind: kind, to: pasteboard) else {
+            NSSound.beep()
+            return
+        }
+    }
+
+    @objc func copy(_ sender: Any?) { copySelection(.all) }
+    @objc func copyAsText(_ sender: Any?) { copySelection(.text) }
+    @objc func copyAsANSI(_ sender: Any?) { copySelection(.ansi) }
+    @objc func copyAsImage(_ sender: Any?) { copySelection(.image) }
 
     @objc func cut(_ sender: Any?) {
-        guard let copied = editor.cut() else { NSSound.beep(); return }
-        write(copied)
+        guard editor.floating == nil, let clip = selectionClipboard, ArtPasteboard.write(clip, kind: .all, to: pasteboard) else {
+            NSSound.beep()
+            return
+        }
+        _ = editor.cut()
     }
 
-    private func write(_ copied: (cells: Data, text: String)) {
-        pasteboard.clearContents()
-        pasteboard.declareTypes([NSPasteboard.PasteboardType(CanvasEditor.cellsPasteboardType), .string], owner: nil)
-        pasteboard.setData(copied.cells, forType: NSPasteboard.PasteboardType(CanvasEditor.cellsPasteboardType))
-        pasteboard.setString(copied.text, forType: .string)
-    }
+    /// Floats the pasteboard's cells, text or picture at the cursor (ruling 5).
+    @objc func paste(_ sender: Any?) { paste(at: nil) }
 
-    @objc func paste(_ sender: Any?) {
-        if let cells = pasteboard.data(forType: NSPasteboard.PasteboardType(CanvasEditor.cellsPasteboardType)) {
-            editor.paste(cells: cells)
-        } else if let text = pasteboard.string(forType: .string) {
-            editor.paste(text: text)
-        } else {
+    /// The context menu's Paste: floats at the cell that was clicked.
+    @objc func pasteAtContextCell(_ sender: Any?) { paste(at: contextCell) }
+
+    private func paste(at cell: (x: Int, y: Int)?) {
+        switch ArtPasteboard.read(pasteboard) {
+        case .cells(let region):
+            editor.beginFloating(region, x: cell?.x, y: cell?.y)
+        case .text(let text):
+            editor.beginFloating(text: text, x: cell?.x, y: cell?.y)
+            if editor.floating == nil { NSSound.beep() }
+        case .image(let image):
+            pasteImage(image, at: cell)
+        case nil:
             NSSound.beep()
         }
+        scrollFloatingVisible()
+    }
+
+    /// A picture becomes block art with the last Import Image options (ruling 7): as wide as the
+    /// selection (and floated at its corner), else the image's pixel width up to the canvas width.
+    private func pasteImage(_ image: CGImage, at cell: (x: Int, y: Int)?) {
+        var options = ImageImportOptionsView.remembered
+        let selection = editor.selection
+        options.columns = CellClipboard.imageColumns(imageWidth: image.width, selectionWidth: selection?.width,
+                                                     canvasColumns: editor.canvas.columns)
+        options.iceColors = editor.canvas.iceColors
+        let converted = ImageToAnsi.convert(image, options: options)
+        let region = converted.region(CellRect(x: 0, y: 0, width: converted.columns, height: converted.height))
+        editor.beginFloating(region, x: cell?.x ?? selection?.x, y: cell?.y ?? selection?.y)
     }
 
     @objc override func selectAll(_ sender: Any?) { editor.selectAll() }
@@ -287,9 +411,15 @@ final class EditorCanvasView: NSView {
 
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(copy(_:)), #selector(cut(_:)): return editor.selection != nil
-        case #selector(toggleIceColors(_:)):
-            item.state = editor.canvas.iceColors ? .on : .off
+        case #selector(copy(_:)), #selector(cut(_:)), #selector(copyAsText(_:)), #selector(copyAsANSI(_:)),
+             #selector(copyAsImage(_:)):
+            return editor.selection != nil && editor.floating == nil
+        case #selector(paste(_:)), #selector(pasteAtContextCell(_:)): return ArtPasteboard.canPaste(pasteboard)
+        // A floating paste is placed or cancelled before anything else changes the canvas.
+        case #selector(delete(_:)), #selector(fillWithCharacter(_:)), #selector(fillWithColour(_:)),
+             #selector(toggleIceColors(_:)), #selector(canvasSize(_:)), #selector(editSauce(_:)):
+            if editor.floating != nil { return false }
+            if item.action == #selector(toggleIceColors(_:)) { item.state = editor.canvas.iceColors ? .on : .off }
             return true
         default: return true
         }
@@ -356,6 +486,7 @@ final class EditorViewController: NSViewController {
     private let setPopup = NSPopUpButton()
     private let modeControl = NSSegmentedControl(labels: ["Draw", "Select"], trackingMode: .selectOne, target: nil, action: nil)
     private let iceBox = NSButton(checkboxWithTitle: "iCE colours", target: nil, action: nil)
+    private let transparentBox = NSButton(checkboxWithTitle: "Transparent paste", target: nil, action: nil)
     private let status = NSTextField(labelWithString: "")
     private let preview = NSTextField(labelWithString: " Aa ")
     private var lastBlockSet = -1
@@ -415,7 +546,10 @@ final class EditorViewController: NSViewController {
         preview.drawsBackground = true
         preview.toolTip = "Current foreground on background"
         let colourLabel = NSTextField(labelWithString: "Colours:")
-        let bottomRow = NSStackView(views: [colourLabel] + swatches + [preview, iceBox])
+        transparentBox.target = self
+        transparentBox.action = #selector(transparentChanged(_:))
+        transparentBox.toolTip = "Spaces in a pasted block leave the art underneath (T while pasting)"
+        let bottomRow = NSStackView(views: [colourLabel] + swatches + [preview, iceBox, transparentBox])
         bottomRow.spacing = 2
         bottomRow.setCustomSpacing(10, after: swatches.last!)
         bottomRow.setCustomSpacing(12, after: preview)
@@ -480,6 +614,11 @@ final class EditorViewController: NSViewController {
         view.window?.makeFirstResponder(canvasView)
     }
 
+    @objc private func transparentChanged(_ sender: NSButton) {
+        editor.transparentPaste = sender.state == .on
+        view.window?.makeFirstResponder(canvasView)
+    }
+
     @objc private func iceChanged(_ sender: NSButton) {
         setIce(sender.state == .on)
         view.window?.makeFirstResponder(canvasView)
@@ -506,9 +645,15 @@ final class EditorViewController: NSViewController {
         preview.textColor = color(editor.foregroundColor)
         preview.backgroundColor = color(editor.backgroundColor)
         iceBox.state = editor.canvas.iceColors ? .on : .off
+        transparentBox.state = editor.transparentPaste ? .on : .off
         var text = "\(editor.cursor.x + 1), \(editor.cursor.y + 1)  |  \(editor.canvas.columns) x \(editor.canvas.height)"
         if let s = editor.selection { text += "  |  selection \(s.width) x \(s.height)" }
         text += "  |  set \(editor.blockSet + 1)  |  \(editor.canvas.fontName)"
+        if let floating = editor.floating {
+            text = "Pasting \(floating.region.width) x \(floating.region.height) at \(floating.x + 1), \(floating.y + 1)"
+                + (editor.transparentPaste ? " (transparent)" : "")
+                + "  |  arrows or drag to move, Return or click to place, Esc to cancel, T for transparent"
+        }
         status.stringValue = text
         onChange?()
     }

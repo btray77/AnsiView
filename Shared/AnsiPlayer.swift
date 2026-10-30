@@ -1,6 +1,7 @@
 import AnsiCore
 import AppKit
 import Combine
+import QuartzCore
 import os
 
 /// Playback speeds in bits per second. 0 means draw instantly.
@@ -171,6 +172,37 @@ final class AnsiPlayerViewController: NSViewController {
     /// Left and Right arrows step frames. Quick Look turns this off so the arrows keep moving
     /// between the selected files.
     var handlesArrowKeys = true
+
+    /// Dragging selects cells for copying. The app's windows turn this on; Quick Look leaves it
+    /// off, so a click there still skips or replays on mouse down.
+    var allowsSelection = false
+
+    /// The selected cells of the screen on display (`displayedScreen`), or nil.
+    private(set) var selection: CellRect?
+    private var selectionWasInTerminalMode = false
+
+    /// Selects cells of the displayed screen (clipped to it), or clears with nil.
+    func select(_ rect: CellRect?) {
+        let grid = CellRect(x: 0, y: 0, width: source.columns, height: displayedRows)
+        selection = rect.flatMap { Self.intersect($0, grid) }
+        canvas.showSelection(selection, columns: source.columns, rows: displayedRows)
+    }
+
+    func selectAll() { select(CellRect(x: 0, y: 0, width: source.columns, height: displayedRows)) }
+
+    private static func intersect(_ a: CellRect, _ b: CellRect) -> CellRect? {
+        let x0 = max(a.x, b.x), y0 = max(a.y, b.y)
+        let x1 = min(a.x + a.width, b.x + b.width), y1 = min(a.y + a.height, b.y + b.height)
+        return x1 > x0 && y1 > y0 ? CellRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0) : nil
+    }
+
+    /// The selected cells of the frame on screen, ready for the pasteboard, drawn with the art's font.
+    var selectionClipboard: CellClipboard? {
+        guard let selection else { return nil }
+        let region = displayedScreen.region(selection)
+        guard region.height > 0 else { return nil }
+        return CellClipboard(region: region, font: renderOptions.font, ninePixel: renderOptions.ninePixel)
+    }
 
     /// Line sounds; used only while `PlaybackSpeed.modemSounds` is on.
     var sound: PlaybackSound?
@@ -634,18 +666,28 @@ final class AnsiPlayerViewController: NSViewController {
         }
     }
 
+    /// The screen as drawn: the 25 line terminal window during playback of tall art, otherwise
+    /// the whole canvas padded to its full height.
+    var displayedScreen: AnsiScreen {
+        if isTerminalMode { return screen.window(top: viewportTop ?? 0, rows: TerminalViewport.rows) }
+        var padded = screen
+        while padded.rows.count < analysis.canvasRows {
+            padded.rows.append(Array(repeating: AnsiCell(), count: source.columns))
+        }
+        return padded
+    }
+
     private func redraw() {
         var options = renderOptions
-        var padded = screen
-        if isTerminalMode {
-            padded = screen.window(top: viewportTop ?? 0, rows: TerminalViewport.rows)
-            options.scale = AnsiRenderer.preferredScale(rows: TerminalViewport.rows)
-        } else {
-            while padded.rows.count < analysis.canvasRows {
-                padded.rows.append(Array(repeating: AnsiCell(), count: source.columns))
-            }
-        }
+        let padded = displayedScreen
+        if isTerminalMode { options.scale = AnsiRenderer.preferredScale(rows: TerminalViewport.rows) }
         options.blinkVisible = blinkVisible
+        // A tall piece entering or leaving its 25 row playback window shows other rows under the
+        // same cells: the selection no longer means the same art, so it is dropped.
+        if isTerminalMode != selectionWasInTerminalMode {
+            selectionWasInTerminalMode = isTerminalMode
+            if selection != nil { select(nil) }
+        }
         let image = AnsiRenderer.render(padded, options: options)?.image
         canvas.image = PlaybackSpeed.crtEffect ? image.flatMap { CRTFilter().apply($0) } ?? image : image
         if isViewLoaded { fitToWindow() }
@@ -682,6 +724,13 @@ final class AnsiCanvasView: NSView {
         didSet { layer?.contents = image }
     }
 
+    /// The selection marquee: a translucent fill with a dashed outline, over the art.
+    private let marquee = CAShapeLayer()
+    private var marqueeCells: (rect: CellRect, columns: Int, rows: Int)?
+    /// Where a mouse press went down, while it may still become a selection drag.
+    private var pressPoint: NSPoint?
+    private var dragAnchor: (x: Int, y: Int)?
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
@@ -689,6 +738,39 @@ final class AnsiCanvasView: NSView {
         layer?.magnificationFilter = .nearest
         layer?.minificationFilter = .nearest
         layer?.contentsGravity = .resize
+        marquee.fillColor = NSColor.systemBlue.withAlphaComponent(0.25).cgColor
+        marquee.strokeColor = NSColor.white.cgColor
+        marquee.lineWidth = 1
+        marquee.lineDashPattern = [5, 3]
+        marquee.shadowColor = NSColor.black.cgColor
+        marquee.shadowOpacity = 1
+        marquee.shadowRadius = 0
+        marquee.shadowOffset = CGSize(width: 1, height: -1)
+        marquee.isHidden = true
+        marquee.actions = ["path": NSNull(), "hidden": NSNull(), "position": NSNull(), "bounds": NSNull()]
+        layer?.addSublayer(marquee)
+    }
+
+    /// Shows the marquee over `rect` of a `columns` x `rows` grid stretched over the view, or hides it.
+    func showSelection(_ rect: CellRect?, columns: Int, rows: Int) {
+        marqueeCells = rect.map { ($0, columns, rows) }
+        layoutMarquee()
+    }
+
+    private func layoutMarquee() {
+        guard let cells = marqueeCells else { marquee.isHidden = true; return }
+        marquee.frame = bounds
+        marquee.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        var area = CellGrid.rect(for: cells.rect, in: bounds.size, columns: cells.columns, rows: cells.rows)
+        // The layer's origin is at the bottom unless AppKit flipped its geometry for this flipped view.
+        if !(layer?.isGeometryFlipped ?? false) { area.origin.y = bounds.height - area.maxY }
+        marquee.path = CGPath(rect: area.insetBy(dx: 0.5, dy: 0.5), transform: nil)
+        marquee.isHidden = false
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        layoutMarquee()
     }
 
     @available(*, unavailable)
@@ -698,13 +780,78 @@ final class AnsiCanvasView: NSView {
     override var acceptsFirstResponder: Bool { true }
     override var wantsUpdateLayer: Bool { true }
 
+    /// Without selection (Quick Look) a press is a click at once. With it, a drag selects cells and
+    /// a click without a drag clears the selection, or is a click when nothing is selected.
     override func mouseDown(with event: NSEvent) {
-        onClick?()
+        guard let player, player.allowsSelection else { onClick?(); return }
+        window?.makeFirstResponder(self)
+        pressPoint = convert(event.locationInWindow, from: nil)
+        dragAnchor = nil
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let player, player.allowsSelection, let start = pressPoint else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        if dragAnchor == nil {
+            guard hypot(point.x - start.x, point.y - start.y) > 3 else { return }
+            dragAnchor = cell(at: start)
+        }
+        if let anchor = dragAnchor {
+            let here = cell(at: point)
+            player.select(CellRect.spanning(anchor, here))
+        }
+        autoscroll(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let player, player.allowsSelection, pressPoint != nil else { return }
+        let dragged = dragAnchor != nil
+        pressPoint = nil
+        dragAnchor = nil
+        guard !dragged else { return }
+        if player.selection != nil { player.select(nil) } else { onClick?() }
+    }
+
+    private func cell(at point: NSPoint) -> (Int, Int) {
+        guard let player else { return (0, 0) }
+        let cell = CellGrid.cell(at: point, in: bounds.size, columns: player.source.columns, rows: player.displayedRows)
+        return (cell.x, cell.y)
+    }
+
+    @objc override func selectAll(_ sender: Any?) {
+        guard let player, player.allowsSelection else {
+            // Quick Look: not ours to answer; pass it on as if this view did not implement it.
+            nextResponder?.tryToPerform(#selector(selectAll(_:)), with: sender)
+            return
+        }
+        player.selectAll()
+    }
+
+    /// Escape or Command-period clears a selection. NSView does not implement this action, so
+    /// it is passed on rather than sent to super (which would raise).
+    @objc override func cancelOperation(_ sender: Any?) {
+        if let player, player.selection != nil {
+            player.select(nil)
+        } else {
+            nextResponder?.tryToPerform(#selector(cancelOperation(_:)), with: sender)
+        }
+    }
+
+    /// The app's context menu for a viewer with selection (Copy, Copy As, Select All); none in Quick Look.
+    static var selectionMenu: ((AnsiCanvasView) -> NSMenu?)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let player, player.allowsSelection, let make = Self.selectionMenu else { return super.menu(for: event) }
+        return make(self)
     }
 
     /// Left and Right arrows step frames (Quick Look has no menus to carry the shortcuts).
     /// Only animated art in a host that wants them takes the arrows; otherwise they pass on.
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53, let player, player.selection != nil {
+            player.select(nil)
+            return
+        }
         guard let player, player.timeline != nil, player.handlesArrowKeys else {
             super.keyDown(with: event)
             return

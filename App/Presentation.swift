@@ -48,6 +48,7 @@ final class PresentationController: NSObject {
         presented.fileURL = player.fileURL
         presented.artName = player.artName
         presented.sound = player.sound == nil ? nil : ModemSoundPlayer()
+        ViewerCopy.enable(presented)
         let controller = PresentationController(screen: player.view.window?.screen, origin: player.view.window)
         controller.single = presented
         controller.originPlayer = player

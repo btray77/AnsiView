@@ -99,6 +99,8 @@ Requires macOS 14 or later, on Apple silicon or Intel.
 | Open folder or art pack | Shift Command O |
 | Start slideshow | Option Command S |
 | Next / previous art in a slideshow | Right / Left arrow, or Option Command Right / Left |
+| Select cells to copy | Drag over the art (a click or Escape clears; Command A selects all) |
+| Copy / Copy As Image / Copy As ANSI | Command C / Option Command C / Shift Option Command C |
 
 The playback speeds you choose in the app (per file and default) are also used by the Quick Look preview.
 
@@ -125,10 +127,18 @@ AnsiView has a simple TheDraw style editor (in the app only; Quick Look stays a 
 - **Drawing.** In Draw mode the left button paints half block pixels in the foreground colour
   and the right button in the background colour; each stroke is one undo step. In Select mode
   (or with Shift and the arrows) drag a rectangle.
-- **Selection.** Copy, Cut, Paste (rectangles keep characters and colours; plain text from other
-  apps pastes line by line in the current colours), Art > Fill Selection with Character (the
-  last block character used) and Art > Fill Selection with Colour (recolours, keeps the
-  characters). With no selection the fills cover the whole canvas.
+- **Selection.** Copy, Cut, Paste (see Copy and paste below), Art > Fill Selection with
+  Character (the last block character used) and Art > Fill Selection with Colour (recolours,
+  keeps the characters). With no selection the fills cover the whole canvas.
+- **Pasting.** Paste shows the block floating at the cursor (or where you right-clicked).
+  Move it with the arrows (Shift: 8 cells) or by dragging, place it with Return or a click,
+  or press Escape to cancel. Tick **Transparent paste** (or press T while pasting) so spaces in
+  the block leave the art underneath. Placing is one undo step. Plain text from other apps
+  pastes in the current colours. A picture (a screenshot, an image copied from a browser)
+  becomes block art with the last Import Image settings, as wide as the selection if there is
+  one, otherwise as wide as the picture in pixels up to the canvas width.
+- **Context menu.** Right-click in Select mode, or Control-click in any mode, for Cut, Copy,
+  Copy As, Paste and Select All. In Draw mode the right button still paints.
 - **Art menu.** Canvas Size... (1 to 1,000 columns, 1 to 1,500 rows), Edit SAUCE... (title,
   author, group), Toggle iCE Colours, Zoom In / Out (Command = / Command -).
 - **Undo / Redo** in the Edit menu cover every change.
@@ -187,6 +197,22 @@ address that could not be found, a refused port, no answer within 15 seconds, or
 closing the connection. AnsiView only makes outgoing connections (the sandbox's
 `network.client` entitlement, which the app already had for 16colo.rs); the Quick Look,
 thumbnail and Spotlight extensions have no network access.
+
+### Copy and paste
+
+Drag over the art in any AnsiView window (the viewer, slideshows and presentation mode, not
+Quick Look) or select in the editor, then Edit > Copy (Command C). One copy offers:
+
+- the cells themselves, so pasting into the AnsiView editor gives exactly the same characters
+  and colours;
+- plain Unicode text (code page 437 mapped), for TextEdit, Notes or a code editor;
+- ANSI text with 24 bit colour codes, for terminals (`pbpaste > art.ans`, then `cat art.ans`);
+- a PNG and TIFF picture of the selected cells in the art's font, for Preview, Messages, Pages
+  or Mail.
+
+Each app takes the kind it understands. **Edit > Copy As** puts just one kind on the clipboard:
+Text, ANSI (escape codes, for terminals) or Image. In an animation the copy is of the frame on
+screen. Very large selections (beyond about 160 MB of pixels) are copied without the picture.
 
 ### Importing images
 
