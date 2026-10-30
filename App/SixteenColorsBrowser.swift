@@ -27,13 +27,25 @@ final class SixteenColorsClient {
 
     let session: URLSession
     let cacheFolder: URL
+    /// Listings (`api/`, read back only when offline), pictures (`images/`) and files (`files/`),
+    /// under a 200 MB cap. Pack ZIPs (`packs/`) stay outside it: a gallery may still be reading one.
+    let cache: DiskCache
     private var spacing = RequestSpacing(interval: 1)
+    private var lane = RequestLane()
+    private var waiters: [Int: CheckedContinuation<Void, Error>] = [:]
+    private var pump: Task<Void, Never>?
     private var memory: [URL: Data] = [:]
+    /// Pictures 16colo.rs does not have (HTTP 404), remembered for the session.
+    private(set) var missing: Set<URL> = []
+    /// True while answers come from the disk because 16colo.rs cannot be reached.
+    private(set) var isOffline = false
     /// When each network request started (uptime seconds), for checks.
     private(set) var requestStarts: [TimeInterval] = []
+    /// Every finished request: what, when it started, how many bytes came back (for checks).
+    private(set) var requests: [(url: URL, start: TimeInterval, bytes: Int)] = []
     private let log = Logger(subsystem: "com.traynham.ansiview", category: "16colors")
 
-    init(session: URLSession? = nil, cacheFolder: URL) {
+    init(session: URLSession? = nil, cacheFolder: URL, capacity: Int = DiskCache.defaultCapacity) {
         if let session {
             self.session = session
         } else {
@@ -42,27 +54,64 @@ final class SixteenColorsClient {
             self.session = URLSession(configuration: configuration)
         }
         self.cacheFolder = cacheFolder
+        self.cache = DiskCache(folder: cacheFolder, capacity: capacity, excluded: ["packs"])
     }
 
-    /// Waits for its turn, then makes one request with AnsiView's User-Agent.
+    /// One request with AnsiView's User-Agent.
     private func request(_ url: URL) -> URLRequest {
         var request = URLRequest(url: url)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         return request
     }
 
-    /// Waits until a request may start, then records it. A cancelled waiter (the user moved on)
-    /// throws CancellationError and never reaches the network.
-    private func waitForTurn() async throws {
-        while true {
-            try Task.checkCancellation()
-            let delay = spacing.delay(now: ProcessInfo.processInfo.systemUptime)
-            if delay <= 0 { break }
-            try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+    /// Waits in the lane until this request may start (by priority, at least a second after the
+    /// last one), then records it. A cancelled waiter (the user moved on, the row scrolled away)
+    /// leaves the lane, throws CancellationError and never reaches the network.
+    private func waitForTurn(_ priority: RequestLane.Priority) async throws -> TimeInterval {
+        try Task.checkCancellation()
+        let ticket = lane.enqueue(priority)
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled {
+                    lane.cancel(ticket)
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                waiters[ticket] = continuation
+                startPump()
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.leaveLane(ticket) }
         }
-        let now = ProcessInfo.processInfo.systemUptime
-        spacing.started(at: now)
-        requestStarts.append(now)
+        return requestStarts.last ?? ProcessInfo.processInfo.systemUptime
+    }
+
+    private func leaveLane(_ ticket: Int) {
+        lane.cancel(ticket)
+        waiters.removeValue(forKey: ticket)?.resume(throwing: CancellationError())
+    }
+
+    /// Lets waiters go one at a time, a second apart, best priority first.
+    private func startPump() {
+        guard pump == nil else { return }
+        pump = Task { @MainActor [weak self] in
+            while let self {
+                let delay = self.spacing.delay(now: ProcessInfo.processInfo.systemUptime)
+                if delay > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    continue
+                }
+                guard let ticket = self.lane.next() else {
+                    self.pump = nil
+                    return
+                }
+                guard let waiter = self.waiters.removeValue(forKey: ticket) else { continue }
+                let now = ProcessInfo.processInfo.systemUptime
+                self.spacing.started(at: now)
+                self.requestStarts.append(now)
+                waiter.resume()
+            }
+        }
     }
 
     private func check(_ response: URLResponse) throws {
@@ -71,14 +120,72 @@ final class SixteenColorsClient {
         }
     }
 
+    /// Notes whether this failure means 16colo.rs cannot be reached.
+    private func noteFailure(_ error: Error) {
+        if Self.describe(error).offline { isOffline = true }
+    }
+
     private func json(_ url: URL) async throws -> Data {
         if let cached = memory[url] { return cached }
-        try await waitForTurn()
+        let key = SixteenColors.apiCacheName(for: url)
+        do {
+            let start = try await waitForTurn(.user)
+            log.info("GET \(url.absoluteString, privacy: .public)")
+            let (data, response) = try await session.data(for: request(url))
+            requests.append((url, start, data.count))
+            try check(response)
+            memory[url] = data
+            isOffline = false
+            try? cache.store(data, for: key)
+            return data
+        } catch {
+            // Offline: the copy saved last time, if there is one.
+            if Self.describe(error).offline, let saved = cache.data(for: key) {
+                isOffline = true
+                memory[url] = saved
+                return saved
+            }
+            noteFailure(error)
+            throw error
+        }
+    }
+
+    /// A `tn` or `x1` picture: from the disk cache, else downloaded (when its turn comes) and kept.
+    /// Only PNG data is kept; a 404 is remembered for the session.
+    func image(_ url: URL, priority: RequestLane.Priority) async throws -> NSImage {
+        guard let key = SixteenColors.imageCacheName(for: url) else { throw SixteenColors.DecodeError.unreadable }
+        if let saved = cache.data(for: key), let image = NSImage(data: saved) { return image }
+        if missing.contains(url) { throw HTTPError(status: 404) }
+        let start = try await waitForTurn(priority)
         log.info("GET \(url.absoluteString, privacy: .public)")
-        let (data, response) = try await session.data(for: request(url))
-        try check(response)
-        memory[url] = data
-        return data
+        let data: Data
+        do {
+            let (body, response) = try await session.data(for: request(url))
+            requests.append((url, start, body.count))
+            if (response as? HTTPURLResponse)?.statusCode == 404 { missing.insert(url) }
+            try check(response)
+            data = body
+        } catch {
+            noteFailure(error)
+            throw error
+        }
+        isOffline = false
+        guard SixteenColors.isPNG(data), let image = NSImage(data: data) else { throw SixteenColors.DecodeError.unreadable }
+        try? cache.store(data, for: key)
+        return image
+    }
+
+    /// A picture already on disk (no network): for showing at once, and when offline.
+    func cachedImage(_ url: URL) -> NSImage? {
+        guard let key = SixteenColors.imageCacheName(for: url), let data = cache.data(for: key) else { return nil }
+        return NSImage(data: data)
+    }
+
+    /// A pack's file list already known (this session, or saved on disk), without the network.
+    func cachedPack(named name: String) -> SixteenColors.PackDetail? {
+        let url = SixteenColors.packURL(name: name)
+        let data = memory[url] ?? cache.data(for: SixteenColors.apiCacheName(for: url))
+        return data.flatMap { try? SixteenColors.decodePack($0, name: name) }
     }
 
     func years() async throws -> [SixteenColors.Year] {
@@ -104,9 +211,10 @@ final class SixteenColorsClient {
     /// Downloads `url` to `destination` unless it is already there.
     private func download(_ url: URL, to destination: URL) async throws -> URL {
         if FileManager.default.fileExists(atPath: destination.path) { return destination }
-        try await waitForTurn()
+        let start = try await waitForTurn(.user)
         log.info("Download \(url.absoluteString, privacy: .public)")
         let (temporary, response) = try await session.download(for: request(url))
+        requests.append((url, start, (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0))
         try check(response)
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
@@ -127,15 +235,35 @@ final class SixteenColorsClient {
         return try await download(url, to: cacheFolder.appendingPathComponent("packs").appendingPathComponent(name))
     }
 
-    /// One file of a pack, in Caches/16colors/files/<pack>.
-    func downloadFile(_ file: SixteenColors.PackFile, in pack: String) async throws -> URL {
+    /// One file of a pack, in Caches/16colors/files/<pack> (counted in the disk cache's cap).
+    func downloadFile(_ file: SixteenColors.PackFile, in pack: String,
+                      priority: RequestLane.Priority = .user) async throws -> URL {
         guard let url = SixteenColors.rawFileURL(pack: pack, file: file.name),
-              let folder = SixteenColors.packCacheName(pack).map({ ($0 as NSString).deletingPathExtension }),
-              let name = SixteenColors.cacheName(for: file.name) else {
+              let key = SixteenColors.fileCacheName(pack: pack, file: file.name) else {
             throw SixteenColors.DecodeError.unreadable
         }
-        return try await download(url, to: cacheFolder.appendingPathComponent("files")
-            .appendingPathComponent(folder).appendingPathComponent(name))
+        if cache.contains(key) {
+            cache.touch(key)
+            return cache.url(for: key)
+        }
+        let start = try await waitForTurn(priority)
+        log.info("Download \(url.absoluteString, privacy: .public)")
+        do {
+            let (temporary, response) = try await session.download(for: request(url))
+            requests.append((url, start, (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0))
+            try check(response)
+            isOffline = false
+            return try cache.adopt(temporary, for: key)
+        } catch {
+            noteFailure(error)
+            throw error
+        }
+    }
+
+    /// A file already downloaded, without the network.
+    func cachedFile(_ file: SixteenColors.PackFile, in pack: String) -> URL? {
+        guard let key = SixteenColors.fileCacheName(pack: pack, file: file.name), cache.contains(key) else { return nil }
+        return cache.url(for: key)
     }
 
     /// What to tell the user, and whether it looks like no network at all.
