@@ -297,10 +297,15 @@ final class TerminalViewController: NSViewController {
     lazy var hostKeys = HostKeyPrompt(window: { [weak self] in self?.view.window })
     /// Why the SSH key file was not used for this connection.
     private(set) var transportProblem: String?
+    /// Asks keyboard-interactive SSH questions (the harness swaps in one that answers by itself).
+    lazy var sshPrompts = SSHPromptSheet(window: { [weak self] in self?.view.window })
+    /// The weak SSH algorithms this connection uses (shown as a status note).
+    private(set) var sshWeakAlgorithms: [String] = []
 
     /// The app's SSH transport (AnsiCore makes the others).
     private func makeTransport() -> BBSTransport? {
         transportProblem = nil
+        sshWeakAlgorithms = []
         guard entry.mode == .ssh else { return nil }
         let entry = self.entry, passwords = self.passwords
         let ssh = SSHTransport(host: entry.host, port: entry.port, settings: TransportSettings(entry: entry),
@@ -310,6 +315,14 @@ final class TerminalViewController: NSViewController {
         ssh.onLoginProblem = { [weak self] problem in
             self?.transportProblem = problem
             self?.updateStatus()
+        }
+        ssh.onNegotiated = { [weak self] algorithms in
+            self?.sshWeakAlgorithms = algorithms.weakAlgorithms
+            self?.updateStatus()
+        }
+        ssh.askPrompts = { [weak self] question, done in
+            guard let self else { return done(nil) }
+            self.sshPrompts.ask(question, done: done)
         }
         return ssh
     }
@@ -758,6 +771,8 @@ final class TerminalViewController: NSViewController {
                      "\(emulator.columns)x\(emulator.rows)", entry.encoding.label]
         if entry.mode != .telnet { parts.append(entry.mode == .webSocket && entry.webSocketSecure ? "WebSocket (wss)" : entry.mode.label) }
         if let transportProblem { parts.append(transportProblem) }
+        let legacyNote = SSHCompatibility.legacyNote(weakAlgorithms: sshWeakAlgorithms)
+        if let legacyNote { parts.append(legacyNote) }
         if let captureName { parts.append("Capturing to \(captureName)") }
         if scrollOffset > 0 { parts.append("Scrollback -\(scrollOffset)") }
         if let captureProblem { parts.append(captureProblem) }
@@ -765,7 +780,8 @@ final class TerminalViewController: NSViewController {
         if let transferText = transfers.statusText { parts.append(transferText) }
         statusText = parts.joined(separator: "  |  ")
         statusLabel.stringValue = statusText
-        statusLabel.toolTip = statusText
+        statusLabel.toolTip = legacyNote == nil ? statusText
+            : statusText + "\n\n" + SSHCompatibility.legacyExplanation(weakAlgorithms: sshWeakAlgorithms)
     }
 }
 

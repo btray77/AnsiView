@@ -5,7 +5,10 @@
   license; AnsiView's code is MIT. HTML exports embed the matching font file with a credit comment.
 - **WebP encoding:** libwebp by Google, BSD license, via libwebp-Xcode by SDWebImage.
 - **Updates:** Sparkle 2 (https://sparkle-project.org), MIT license, in the direct download build only.
-- **SSH:** swift-nio-ssh 0.15.1 (https://github.com/apple/swift-nio-ssh) and its dependencies
+- **SSH:** swift-nio-ssh 0.15.1 (https://github.com/apple/swift-nio-ssh, commit d1985926), vendored
+  as `Packages/swift-nio-ssh-bbs` with AnsiView's changes for classic BBS servers (Diffie-Hellman
+  key exchange, RSA and DSA host keys, AES-CTR/CBC and 3DES with HMAC, keyboard-interactive login;
+  every change is listed in its `PATCHES.md`; Apache License 2.0, its `LICENSE.txt` kept), and its dependencies
   swift-nio 2.104.0, swift-crypto 5.0.3, swift-atomics 1.3.1, swift-collections 1.7.5,
   swift-system 1.8.1 and swift-asn1 1.7.3, all by Apple and the SwiftNIO / Swift project authors,
   Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0). Used in the app only.

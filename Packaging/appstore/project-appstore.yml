@@ -19,8 +19,7 @@ packages:REPLACE:
     url: https://github.com/SDWebImage/libwebp-Xcode
     exactVersion: 1.6.0
   swift-nio-ssh:
-    url: https://github.com/apple/swift-nio-ssh
-    exactVersion: 0.15.1
+    path: ../../Packages/swift-nio-ssh-bbs
   swift-nio:
     url: https://github.com/apple/swift-nio
     exactVersion: 2.104.0
