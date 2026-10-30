@@ -92,6 +92,7 @@ struct SSHKeyExchangeStateMachine {
     private var initialExchangeBytes: ByteBuffer
     private var protectionSchemes: [NIOSSHTransportProtection.Type]
     private var previousSessionIdentifier: ByteBuffer?
+    private let remoteVersion: String
 
     init(
         allocator: ByteBufferAllocator,
@@ -108,6 +109,7 @@ struct SSHKeyExchangeStateMachine {
         self.state = .idle
         self.protectionSchemes = protectionSchemes
         self.previousSessionIdentifier = previousSessionIdentifier
+        self.remoteVersion = remoteVersion
 
         switch self.role {
         case .client:
@@ -129,7 +131,7 @@ struct SSHKeyExchangeStateMachine {
 
         return .init(
             cookie: rng.randomCookie(allocator: self.allocator),
-            keyExchangeAlgorithms: Self.supportedKeyExchangeAlgorithms,
+            keyExchangeAlgorithms: self.supportedKeyExchangeAlgorithms,
             serverHostKeyAlgorithms: self.supportedHostKeyAlgorithms,
             encryptionAlgorithmsClientToServer: encryptionAlgorithms,
             encryptionAlgorithmsServerToClient: encryptionAlgorithms,
@@ -275,11 +277,26 @@ struct SSHKeyExchangeStateMachine {
         case .awaitingKeyExchangeInit(exchange: let exchanger, let negotiated):
             precondition(self.role.isClient, "Servers must not send ecdh key exchange init messages")
             self.state = .keyExchangeInitSent(exchange: exchanger, negotiated: negotiated)
+        case .keyExchangeInitSent where message.kind == .groupExchangeInit:
+            // AnsiView patch: the group exchange e follows the request in the same state.
+            precondition(self.role.isClient, "Servers must not send group exchange init messages")
         case .idle, .keyExchangeSent, .keyExchangeReceived, .awaitingKeyExchangeInitInvalidGuess, .keyExchangeInitSent,
             .keyExchangeInitReceived, .keysExchanged, .newKeysSent, .newKeysReceived, .complete:
             // This is a precondition not a throw because we control the sending of this message.
             preconditionFailure("Cannot send ECDH key exchange message in state \(self.state)")
         }
+    }
+
+    /// AnsiView patch: RFC 4419 SSH_MSG_KEX_DH_GEX_GROUP, answered with SSH_MSG_KEX_DH_GEX_INIT.
+    mutating func handle(
+        keyExchangeDHGroupExchangeGroup message: SSHMessage.KeyExchangeDHGroupExchangeGroupMessage
+    ) throws -> SSHMultiMessage? {
+        guard case .keyExchangeInitSent(exchange: var exchanger, let negotiated) = self.state, self.role.isClient else {
+            throw SSHKeyExchangeError.unexpectedMessage
+        }
+        let initMessage = try exchanger.receiveGroupExchangeGroup(message)
+        self.state = .keyExchangeInitSent(exchange: exchanger, negotiated: negotiated)
+        return SSHMultiMessage(.keyExchangeInit(initMessage))
     }
 
     mutating func handle(
@@ -289,7 +306,12 @@ struct SSHKeyExchangeStateMachine {
         case .keyExchangeInitSent(exchange: var exchanger, let negotiated):
             switch self.role {
             case .client:
-                guard message.hostKey.keyPrefix.elementsEqual(negotiated.negotiatedHostKeyAlgorithm.utf8) else {
+                // AnsiView patch: rsa-sha2-256/512 use ssh-rsa keys (RFC 8332), and the signature must
+                // be made with the negotiated algorithm (RFC 8332 section 3).
+                let keyType = NIOSSHPublicKey.keyType(forHostKeyAlgorithm: negotiated.negotiatedHostKeyAlgorithm)
+                guard message.hostKey.keyPrefix.elementsEqual(keyType.utf8),
+                    message.signature.algorithmName == negotiated.negotiatedHostKeyAlgorithm
+                else {
                     throw NIOSSHError.invalidHostKeyForKeyExchange(
                         expected: negotiated.negotiatedHostKeyAlgorithm,
                         got: message.hostKey.keyPrefix
@@ -395,7 +417,7 @@ struct SSHKeyExchangeStateMachine {
 
         // We only support symmetrical negotiation results.
         guard clientEncryption == serverEncryption, clientMAC == serverMAC else {
-            throw NIOSSHError.keyExchangeNegotiationFailure
+            throw NIOSSHError.keyExchangeNegotiationFailure("ciphers differ by direction")
         }
 
         // Ok, now we need to find the right transport protection scheme. This can technically fail.
@@ -404,7 +426,20 @@ struct SSHKeyExchangeStateMachine {
                 $0.cipherName == clientEncryption && ($0.macName == nil || $0.macName! == clientMAC)
             })
         else {
-            throw NIOSSHError.keyExchangeNegotiationFailure
+            throw NIOSSHError.keyExchangeNegotiationFailure("cipher \(clientEncryption) with MAC \(clientMAC)")
+        }
+
+        // AnsiView patch: tell the client what was agreed.
+        if case .client(let configuration) = self.role, let observer = configuration.algorithmsNegotiated {
+            observer(
+                NIOSSHNegotiatedAlgorithms(
+                    serverVersion: self.remoteVersion,
+                    keyExchange: String(keyExchange),
+                    hostKey: String(hostKey),
+                    cipher: String(clientEncryption),
+                    mac: scheme.macName
+                )
+            )
         }
 
         // Great, we have a protection scheme. Build the negotiation result.
@@ -451,13 +486,13 @@ struct SSHKeyExchangeStateMachine {
 
         switch self.role {
         case .client:
-            clientAlgorithms = Self.supportedKeyExchangeAlgorithms
+            clientAlgorithms = self.supportedKeyExchangeAlgorithms
             serverAlgorithms = peerKeyExchangeAlgorithms
             clientHostKeyAlgorithms = self.supportedHostKeyAlgorithms
             serverHostKeyAlgorithms = peerHostKeyAlgorithms
         case .server:
             clientAlgorithms = peerKeyExchangeAlgorithms
-            serverAlgorithms = Self.supportedKeyExchangeAlgorithms
+            serverAlgorithms = self.supportedKeyExchangeAlgorithms
             clientHostKeyAlgorithms = peerHostKeyAlgorithms
             serverHostKeyAlgorithms = self.supportedHostKeyAlgorithms
         }
@@ -481,7 +516,13 @@ struct SSHKeyExchangeStateMachine {
         }
 
         // Completed the loop with usable protocols, we have to throw.
-        throw NIOSSHError.keyExchangeNegotiationFailure
+        // AnsiView patch: say which part failed and what the peer offered.
+        let peerAlgorithms = self.role.isClient ? serverAlgorithms : clientAlgorithms
+        let peerHostKeys = self.role.isClient ? serverHostKeyAlgorithms : clientHostKeyAlgorithms
+        if !clientAlgorithms.contains(where: { serverAlgorithms.contains($0) }) {
+            throw NIOSSHError.keyExchangeNegotiationFailure("key exchange: " + peerAlgorithms.joined(separator: ","))
+        }
+        throw NIOSSHError.keyExchangeNegotiationFailure("host key: " + peerHostKeys.joined(separator: ","))
     }
 
     private func negotiatedTransportProtection(
@@ -511,12 +552,19 @@ struct SSHKeyExchangeStateMachine {
         // is in the server's list as well.
         guard let encryption = clientEncryptionAlgorithms.first(where: { serverEncryptionAlgorithms.contains($0) })
         else {
-            throw NIOSSHError.keyExchangeNegotiationFailure
+            let peer = self.role.isClient ? serverEncryptionAlgorithms : clientEncryptionAlgorithms
+            throw NIOSSHError.keyExchangeNegotiationFailure("cipher: " + peer.joined(separator: ","))
         }
 
-        // Ok great, now work out what we negotiated as a MAC.
-        guard let mac = clientMACAlgorithms.first(where: { serverMACAlgorithms.contains($0) }) else {
-            throw NIOSSHError.keyExchangeNegotiationFailure
+        // Ok great, now work out what we negotiated as a MAC. AnsiView patch: AEAD ciphers
+        // (AES-GCM) ignore the MAC, so any MAC the peer lists will do for them.
+        let aead = self.protectionSchemes.contains { $0.cipherName == encryption && $0.macName == nil }
+        guard
+            let mac = clientMACAlgorithms.first(where: { serverMACAlgorithms.contains($0) })
+                ?? (aead ? (self.role.isClient ? serverMACAlgorithms : clientMACAlgorithms).first : nil)
+        else {
+            let peer = self.role.isClient ? serverMACAlgorithms : clientMACAlgorithms
+            throw NIOSSHError.keyExchangeNegotiationFailure("MAC: " + peer.joined(separator: ","))
         }
 
         return (encryption, mac)
@@ -553,7 +601,7 @@ struct SSHKeyExchangeStateMachine {
     private func expectingIncorrectGuess(_ kexMessage: SSHMessage.KeyExchangeMessage) -> Bool {
         // A guess is wrong if the key exchange algorithm and/or the host key algorithm differ from our preference.
         kexMessage.firstKexPacketFollows
-            && (kexMessage.keyExchangeAlgorithms.first != Self.supportedKeyExchangeAlgorithms.first
+            && (kexMessage.keyExchangeAlgorithms.first != self.supportedKeyExchangeAlgorithms.first
                 || kexMessage.serverHostKeyAlgorithms.first != self.supportedHostKeyAlgorithms.first)
     }
 
@@ -567,14 +615,37 @@ struct SSHKeyExchangeStateMachine {
         }
     }
 
+    /// AnsiView patch: the key exchange methods offered by this peer, in order of preference: the
+    /// configured list (known names only) or all of them; a server never offers group exchange.
+    private var supportedKeyExchangeAlgorithms: [Substring] {
+        let known: [Substring]
+        let configured: [String]?
+        switch self.role {
+        case .client(let configuration):
+            known = Self.supportedKeyExchangeAlgorithms
+            configured = configuration.keyExchangeAlgorithms
+        case .server(let configuration):
+            known = Self.supportedKeyExchangeAlgorithms.filter { !$0.hasPrefix("diffie-hellman-group-exchange") }
+            configured = configuration.keyExchangeAlgorithms
+        }
+        guard let configured else { return known }
+        return configured.map { Substring($0) }.filter { known.contains($0) }
+    }
+
     /// The encryption algorithms supported by this peer, in order of preference.
+    /// AnsiView patch: each name once (one scheme per cipher and MAC pair).
     private var supportedEncryptionAlgorithms: [Substring] {
-        self.protectionSchemes.map { Substring($0.cipherName) }
+        Self.unique(self.protectionSchemes.map { Substring($0.cipherName) })
+    }
+
+    private static func unique(_ names: [Substring]) -> [Substring] {
+        var seen = Set<Substring>()
+        return names.filter { seen.insert($0).inserted }
     }
 
     /// The MAC algorithms supported by this peer, in order of preference.
     private var supportedMacAlgorithms: [Substring] {
-        let schemes = self.protectionSchemes.compactMap { $0.macName.map { Substring($0) } }
+        let schemes = Self.unique(self.protectionSchemes.compactMap { $0.macName.map { Substring($0) } })
 
         // We do a weird thing here: if there are no MAC schemes, we lie and put one in. This is
         // because some schemes (such as AES-GCM in OpenSSH mode) ignore the MAC negotiation.
@@ -589,11 +660,19 @@ struct SSHKeyExchangeStateMachine {
 
 extension SSHKeyExchangeStateMachine {
     // For now this is a static list.
+    // AnsiView patch: modern first (curve25519, then the NIST curves), then finite field
+    // Diffie-Hellman for older BBS servers, weakest last (PATCHES.md).
     static let supportedKeyExchangeImplementations: [EllipticCurveKeyExchangeProtocol.Type] = [
+        EllipticCurveKeyExchange<Curve25519.KeyAgreement.PrivateKey>.self,
         EllipticCurveKeyExchange<P384.KeyAgreement.PrivateKey>.self,
         EllipticCurveKeyExchange<P256.KeyAgreement.PrivateKey>.self,
         EllipticCurveKeyExchange<P521.KeyAgreement.PrivateKey>.self,
-        EllipticCurveKeyExchange<Curve25519.KeyAgreement.PrivateKey>.self,
+        FiniteFieldDiffieHellmanKeyExchange<DHGroup16SHA512>.self,
+        FiniteFieldDiffieHellmanKeyExchange<DHGroupExchangeSHA256>.self,
+        FiniteFieldDiffieHellmanKeyExchange<DHGroup14SHA256>.self,
+        FiniteFieldDiffieHellmanKeyExchange<DHGroup14SHA1>.self,
+        FiniteFieldDiffieHellmanKeyExchange<DHGroupExchangeSHA1>.self,
+        FiniteFieldDiffieHellmanKeyExchange<DHGroup1SHA1>.self,
     ]
 
     static let supportedKeyExchangeAlgorithms: [Substring] = supportedKeyExchangeImplementations.flatMap {
@@ -603,6 +682,8 @@ extension SSHKeyExchangeStateMachine {
     /// All known host key algorithms.
     static let supportedServerHostKeyAlgorithms: [Substring] = [
         "ssh-ed25519", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp521",
+        // AnsiView patch: verification only, RSA (RFC 8332 first) then DSA.
+        "rsa-sha2-512", "rsa-sha2-256", "ssh-rsa", "ssh-dss",
     ]
 }
 

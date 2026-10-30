@@ -50,6 +50,16 @@ extension AcceptsKeyExchangeMessages {
         return .possibleFutureMessage(message)
     }
 
+    /// AnsiView patch: RFC 4419 group.
+    mutating func receiveKeyExchangeDHGroupExchangeGroupMessage(
+        _ message: SSHMessage.KeyExchangeDHGroupExchangeGroupMessage
+    ) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
+        if let message = try self.keyExchangeStateMachine.handle(keyExchangeDHGroupExchangeGroup: message) {
+            return .emitMessage(message)
+        }
+        return .noMessage
+    }
+
     mutating func receiveNewKeysMessage() throws {
         // Received a new keys message. Apply the encryption keys to the parser.
         let result = try self.keyExchangeStateMachine.handleNewKeys()

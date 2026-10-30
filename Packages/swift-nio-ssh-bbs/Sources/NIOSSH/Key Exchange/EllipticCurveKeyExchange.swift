@@ -45,6 +45,19 @@ protocol EllipticCurveKeyExchangeProtocol: _NIOSSHSendableMetatype {
     ) throws -> KeyExchangeResult
 
     static var keyExchangeAlgorithmNames: [Substring] { get }
+
+    /// AnsiView patch: RFC 4419 group exchange, client side (only the DH group exchange does this).
+    mutating func receiveGroupExchangeGroup(
+        _ message: SSHMessage.KeyExchangeDHGroupExchangeGroupMessage
+    ) throws -> SSHMessage.KeyExchangeECDHInitMessage
+}
+
+extension EllipticCurveKeyExchangeProtocol {
+    mutating func receiveGroupExchangeGroup(
+        _ message: SSHMessage.KeyExchangeDHGroupExchangeGroupMessage
+    ) throws -> SSHMessage.KeyExchangeECDHInitMessage {
+        throw NIOSSHError.protocolViolation(protocolName: "key exchange", violation: "unexpected group exchange group")
+    }
 }
 
 struct EllipticCurveKeyExchange<PrivateKey: ECDHCompatiblePrivateKey>: EllipticCurveKeyExchangeProtocol {
@@ -333,13 +346,11 @@ extension EllipticCurveKeyExchange {
         sessionID: ByteBuffer,
         expectedKeySize: Int
     ) -> [UInt8] {
-        assert(expectedKeySize <= PrivateKey.Hasher.Digest.byteCount)
-        return Array(
-            self.generateSpecificHash(
-                baseHasher: baseHasher,
-                discriminatorByte: UInt8(ascii: "A"),
-                sessionID: sessionID
-            ).prefix(expectedKeySize)
+        return self.generateSpecificHash(
+            baseHasher: baseHasher,
+            discriminatorByte: UInt8(ascii: "A"),
+            sessionID: sessionID,
+            length: expectedKeySize
         )
     }
 
@@ -348,13 +359,11 @@ extension EllipticCurveKeyExchange {
         sessionID: ByteBuffer,
         expectedKeySize: Int
     ) -> [UInt8] {
-        assert(expectedKeySize <= PrivateKey.Hasher.Digest.byteCount)
-        return Array(
-            self.generateSpecificHash(
-                baseHasher: baseHasher,
-                discriminatorByte: UInt8(ascii: "B"),
-                sessionID: sessionID
-            ).prefix(expectedKeySize)
+        return self.generateSpecificHash(
+            baseHasher: baseHasher,
+            discriminatorByte: UInt8(ascii: "B"),
+            sessionID: sessionID,
+            length: expectedKeySize
         )
     }
 
@@ -363,14 +372,13 @@ extension EllipticCurveKeyExchange {
         sessionID: ByteBuffer,
         expectedKeySize: Int
     ) -> SymmetricKey {
-        assert(expectedKeySize <= PrivateKey.Hasher.Digest.byteCount)
-        return SymmetricKey.truncatingDigest(
-            self.generateSpecificHash(
+        return SymmetricKey(
+            data: self.generateSpecificHash(
                 baseHasher: baseHasher,
                 discriminatorByte: UInt8(ascii: "C"),
-                sessionID: sessionID
-            ),
-            length: expectedKeySize
+                sessionID: sessionID,
+                length: expectedKeySize
+            )
         )
     }
 
@@ -379,14 +387,13 @@ extension EllipticCurveKeyExchange {
         sessionID: ByteBuffer,
         expectedKeySize: Int
     ) -> SymmetricKey {
-        assert(expectedKeySize <= PrivateKey.Hasher.Digest.byteCount)
-        return SymmetricKey.truncatingDigest(
-            self.generateSpecificHash(
+        return SymmetricKey(
+            data: self.generateSpecificHash(
                 baseHasher: baseHasher,
                 discriminatorByte: UInt8(ascii: "D"),
-                sessionID: sessionID
-            ),
-            length: expectedKeySize
+                sessionID: sessionID,
+                length: expectedKeySize
+            )
         )
     }
 
@@ -395,14 +402,13 @@ extension EllipticCurveKeyExchange {
         sessionID: ByteBuffer,
         expectedKeySize: Int
     ) -> SymmetricKey {
-        assert(expectedKeySize <= PrivateKey.Hasher.Digest.byteCount)
-        return SymmetricKey.truncatingDigest(
-            self.generateSpecificHash(
+        return SymmetricKey(
+            data: self.generateSpecificHash(
                 baseHasher: baseHasher,
                 discriminatorByte: UInt8(ascii: "E"),
-                sessionID: sessionID
-            ),
-            length: expectedKeySize
+                sessionID: sessionID,
+                length: expectedKeySize
+            )
         )
     }
 
@@ -411,26 +417,30 @@ extension EllipticCurveKeyExchange {
         sessionID: ByteBuffer,
         expectedKeySize: Int
     ) -> SymmetricKey {
-        assert(expectedKeySize <= PrivateKey.Hasher.Digest.byteCount)
-        return SymmetricKey.truncatingDigest(
-            self.generateSpecificHash(
+        return SymmetricKey(
+            data: self.generateSpecificHash(
                 baseHasher: baseHasher,
                 discriminatorByte: UInt8(ascii: "F"),
-                sessionID: sessionID
-            ),
-            length: expectedKeySize
+                sessionID: sessionID,
+                length: expectedKeySize
+            )
         )
     }
 
+    // AnsiView patch: RFC 4253 section 7.2 key extension (K2 = HASH(K || H || K1) ...) so keys longer
+    // than the digest (hmac-sha2-512 after SHA-256) are derived correctly instead of truncated.
     private func generateSpecificHash(
         baseHasher: PrivateKey.Hasher,
         discriminatorByte: UInt8,
-        sessionID: ByteBuffer
-    ) -> PrivateKey.Hasher.Digest {
-        var localHasher = baseHasher
-        localHasher.update(byte: discriminatorByte)
-        localHasher.update(data: sessionID.readableBytesView)
-        return localHasher.finalize()
+        sessionID: ByteBuffer,
+        length: Int
+    ) -> [UInt8] {
+        SSHKeyDerivation.expand(
+            baseHasher,
+            letter: discriminatorByte,
+            sessionID: sessionID.readableBytesView,
+            length: length
+        )
     }
 }
 

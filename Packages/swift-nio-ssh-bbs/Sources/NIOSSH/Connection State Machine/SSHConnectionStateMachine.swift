@@ -163,6 +163,11 @@ struct SSHConnectionStateMachine {
                         let result = try state.receiveKeyExchangeReplyMessage(message)
                         self = .keyExchange(state)
                         return result
+                    case .keyExchangeDHGroupExchangeGroup(let message):
+                        // AnsiView patch: RFC 4419 group.
+                        let result = try state.receiveKeyExchangeDHGroupExchangeGroupMessage(message)
+                        self = .keyExchange(state)
+                        return result
                     case .newKeys:
                         try state.receiveNewKeysMessage()
                         self = .receivedNewKeys(.init(keyExchangeState: state, loop: loop))
@@ -220,6 +225,11 @@ struct SSHConnectionStateMachine {
                         return result
                     case .keyExchangeReply(let message):
                         let result = try state.receiveKeyExchangeReplyMessage(message)
+                        self = .sentNewKeys(state)
+                        return result
+                    case .keyExchangeDHGroupExchangeGroup(let message):
+                        // AnsiView patch: RFC 4419 group.
+                        let result = try state.receiveKeyExchangeDHGroupExchangeGroupMessage(message)
                         self = .sentNewKeys(state)
                         return result
                     case .newKeys:
@@ -605,6 +615,11 @@ struct SSHConnectionStateMachine {
                         let result = try state.receiveKeyExchangeReplyMessage(message)
                         self = .rekeying(state)
                         return result
+                    case .keyExchangeDHGroupExchangeGroup(let message):
+                        // AnsiView patch: RFC 4419 group.
+                        let result = try state.receiveKeyExchangeDHGroupExchangeGroupMessage(message)
+                        self = .rekeying(state)
+                        return result
                     case .newKeys:
                         try state.receiveNewKeysMessage()
                         let newState = RekeyingReceivedNewKeysState(state)
@@ -734,6 +749,11 @@ struct SSHConnectionStateMachine {
                         return result
                     case .keyExchangeReply(let message):
                         let result = try state.receiveKeyExchangeReplyMessage(message)
+                        self = .rekeyingSentNewKeysState(state)
+                        return result
+                    case .keyExchangeDHGroupExchangeGroup(let message):
+                        // AnsiView patch: RFC 4419 group.
+                        let result = try state.receiveKeyExchangeDHGroupExchangeGroupMessage(message)
                         self = .rekeyingSentNewKeysState(state)
                         return result
                     case .newKeys:

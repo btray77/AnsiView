@@ -26,6 +26,13 @@ public struct SSHClientConfiguration {
     /// Supported data encryption algorithms
     public var transportProtectionSchemes: [NIOSSHTransportProtection.Type]
 
+    /// AnsiView patch: the key exchange methods to offer, in order (nil: all, modern first).
+    /// Unknown names are ignored.
+    public var keyExchangeAlgorithms: [String]? = nil
+
+    /// AnsiView patch: called on the event loop after each key exchange negotiation.
+    public var algorithmsNegotiated: (@Sendable (NIOSSHNegotiatedAlgorithms) -> Void)? = nil
+
     /// The maximum size, in bytes, of a channel data payload this peer is willing to receive (the
     /// "maximum packet size" of an SSH channel, RFC 4254 §5.1). It is advertised to the remote peer
     /// when opening channels and bounds inbound encrypted packets. Defaults to `1 << 17` (128 KiB).
