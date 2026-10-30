@@ -9,7 +9,10 @@ extension UTType {
 
 /// Read only document holding the file's bytes.
 struct AnsiDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.ansiArt] }
+    /// .bin and .adf belong to other system types; AnsiView opens them as an alternate viewer.
+    static var readableContentTypes: [UTType] {
+        [.ansiArt, UTType("com.apple.macbinary-archive"), UTType("com.amiga.adf-archive")].compactMap { $0 }
+    }
 
     let source: ArtFile
 

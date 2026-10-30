@@ -47,6 +47,9 @@ public struct RenderedAnsi {
 
 /// Draws an AnsiScreen as a text mode bitmap.
 public enum AnsiRenderer {
+    /// Upper bound on a rendered image, in bytes (4 per pixel).
+    public static let maxImageBytes = 160_000_000
+
     /// Scale used for a screen of this height: 2x normally, 1x for very tall files to bound memory.
     public static func preferredScale(rows: Int) -> Int {
         rows <= 250 ? 2 : 1
@@ -59,17 +62,27 @@ public enum AnsiRenderer {
     }
 
     public static func render(_ screen: AnsiScreen, options: RenderOptions) -> RenderedAnsi? {
-        let rowCount = max(1, screen.rows.count)
-        let scale = max(1, options.scale)
+        let cellWidth = options.font.width + (options.ninePixel ? 1 : 0)
+        let artWidth = screen.columns * cellWidth
+        let artHeight = max(1, screen.rows.count) * options.font.height
+        // Stay inside maxImageBytes: lower the scale first, then draw only the rows that fit.
+        var scale = max(1, options.scale)
+        while scale > 1, artWidth * scale * artHeight * scale * 4 > maxImageBytes { scale -= 1 }
+        let rowsThatFit = max(1, maxImageBytes / (4 * artWidth * options.font.height))
+        let rowCount = min(max(1, screen.rows.count), rowsThatFit)
         let masks = GlyphMasks.shared(font: options.font, ninePixel: options.ninePixel, scale: scale)
         let cw = masks.cellWidth * scale
         let ch = options.font.height * scale
         let width = screen.columns * cw
         let height = rowCount * ch
 
-        var pixels = [UInt32](repeating: packed(Palette.vga[0]), count: width * height)
-        pixels.withUnsafeMutableBufferPointer { out in
-            for (rowIndex, row) in screen.rows.enumerated() {
+        // The provider takes ownership of this buffer, so the image is never copied.
+        let count = width * height
+        let buffer = UnsafeMutablePointer<UInt32>.allocate(capacity: count)
+        buffer.initialize(repeating: packed(Palette.vga[0]), count: count)
+        do {
+            let out = UnsafeMutableBufferPointer(start: buffer, count: count)
+            for (rowIndex, row) in screen.rows.prefix(rowCount).enumerated() {
                 for (colIndex, cell) in row.enumerated() where colIndex < screen.columns {
                     let hidden = cell.blink && !options.blinkVisible
                     let mask = hidden ? masks.mask(for: 0x20)
@@ -89,8 +102,9 @@ public enum AnsiRenderer {
             }
         }
 
-        let data = pixels.withUnsafeBufferPointer { Data(buffer: $0) }
-        guard let provider = CGDataProvider(data: data as CFData),
+        guard let provider = CGDataProvider(
+                dataInfo: nil, data: buffer, size: count * 4,
+                releaseData: { _, data, _ in data.assumingMemoryBound(to: UInt32.self).deallocate() }),
               let space = CGColorSpace(name: CGColorSpace.sRGB),
               let image = CGImage(
                 width: width, height: height,

@@ -1,6 +1,9 @@
 /// Translates BBS specific color code formats into ANSI escape sequences, so they play
 /// (and animate) through `AnsiTerminal` like any ANSI file.
 public enum BBSCodes {
+    /// Upper bound on translated output, so repeat commands cannot expand without limit.
+    public static let maxOutputBytes = 8_000_000
+
     private static let escape: [UInt8] = [0x1B, 0x5B]
 
     /// PCBoard: "@Xbf" sets background b and foreground f (hex); "@CLS@" clears the screen.
@@ -48,14 +51,16 @@ public enum BBSCodes {
         out.reserveCapacity(bytes.count)
         var attribute: UInt8 = 0x07
         var i = 0
-        while i < bytes.count {
+        while i < bytes.count, out.count < maxOutputBytes {
             let b = bytes[i]
+            // 0x1A is end of file only in text position; as a parameter it is an ordinary value.
+            if b == 0x1A { break }
             if b == 0x0C {
                 attribute = 0x03
                 out += clearScreen + sgr(attribute: attribute)
                 i += 1
             } else if b == 0x19, i + 2 < bytes.count {
-                out += [UInt8](repeating: bytes[i + 1], count: Int(bytes[i + 2]))
+                out += [UInt8](repeating: bytes[i + 1], count: min(Int(bytes[i + 2]), maxOutputBytes - out.count))
                 i += 3
             } else if b == 0x16, i + 1 < bytes.count {
                 let command = bytes[i + 1]

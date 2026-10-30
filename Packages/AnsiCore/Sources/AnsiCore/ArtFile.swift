@@ -50,10 +50,14 @@ public enum ArtFormat: Equatable {
         case "avt": return .avatar
         default: break
         }
-        let head = bytes.prefix(65_536)
-        if containsPCBoardCode(head) { return .pcboard }
-        if containsWildcatCode(head) { return .wildcat }
-        if containsAvatarCode(head) { return .avatar }
+        // Art extensions are trusted: an "@" in ASCII art must not turn it into a BBS format.
+        let artExtensions: Set<String> = ["ans", "asc", "nfo", "diz", "ice"]
+        if !artExtensions.contains(fileExtension?.lowercased() ?? "") {
+            let head = bytes.prefix(65_536)
+            if isConvincing(codeOffsets(head, matching: isPCBoardCode)) { return .pcboard }
+            if isConvincing(codeOffsets(head, matching: isWildcatCode)) { return .wildcat }
+            if isConvincing(codeOffsets(head, matching: isAvatarCode)) { return .avatar }
+        }
         if isUTF8WithMultibyte(bytes) { return .utf8Ansi }
         return .ansi
     }
@@ -62,34 +66,35 @@ public enum ArtFormat: Equatable {
         (0x30...0x39).contains(b) || (0x41...0x46).contains(b) || (0x61...0x66).contains(b)
     }
 
-    /// "@X" followed by two hex digits.
-    private static func containsPCBoardCode(_ b: ArraySlice<UInt8>) -> Bool {
+    /// A file really uses a code format when a code appears near the start or several times.
+    private static func isConvincing(_ offsets: [Int]) -> Bool {
+        offsets.count >= 3 || (offsets.first.map { $0 < 256 } ?? false)
+    }
+
+    /// Offsets (from the start) of up to three codes.
+    private static func codeOffsets(_ b: ArraySlice<UInt8>, matching test: (ArraySlice<UInt8>, Int) -> Bool) -> [Int] {
+        var found: [Int] = []
         var i = b.startIndex
-        while i + 3 < b.endIndex {
-            if b[i] == 0x40, b[i + 1] == 0x58, isHex(b[i + 2]), isHex(b[i + 3]) { return true }
+        while i < b.endIndex, found.count < 3 {
+            if test(b, i) { found.append(i - b.startIndex) }
             i += 1
         }
-        return false
+        return found
+    }
+
+    /// "@X" followed by two hex digits.
+    private static func isPCBoardCode(_ b: ArraySlice<UInt8>, _ i: Int) -> Bool {
+        i + 3 < b.endIndex && b[i] == 0x40 && b[i + 1] == 0x58 && isHex(b[i + 2]) && isHex(b[i + 3])
     }
 
     /// "@", two hex digits, "@".
-    private static func containsWildcatCode(_ b: ArraySlice<UInt8>) -> Bool {
-        var i = b.startIndex
-        while i + 3 < b.endIndex {
-            if b[i] == 0x40, isHex(b[i + 1]), isHex(b[i + 2]), b[i + 3] == 0x40 { return true }
-            i += 1
-        }
-        return false
+    private static func isWildcatCode(_ b: ArraySlice<UInt8>, _ i: Int) -> Bool {
+        i + 3 < b.endIndex && b[i] == 0x40 && isHex(b[i + 1]) && isHex(b[i + 2]) && b[i + 3] == 0x40
     }
 
     /// Avatar's set attribute command, ^V^A.
-    private static func containsAvatarCode(_ b: ArraySlice<UInt8>) -> Bool {
-        var i = b.startIndex
-        while i + 1 < b.endIndex {
-            if b[i] == 0x16, b[i + 1] == 0x01 { return true }
-            i += 1
-        }
-        return false
+    private static func isAvatarCode(_ b: ArraySlice<UInt8>, _ i: Int) -> Bool {
+        i + 1 < b.endIndex && b[i] == 0x16 && b[i + 1] == 0x01
     }
 
     /// Valid UTF-8 containing at least one multibyte sequence. CP437 art with high bytes is
@@ -131,7 +136,8 @@ public struct ArtFile {
         let (sauce, contentLength) = Sauce.read(raw)
         var body = Array(raw.prefix(contentLength))
         let format = ArtFormat.detect(bytes: body, fileExtension: fileExtension, sauce: sauce)
-        if format.isStream, let eof = body.firstIndex(of: 0x1A) {
+        // Avatar uses 0x1A as a parameter value, so its translator finds end of file itself.
+        if format.isStream, format != .avatar, let eof = body.firstIndex(of: 0x1A) {
             // DOS end of file marker; anything after it is padding.
             body.removeSubrange(eof...)
         }

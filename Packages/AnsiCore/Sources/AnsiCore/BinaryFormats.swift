@@ -16,6 +16,9 @@ public enum BinaryFormats {
         let height = Int(bytes[7]) | Int(bytes[8]) << 8
         let fontHeight = Int(bytes[9])
         let flags = bytes[10]
+        // Same believable width range as SAUCE; a hostile header must not size the screen.
+        guard (1...1000).contains(width), height > 0 else { throw LoadError.truncated }
+        if flags & 0x02 != 0, !(1...32).contains(fontHeight) { throw LoadError.truncated }
         var offset = 11
         var palette = Palette.vga
         if flags & 0x01 != 0 {
@@ -33,7 +36,7 @@ public enum BinaryFormats {
             offset += length
         }
         let ice = flags & 0x08 != 0
-        let cellCount = min(width * height, width * AnsiTerminal.maxRows)
+        let cellCount = width * min(height, AnsiTerminal.maxRows)
         var pairs: [UInt8]
         if flags & 0x04 != 0 {
             pairs = decompressXBin(bytes[offset...], cells: cellCount)
