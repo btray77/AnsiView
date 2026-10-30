@@ -5,3 +5,6 @@ AnsiView.xcodeproj/
 *.xcuserstate
 xcuserdata/
 Packaging/appstore/AnsiViewAppStore.xcodeproj/
+
+# Agent worktrees
+.claude/
