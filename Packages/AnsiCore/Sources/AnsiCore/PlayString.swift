@@ -269,6 +269,10 @@ public enum PlayString {
                     tokens.append("P\(length)\(dotText)")
                     continue
                 }
+                if semitone / 12 != state.octave {
+                    state.octave = semitone / 12
+                    tokens.append("O\(state.octave)")
+                }
                 var suffix = ""
                 if length != state.length {
                     // Change L when the next note uses the same length too, else use a suffix.
@@ -278,10 +282,6 @@ public enum PlayString {
                     } else {
                         suffix = "\(length)"
                     }
-                }
-                if semitone / 12 != state.octave {
-                    state.octave = semitone / 12
-                    tokens.append("O\(state.octave)")
                 }
                 tokens.append(names[semitone % 12] + suffix + dotText)
             }
