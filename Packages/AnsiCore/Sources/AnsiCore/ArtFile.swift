@@ -59,7 +59,10 @@ public enum ArtFormat: Equatable {
             if isConvincing(codeOffsets(head, matching: isWildcatCode)) { return .wildcat }
             if isConvincing(codeOffsets(head, matching: isAvatarCode)) { return .avatar }
         }
-        if isUTF8WithMultibyte(bytes) { return .utf8Ansi }
+        // A SAUCE font name means a code page font (AnsiView's editor always writes one), so short
+        // CP437 art that happens to be valid UTF-8 (box characters such as C4 BF) stays CP437.
+        let namesFont = !(sauce?.fontName.isEmpty ?? true)
+        if !namesFont, isUTF8WithMultibyte(bytes) { return .utf8Ansi }
         return .ansi
     }
 

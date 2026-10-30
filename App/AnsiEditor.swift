@@ -15,8 +15,12 @@ final class EditorCanvasView: NSView {
     var zoom: CGFloat = 2 { didSet { refresh() } }
     var pasteboard = NSPasteboard.general
 
-    private var image: CGImage?
-    private var renderedCanvas: EditCanvas?
+    /// Rows are rendered in bands, so a big canvas never hits the renderer's image size limit
+    /// and a change re-renders only the bands it touched (and only when they are visible).
+    static let bandRows = 32
+    private var bandImages: [Int: CGImage] = [:]
+    private var bandSources: [Int: ArraySlice<[AnsiCell]>] = [:]
+    private var bandKey = ""
     private var dragAnchor: (x: Int, y: Int)?
     /// The last half block pixel painted in this stroke (column, half row), to fill gaps on fast drags.
     private var lastPixel: (x: Int, y: Int)?
@@ -45,13 +49,14 @@ final class EditorCanvasView: NSView {
                width: cellSize.width, height: cellSize.height)
     }
 
-    /// Re-renders when the cells changed, resizes to the canvas and redraws.
+    /// Resizes to the canvas and redraws; bands whose rows changed are re-rendered when drawn.
     func refresh() {
         let canvas = editor.canvas
-        if renderedCanvas != canvas {
-            let screen = canvas.screen(trimmed: false)
-            image = AnsiRenderer.render(screen, options: RenderOptions(font: canvas.font, scale: 1))?.image
-            renderedCanvas = canvas
+        let key = "\(canvas.columns)|\(canvas.fontName)"
+        if key != bandKey {
+            bandImages.removeAll()
+            bandSources.removeAll()
+            bandKey = key
         }
         let size = NSSize(width: CGFloat(canvas.columns) * cellSize.width, height: CGFloat(canvas.height) * cellSize.height)
         if frame.size != size { setFrameSize(size) }
@@ -61,10 +66,18 @@ final class EditorCanvasView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor.black.setFill()
         bounds.fill()
-        if let image, let context = NSGraphicsContext.current {
-            context.imageInterpolation = .none
-            let drawn = NSRect(x: 0, y: 0, width: CGFloat(image.width) * zoom, height: CGFloat(image.height) * zoom)
-            NSImage(cgImage: image, size: drawn.size).draw(in: drawn)
+        let canvas = editor.canvas
+        NSGraphicsContext.current?.imageInterpolation = .none
+        let bandHeight = CGFloat(Self.bandRows) * cellSize.height
+        let first = max(0, Int(floor(dirtyRect.minY / bandHeight)))
+        let last = min((canvas.height - 1) / Self.bandRows, Int(floor(dirtyRect.maxY / bandHeight)))
+        if first <= last {
+            for band in first...last {
+                guard let image = bandImage(band, canvas: canvas) else { continue }
+                let drawn = NSRect(x: 0, y: CGFloat(band) * bandHeight,
+                                   width: CGFloat(image.width) * zoom, height: CGFloat(image.height) * zoom)
+                NSImage(cgImage: image, size: drawn.size).draw(in: drawn)
+            }
         }
         if let selection = editor.selection {
             let rect = cellRect(column: selection.x, row: selection.y)
@@ -85,11 +98,35 @@ final class EditorCanvasView: NSView {
         NSRect(x: cursor.minX, y: cursor.maxY - max(2, cursor.height / 8), width: cursor.width, height: max(2, cursor.height / 8)).fill()
     }
 
+    /// The rendered rows of one band, re-rendered only when those rows changed.
+    private func bandImage(_ band: Int, canvas: EditCanvas) -> CGImage? {
+        let start = band * Self.bandRows
+        let rows = canvas.rows[start..<min(canvas.height, start + Self.bandRows)]
+        if let cached = bandImages[band], bandSources[band] == rows { return cached }
+        var screen = AnsiScreen(columns: canvas.columns, rows: Array(rows))
+        screen.font = canvas.font
+        let image = AnsiRenderer.render(screen, options: RenderOptions(font: canvas.font, scale: 1))?.image
+        bandImages[band] = image
+        bandSources[band] = rows
+        return image
+    }
+
     func scrollCursorVisible() {
         scrollToVisible(cellRect(column: editor.cursor.x, row: editor.cursor.y).insetBy(dx: -cellSize.width, dy: -cellSize.height))
     }
 
     // MARK: Keyboard
+
+    /// Menu shortcuts without Command (Space for Play / Pause) would otherwise take keys meant
+    /// for the canvas; the key window is asked before the menus, so plain keys are typed here.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.type == .keyDown, window?.firstResponder === self,
+              event.modifierFlags.intersection([.command, .control]).isEmpty else {
+            return super.performKeyEquivalent(with: event)
+        }
+        keyDown(with: event)
+        return true
+    }
 
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command) { super.keyDown(with: event); return }
@@ -508,6 +545,35 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         open.insert(controller)
         controller.showWindow(nil)
         return controller
+    }
+
+    enum UnsavedDecision { case save, discard, cancel }
+
+    /// Asks about every editor with unsaved changes before the app quits. False cancels the quit.
+    static func canTerminate(ask: (EditorWindowController) -> UnsavedDecision = askToSave) -> Bool {
+        for controller in open where controller.editor.isModified {
+            switch ask(controller) {
+            case .save: if !controller.save() { return false }
+            case .discard: continue
+            case .cancel: return false
+            }
+        }
+        return true
+    }
+
+    static func askToSave(_ controller: EditorWindowController) -> UnsavedDecision {
+        controller.window?.makeKeyAndOrderFront(nil)
+        let alert = NSAlert()
+        alert.messageText = "Save changes to \"\(controller.window?.title ?? controller.name)\" before quitting?"
+        alert.informativeText = "Your changes will be lost if you don't save them."
+        alert.addButton(withTitle: "Save...")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Don't Save")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .save
+        case .alertThirdButtonReturn: return .discard
+        default: return .cancel
+        }
     }
 
     /// File > New ANSI Art.

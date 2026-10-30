@@ -193,3 +193,22 @@ func sampleCanvas(trueColor: Bool) -> EditCanvas {
         #expect(SaveFormat.allCases.map(\.fileExtension) == ["ans", "bin", "xb"])
     }
 }
+
+@Suite struct ArtWriterEncodingTests {
+    /// CP437 box characters can form valid UTF-8 ("─┐" is C4 BF); the saved file must still read as CP437.
+    @Test func boxDrawingStaysCP437() throws {
+        var canvas = EditCanvas()
+        canvas.set(AnsiCell(code: 0xC4), x: 0, y: 0)
+        canvas.set(AnsiCell(code: 0xBF), x: 1, y: 0)
+        let data = try ArtWriter.data(canvas, format: .ansi)
+        let file = ArtFile(data: data, fileExtension: "ans")
+        #expect(file.format == .ansi)
+        let back = reopened(data, ext: "ans")
+        #expect(back.rows[0][0].code == 0xC4 && back.rows[0][1].code == 0xBF)
+    }
+
+    /// UTF-8 art without a SAUCE font name is still detected as UTF-8.
+    @Test func utf8ArtStillDetected() {
+        #expect(ArtFile(data: Data("\u{1B}[31m─┐ héllo".utf8), fileExtension: "ans").format == .utf8Ansi)
+    }
+}

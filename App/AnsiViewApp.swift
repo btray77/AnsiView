@@ -36,8 +36,16 @@ private func send(_ action: Selector) {
     NSApp.sendAction(action, to: nil, from: nil)
 }
 
+/// Asks about unsaved editor windows on Quit (they are not documents, so AppKit would not).
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        EditorWindowController.canTerminate() ? .terminateNow : .terminateCancel
+    }
+}
+
 @main
 struct AnsiViewApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage(PlaybackSpeed.defaultsKey, store: PlaybackSpeed.defaults)
     private var baud = PlaybackSpeed.defaultBaud
     @AppStorage(PlaybackSpeed.crtEffectKey, store: PlaybackSpeed.defaults)
