@@ -1,3 +1,5 @@
+import Foundation
+
 /// How a BBS's text bytes are read: DOS code page 437 (the BBS norm) or UTF-8.
 public enum TextEncoding: String, Codable, CaseIterable {
     case cp437, utf8
@@ -92,6 +94,15 @@ public struct TerminalEmulator {
     /// ever scrolled into the scrollback).
     private var placedImages: [PlacedTerminalImage] = []
     private var scrolledLines = 0
+    /// Mouse reporting asked for by the BBS: 9 (X10, presses only), 1000 (presses and releases),
+    /// 0 off; SGR coordinates (1006).
+    public private(set) var mouseTracking = 0
+    private var sgrMouse = false
+    /// CTerm loadable fonts by slot (`DCS CTerm:Font:n:<base64> ST`) and the one selected for the
+    /// primary font with `CSI 0 ; n SP D`.
+    private var loadedFonts: [Int: BitmapFont] = [:]
+    private var selectedFont: BitmapFont?
+    var selectedFontForEngine: BitmapFont? { selectedFont }
     /// The character cell in pixels, for sizing pictures (the app sets it from its font).
     public var imageCellSize = (width: 8, height: 16)
 
@@ -352,7 +363,10 @@ public struct TerminalEmulator {
         controlBuffer = []
         controlOverflow = false
         guard !overflow, !body.isEmpty else { return }
-        if kind == UInt8(ascii: "P"), let image = SixelDecoder.decode(body) {
+        let fontPrefix = Array("CTerm:Font:".utf8)
+        if kind == UInt8(ascii: "P"), body.starts(with: fontPrefix) {
+            loadFont(Array(body.dropFirst(fontPrefix.count)))
+        } else if kind == UInt8(ascii: "P"), let image = SixelDecoder.decode(body) {
             place(image, columns: nil, rows: nil)
         } else if kind == UInt8(ascii: "]"), let request = ITerm2Image.parse(body), request.inline,
                   let image = ITerm2Image.decode(request.data) {
@@ -372,6 +386,31 @@ public struct TerminalEmulator {
             if h == nil, let w { h = w * image.height / max(1, image.width) }
             place(image, columns: (w! + cw - 1) / cw, rows: (h! + ch - 1) / ch)
         }
+    }
+
+    /// A CTerm loadable font: `slot:base64`, 8 pixels wide, its height from the size (8, 14 or 16).
+    private mutating func loadFont(_ text: [UInt8]) {
+        guard let colon = text.firstIndex(of: UInt8(ascii: ":")),
+              let slot = Int(String(decoding: text[..<colon], as: UTF8.self)), (0...255).contains(slot),
+              let data = Data(base64Encoded: Data(text[(colon + 1)...]), options: .ignoreUnknownCharacters) else { return }
+        let heights = [2048: 8, 3584: 14, 4096: 16]
+        guard let height = heights[data.count] else { return }
+        if loadedFonts.count >= 16, loadedFonts[slot] == nil { return }
+        loadedFonts[slot] = BitmapFont(rawGlyphs: [UInt8](data), height: height, name: "CTerm font \(slot)")
+    }
+
+    /// The bytes that report a mouse button (0 left, 1 middle, 2 right) pressed or released at a
+    /// cell (zero based), in the mode the BBS asked for; empty when it asked for none.
+    public mutating func mouse(column: Int, row: Int, button: Int, pressed: Bool) -> [UInt8] {
+        guard mouseTracking != 0 else { return [] }
+        if mouseTracking == 9, !pressed { return [] }
+        if sgrMouse {
+            return Array("\u{1B}[<\(button);\(column + 1);\(row + 1)\(pressed ? "M" : "m")".utf8)
+        }
+        // One byte per coordinate: positions past 222 cannot be sent.
+        guard column + 33 <= 255, row + 33 <= 255 else { return [] }
+        let code = pressed ? button : 3
+        return [0x1B, 0x5B, 0x4D, UInt8(32 + code), UInt8(33 + column), UInt8(33 + row)]
     }
 
     /// Puts a picture at the cursor and moves the cursor to the start of the line below it.
@@ -483,6 +522,8 @@ public struct TerminalEmulator {
                 if value == 7 { autowrap = on; if !on { pendingWrap = false } }
                 if value == 1, profile.isDEC { applicationCursorKeys = on }
                 if value == 33 { iceColors = on }
+                if value == 9 || value == 1000 { mouseTracking = on ? value : 0 }
+                if value == 1006 { sgrMouse = on }
                 if value == 6 {
                     originMode = on
                     row = on ? top : 0
@@ -631,8 +672,14 @@ public struct TerminalEmulator {
         switch (intermediate, final) {
         case (0x20, UInt8(ascii: "D")):
             // CTerm font selection: only the code page 437 fonts (0 and 26, thin) are bundled.
-            let font = parameter(1, 0)
-            fontSelectResult = parameter(0, 0) <= 3 && (font == 0 || font == 26) ? 0 : 1
+            let font = parameter(1, 0), page = parameter(0, 0)
+            if page == 0, let loaded = loadedFonts[font] {
+                selectedFont = loaded
+                fontSelectResult = 0
+            } else {
+                if page == 0, font == 0 || font == 26 { selectedFont = nil }
+                fontSelectResult = page <= 3 && (font == 0 || font == 26) ? 0 : 1
+            }
         case (UInt8(ascii: "*"), UInt8(ascii: "r")):
             let speeds = [0, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 76800, 115200]
             let first = parameter(0, 0), index = parameter(1, 0)
@@ -871,7 +918,7 @@ public struct TerminalEmulator {
     private mutating func reset() {
         let kept = scrollback
         let changes = changeCount, bellCount = bells, keptProfile = profile, ice = entryIceColors
-        let lines = scrolledLines, cell = imageCellSize
+        let lines = scrolledLines, cell = imageCellSize, fonts = loadedFonts
         self = TerminalEmulator(columns: columns, rows: rows, encoding: encoding)
         profile = keptProfile
         iceColors = ice
@@ -879,6 +926,7 @@ public struct TerminalEmulator {
         scrollback = kept
         scrolledLines = lines
         imageCellSize = cell
+        loadedFonts = fonts
         changeCount = changes
         bells = bellCount
     }

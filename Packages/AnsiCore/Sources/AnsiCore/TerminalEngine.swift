@@ -39,6 +39,8 @@ public protocol TerminalEngine {
     mutating func click(x: Int, y: Int) -> [UInt8]
     /// Pictures the BBS sent (sixel, iTerm2), drawn over the text cells they cover.
     func images(scrollOffset: Int) -> [PlacedTerminalImage]
+    /// Mouse reporting (CSI ? 9/1000/1006 h): the bytes for a button at a cell; empty when off.
+    mutating func mouse(column: Int, row: Int, button: Int, pressed: Bool) -> [UInt8]
 }
 
 public extension TerminalEngine {
@@ -52,12 +54,14 @@ public extension TerminalEngine {
     func overlay() -> CGImage? { nil }
     mutating func click(x: Int, y: Int) -> [UInt8] { [] }
     func images(scrollOffset: Int) -> [PlacedTerminalImage] { [] }
+    mutating func mouse(column: Int, row: Int, button: Int, pressed: Bool) -> [UInt8] { [] }
 }
 
 extension TerminalEmulator: TerminalEngine {
     public var scrollbackCount: Int { scrollback.count }
-    /// Amiga boards draw with the Topaz style font; the others use the entry's font.
-    public var font: BitmapFont? { profile == .amiga ? PlatformFonts.topaz : nil }
+    /// Amiga boards draw with the Topaz style font; a CTerm loadable font the BBS selected comes
+    /// next; the others use the entry's font.
+    public var font: BitmapFont? { profile == .amiga ? PlatformFonts.topaz : selectedFontForEngine }
 }
 
 public enum TerminalEngines {
