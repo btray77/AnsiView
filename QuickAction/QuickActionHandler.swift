@@ -12,6 +12,10 @@ final class QuickActionHandler: NSObject, NSExtensionRequestHandling {
         let format = ArtActions.ImageFormat(rawValue: name) ?? .png
         let providers = (context.inputItems as? [NSExtensionItem] ?? []).flatMap { $0.attachments ?? [] }
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        // The file URLs arrive on separate queues; they are gathered first and converted one at a
+        // time, so two pieces with the same name never write the same output.
+        let lock = NSLock()
+        var urls: [URL] = []
         let group = DispatchGroup()
         for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
             group.enter()
@@ -21,18 +25,23 @@ final class QuickActionHandler: NSObject, NSExtensionRequestHandling {
                     log.error("No file: \(String(describing: error), privacy: .public)")
                     return
                 }
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                do {
-                    let written = try QuickActionConversion.convert(url, format: format, fallbackFolder: downloads)
-                    log.info("Wrote \(written.path, privacy: .public)")
-                } catch {
-                    log.error("\(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                }
+                lock.lock()
+                urls.append(url)
+                lock.unlock()
             }
         }
-        group.notify(queue: .main) {
-            context.completeRequest(returningItems: nil, completionHandler: nil)
+        group.notify(queue: .global(qos: .userInitiated)) { [log] in
+            let inputs = urls.sorted { $0.path < $1.path }
+            let scoped = inputs.map { $0.startAccessingSecurityScopedResource() }
+            defer { for (url, started) in zip(inputs, scoped) where started { url.stopAccessingSecurityScopedResource() } }
+            for (input, result) in zip(inputs, QuickActionConversion.convertAll(inputs, format: format, fallbackFolder: downloads)) {
+                switch result {
+                case .success(let written): log.info("Wrote \(written.path, privacy: .public)")
+                case .failure(let error):
+                    log.error("\(input.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            DispatchQueue.main.async { context.completeRequest(returningItems: nil, completionHandler: nil) }
         }
     }
 }

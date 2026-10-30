@@ -27,7 +27,7 @@
 		<key>NSExtensionAttributes</key>
 		<dict>
 			<key>NSExtensionActivationRule</key>
-			<string>SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.ans" OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.asc" OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.apple.macbinary-archive" ).@count &gt;= 1).@count &gt;= 1</string>
+			<string>SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.ans" OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.asc" OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.apple.macbinary-archive" OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.amiga.adf-archive" ).@count &gt;= 1).@count &gt;= 1</string>
 			<key>NSExtensionServiceAllowsFinderPreviewItem</key>
 			<true/>
 			<key>NSExtensionServiceAllowsTouchBarItem</key>

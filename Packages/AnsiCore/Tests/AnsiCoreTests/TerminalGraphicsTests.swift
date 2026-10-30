@@ -130,6 +130,13 @@ private func decodeSixel(_ text: String) -> (width: Int, height: Int, palette: [
         #expect(Data(base64Encoded: payload) == png)
     }
 
+    @Test func kittyChunksAreWholeBase64Quads() {
+        // The protocol needs every chunk but the last to be a multiple of 4 characters.
+        let text = TerminalGraphics.kitty(png: Data((0..<3000).map { UInt8($0 % 256) }), chunkSize: 1001)
+        let chunks = text.components(separatedBy: "\u{1B}\\").filter { !$0.isEmpty }
+        for chunk in chunks.dropLast() { #expect(chunk.split(separator: ";", maxSplits: 1)[1].count % 4 == 0) }
+    }
+
     @Test func kittySingleChunk() {
         let text = TerminalGraphics.kitty(png: Data([1, 2, 3]))
         #expect(text == "\u{1B}_Ga=T,f=100,m=0;AQID\u{1B}\\")

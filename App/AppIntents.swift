@@ -31,7 +31,15 @@ enum ArtTextFormat: String, AppEnum {
 /// Copies an intent's file into a temporary folder under its own name, so the art's extension
 /// (and with it the format) is known.
 private func temporaryCopy(of file: IntentFile) throws -> (url: URL, folder: URL) {
-    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("AnsiView-intent-\(UUID().uuidString)")
+    // A rendered image is handed to Shortcuts from its folder, so folders from earlier runs (more
+    // than an hour old) are removed here instead.
+    let temporary = FileManager.default.temporaryDirectory
+    let old = (try? FileManager.default.contentsOfDirectory(at: temporary, includingPropertiesForKeys: [.creationDateKey])) ?? []
+    for url in old where url.lastPathComponent.hasPrefix("AnsiView-intent-") {
+        let created = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+        if created < Date().addingTimeInterval(-3600) { try? FileManager.default.removeItem(at: url) }
+    }
+    let folder = temporary.appendingPathComponent("AnsiView-intent-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     let name = file.filename.isEmpty ? "art.ans" : (file.filename as NSString).lastPathComponent
     let url = folder.appendingPathComponent(name)

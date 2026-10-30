@@ -105,7 +105,13 @@ final class AnsiSaverView: ScreenSaverView {
                 seed &+= 1
                 playlist = SaverPlaylist.shuffled(playlist, seed: seed)
             }
-            guard let data = try? Data(contentsOf: url) else { continue }
+            guard let data = try? Data(contentsOf: url) else {
+                // Unreadable: dropped, so it is not tried again every frame.
+                playlist.removeAll { $0 == url }
+                if playlist.isEmpty { return }
+                next %= playlist.count
+                continue
+            }
             playback = SaverPlayback(file: ArtFile(data: data, fileExtension: url.pathExtension),
                                      baud: settings.baud, holdSeconds: settings.holdSeconds)
         }

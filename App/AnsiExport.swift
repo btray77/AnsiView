@@ -640,6 +640,9 @@ enum AnsiExporter {
             Thread.sleep(forTimeInterval: 0.005)
         }
         var milliseconds: Int64 = 0
+        // Timestamps come from the running total, not from rounded durations added up, so a long
+        // video does not drift from its sound track.
+        var elapsedSeconds = 0.0
         var lastBuffer: CVPixelBuffer?
         do {
             for (index, frame) in frames.enumerated() {
@@ -668,7 +671,8 @@ enum AnsiExporter {
                     throw AnsiExportError.encodeFailed(writer.error?.localizedDescription ?? "MP4 frame \(index)")
                 }
                 lastBuffer = buffer
-                milliseconds += max(1, Int64((frame.duration * 1000).rounded()))
+                elapsedSeconds += frame.duration
+                milliseconds = max(milliseconds + 1, Int64((elapsedSeconds * 1000).rounded()))
                 progress(Double(index + 1) / Double(frames.count))
             }
             // With a sound track the writer ends the video at its last sample, cutting the final

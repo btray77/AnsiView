@@ -275,6 +275,7 @@ targets:
               ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.ans"
               OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.asc"
               OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.apple.macbinary-archive"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.amiga.adf-archive"
               ).@count >= 1).@count >= 1
             NSExtensionServiceAllowsFinderPreviewItem: true
             NSExtensionServiceAllowsTouchBarItem: false
@@ -322,6 +323,7 @@ targets:
               ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.ans"
               OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.asc"
               OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.apple.macbinary-archive"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.amiga.adf-archive"
               ).@count >= 1).@count >= 1
             NSExtensionServiceAllowsFinderPreviewItem: true
             NSExtensionServiceAllowsTouchBarItem: false

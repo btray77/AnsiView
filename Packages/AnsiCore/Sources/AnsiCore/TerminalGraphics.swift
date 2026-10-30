@@ -54,6 +54,8 @@ public enum TerminalGraphics {
     /// of at most `chunkSize` characters, `m=1` on every chunk but the last.
     public static func kitty(png: Data, chunkSize: Int = 4096) -> String {
         let payload = Array(png.base64EncodedString().utf8)
+        // Every chunk but the last must hold whole groups of four base64 characters.
+        let chunkSize = max(4, chunkSize - chunkSize % 4)
         var out = ""
         var start = 0
         repeat {

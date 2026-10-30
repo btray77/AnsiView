@@ -53,6 +53,11 @@ enum ArtActions {
     static func outputURL(for input: URL, fileExtension: String, in folder: URL) -> URL {
         let existing = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
         var naming = BatchNaming(existing: Set(existing))
-        return folder.appendingPathComponent(naming.name(for: input.lastPathComponent, fileExtension: fileExtension))
+        // The listing can be empty in a sandbox that may still see single files, so each name is
+        // also checked on its own.
+        while true {
+            let url = folder.appendingPathComponent(naming.name(for: input.lastPathComponent, fileExtension: fileExtension))
+            if !FileManager.default.fileExists(atPath: url.path) { return url }
+        }
     }
 }

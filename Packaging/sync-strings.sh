@@ -13,8 +13,10 @@ sync() {
   local args=()
   for f in $files; do args+=(--stringsdata "$f"); done
   xcrun xcstringstool sync "$catalog" $args
-  echo "$catalog: $(xcrun xcstringstool print "$catalog" | grep -c '^') keys"
+  echo "$catalog: $(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["strings"]))' "$catalog") keys"
 }
 sync App/Localizable.xcstrings AnsiView
 sync Preview/Localizable.xcstrings AnsiPreview
 sync Saver/Localizable.xcstrings AnsiSaver
+# QuickAction/PNG and QuickAction/GIF InfoPlist.xcstrings hold only the Quick Actions' names and
+# are edited by hand.
