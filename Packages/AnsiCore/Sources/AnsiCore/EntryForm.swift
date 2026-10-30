@@ -31,6 +31,7 @@ public enum EntryForm {
         if !speedList.contains(e.baud) { speedList.append(e.baud) }
         fields.append(.choice("baud", section: terminal, label: "Simulated speed", hint: "Shows incoming text at a modem speed, such as 2400 baud, for the classic feel. Unlimited shows it at once. Typing is never slowed.", options: speedList.map(speedLabel), index: speedList.firstIndex(of: e.baud) ?? 0))
         fields.append(.choice("backspace", section: terminal, label: "Backspace sends", hint: "The code the Backspace key sends. Most BBSes want BS; choose DEL if Backspace prints odd characters instead of erasing.", options: backspaceOptions, index: e.backspaceSendsDelete ? 1 : 0))
+        fields.append(.choice("musicMode", section: terminal, label: "ANSI music", hint: MusicMode.entryHint, options: MusicMode.allCases.map(\.entryLabel), index: MusicMode.allCases.firstIndex(of: e.musicMode) ?? 2))
         fields.append(.choice("modemSound", section: terminal, label: "Modem sound", hint: "Plays the synthesized dial tones and handshake while connecting. The first choice follows Playback > Modem Sounds.", options: ModemSoundChoice.allCases.map(\.label), index: ModemSoundChoice.allCases.firstIndex(of: e.modemSound) ?? 0))
 
         let login = "Login"
@@ -85,6 +86,7 @@ public enum EntryForm {
         if let f = form.field("iceColors") { e.iceColors = f.isOn }
         if let f = choice("baud") { e.baud = speed(fromLabel: f.choiceValue) }
         if let f = choice("backspace") { e.backspaceSendsDelete = f.index == 1 }
+        if let f = choice("musicMode") { e.musicMode = MusicMode.allCases[safe: f.index] ?? .bananaCom }
         if let f = choice("modemSound") { e.modemSound = ModemSoundChoice.allCases[safe: f.index] ?? .playbackSetting }
         if let v = text("username") {
             let trimmed = v.trimmingCharacters(in: .whitespaces)

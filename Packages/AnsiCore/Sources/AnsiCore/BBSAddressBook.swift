@@ -63,6 +63,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     public var terminalType: String
     /// Shows the blink attribute as a bright background (iCE colours) instead of blinking text.
     public var iceColors: Bool
+    /// Which escape sequences play ANSI music (SyncTERM's default: ESC[| and ESC[N).
+    public var musicMode: MusicMode
 
     public static let standardTerminalTypes = ["ANSI", "ANSI-BBS", "VT100"]
 
@@ -99,6 +101,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         busyText = Self.defaultBusyText
         terminalType = "ANSI"
         iceColors = false
+        musicMode = .bananaCom
     }
 
     public var address: String {
@@ -115,6 +118,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         case id, name, host, port, username, fontName, columns, rows, encoding, mode, baud, backspaceSendsDelete
         case notes, tags, lastCalled, totalCalls, captureOnConnect, captureFolderBookmark, captureFolderName
         case modemSound, macros, autoLogin, loginScript, busyText, terminalType, iceColors
+        case musicMode
     }
 
     /// Missing or out of range fields fall back to the defaults, so older (plan 7) or hand edited books load.
@@ -147,6 +151,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         if let value = try? c.decode(String.self, forKey: .busyText) { busyText = value }
         if let value = try? c.decode(String.self, forKey: .terminalType), !value.isEmpty { terminalType = value }
         if let value = try? c.decode(Bool.self, forKey: .iceColors) { iceColors = value }
+        if let value = try? c.decode(MusicMode.self, forKey: .musicMode) { musicMode = value }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -177,6 +182,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         try c.encode(busyText, forKey: .busyText)
         try c.encode(terminalType, forKey: .terminalType)
         try c.encode(iceColors, forKey: .iceColors)
+        try c.encode(musicMode, forKey: .musicMode)
     }
 
     private static func clampSize(_ value: Int) -> Int {
