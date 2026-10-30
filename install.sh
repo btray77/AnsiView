@@ -13,8 +13,10 @@ cp -R build/Build/Products/Release/AnsiView.app ~/Applications/
 
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
   -f ~/Applications/AnsiView.app
+# Register the extensions now rather than whenever LaunchServices gets to them.
+for appex in ~/Applications/AnsiView.app/Contents/PlugIns/*.appex; do pluginkit -a "$appex"; done
 qlmanage -r >/dev/null 2>&1
 qlmanage -r cache >/dev/null 2>&1
 
-pluginkit -m -p com.apple.quicklook.preview | grep -i ansiview
+for id in Preview Thumbnail; do pluginkit -m -i com.traynham.AnsiView.$id; done
 echo "Installed. Select a .ANS file in Finder and press space."

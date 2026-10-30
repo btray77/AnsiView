@@ -12,7 +12,7 @@ packages:
 settings:
   base:
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "27"
+    CURRENT_PROJECT_VERSION: "28"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -53,18 +53,26 @@ targets:
             UTTypeDescription: ANSI Art
             UTTypeConformsTo: [public.data, public.content]
             UTTypeTagSpecification:
-              public.filename-extension: [ans, ice, diz, nfo, asc, xb, idf, pcb, avt]
+              public.filename-extension: [ans, ice, diz, nfo, xb, idf, pcb, avt]
+          # .asc has its own type: Quick Look refuses thumbnail extensions that claim .asc
+          # ("prohibited filename extension"), so only the thumbnail extension leaves it out.
+          - UTTypeIdentifier: com.traynham.ansiview.asc
+            UTTypeDescription: ASCII Art
+            UTTypeConformsTo: [public.data, public.content]
+            UTTypeTagSpecification:
+              public.filename-extension: [asc]
         CFBundleDocumentTypes:
           - CFBundleTypeName: ANSI Art
             CFBundleTypeRole: Viewer
             LSHandlerRank: Default
-            LSItemContentTypes: [com.traynham.ansiview.ans]
+            LSItemContentTypes: [com.traynham.ansiview.ans, com.traynham.ansiview.asc]
           - CFBundleTypeName: Binary Art
             CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate
             LSItemContentTypes: [com.apple.macbinary-archive, com.amiga.adf-archive]
     dependencies:
       - target: AnsiPreview
+      - target: AnsiThumbnail
       - package: AnsiCore
       - package: libwebp
   AnsiPreview:
@@ -94,7 +102,33 @@ targets:
           NSExtensionAttributes:
             QLIsDataBasedPreview: false
             QLSupportsSearchableItems: false
+            QLSupportedContentTypes: [com.traynham.ansiview.ans, com.traynham.ansiview.asc]
+  AnsiThumbnail:
+    type: app-extension
+    platform: macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.Thumbnail
+    sources: [Thumbnail]
+    dependencies:
+      - package: AnsiCore
+    entitlements:
+      path: Thumbnail/AnsiThumbnail.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-only: true
+    info:
+      path: Thumbnail/Info.plist
+      properties:
+        CFBundleDisplayName: AnsiView Thumbnail
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.quicklook.thumbnail
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ThumbnailProvider
+          NSExtensionAttributes:
             QLSupportedContentTypes: [com.traynham.ansiview.ans]
+            QLThumbnailMinimumDimension: 0
   ansirender:
     type: tool
     platform: macOS

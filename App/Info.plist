@@ -18,6 +18,7 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>com.traynham.ansiview.ans</string>
+				<string>com.traynham.ansiview.asc</string>
 			</array>
 		</dict>
 		<dict>
@@ -74,11 +75,28 @@
 					<string>ice</string>
 					<string>diz</string>
 					<string>nfo</string>
-					<string>asc</string>
 					<string>xb</string>
 					<string>idf</string>
 					<string>pcb</string>
 					<string>avt</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.content</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>ASCII Art</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.traynham.ansiview.asc</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>asc</string>
 				</array>
 			</dict>
 		</dict>

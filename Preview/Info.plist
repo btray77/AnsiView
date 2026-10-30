@@ -29,6 +29,7 @@
 			<key>QLSupportedContentTypes</key>
 			<array>
 				<string>com.traynham.ansiview.ans</string>
+				<string>com.traynham.ansiview.asc</string>
 			</array>
 			<key>QLSupportsSearchableItems</key>
 			<false/>

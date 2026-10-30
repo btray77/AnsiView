@@ -5,13 +5,15 @@ import UniformTypeIdentifiers
 
 extension UTType {
     static let ansiArt = UTType(importedAs: "com.traynham.ansiview.ans")
+    /// `.asc` files: a separate type only because Quick Look thumbnails may not claim `.asc`.
+    static let asciiArt = UTType(importedAs: "com.traynham.ansiview.asc")
 }
 
 /// Read only document holding the file's bytes.
 struct AnsiDocument: FileDocument {
     /// .bin and .adf belong to other system types; AnsiView opens them as an alternate viewer.
     static var readableContentTypes: [UTType] {
-        [.ansiArt, UTType("com.apple.macbinary-archive"), UTType("com.amiga.adf-archive")].compactMap { $0 }
+        [.ansiArt, .asciiArt, UTType("com.apple.macbinary-archive"), UTType("com.amiga.adf-archive")].compactMap { $0 }
     }
 
     let source: ArtFile
