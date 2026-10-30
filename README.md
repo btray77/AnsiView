@@ -26,6 +26,18 @@ solid block and shade characters, and box drawing that lines up without gaps.
 - **Export** the current frame as PNG, JPEG or WebP, or the whole playback as an animated
   GIF, animated WebP or MP4 video, at 1x, 2x or 3x size and any playback speed.
 - **SAUCE aware.** Honors the SAUCE width and iCE color flag and hides the metadata record.
+  File > Get Info (Command I) shows the title, author, group, date, comments, font and flags.
+- **Zoom.** Fit to Window, Integer Fit (whole pixels only, so every pixel is the same size),
+  Actual Size, 2x and 3x, per window, in the View menu.
+- **Presentation Mode** (View menu, Shift Command F) shows the art alone on a black screen with the
+  menu bar, Dock and cursor hidden. Escape leaves.
+- **Gallery and slideshow.** File > Open Folder or Art Pack (Shift Command O) shows a grid of
+  thumbnails for a folder or a `.zip` art pack. Slideshow > Start Slideshow (Option Command S) steps
+  through a folder or pack with the Left and Right arrow keys, with optional Auto Advance.
+- **Finder thumbnails.** Art files show the art itself as their Finder icon (except `.asc`, which
+  macOS does not let thumbnail extensions claim).
+- **Spotlight.** SAUCE fields and the words in the art are indexed, so Spotlight finds art by
+  title, artist, group or text.
 
 ## Install
 
@@ -47,6 +59,12 @@ Requires macOS 14 or later, on Apple silicon or Intel.
 | Scrub | Drag the bar under an animation |
 | Faster / slower | Command ] and Command [ |
 | Export image / animation | Command E / Shift Command E |
+| Get Info (SAUCE) | Command I |
+| Fit / Integer Fit / 1x / 2x / 3x | Command 0 / Option Command 0 / Command 1 / 2 / 3 |
+| Presentation Mode (Escape leaves) | Shift Command F |
+| Open folder or art pack | Shift Command O |
+| Start slideshow | Option Command S |
+| Next / previous art in a slideshow | Right / Left arrow, or Option Command Right / Left |
 
 The playback speeds you choose in the app (per file and default) are also used by the Quick Look preview.
 
