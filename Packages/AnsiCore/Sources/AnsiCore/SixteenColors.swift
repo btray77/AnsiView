@@ -119,13 +119,15 @@ public enum SixteenColors {
         !notViewableExtensions.contains((name as NSString).pathExtension.lowercased())
     }
 
-    /// The name a downloaded file is saved under in the cache: its last path component with
-    /// separators and leading dots removed, plus `.ans` when AnsiView would not otherwise open it
-    /// (group extensions such as `.CIP` are ANSI). Nil when nothing usable is left.
+    /// The relative path a downloaded file is saved under in the cache: each folder kept (so the
+    /// same name in two folders gives two files), every component with `:` replaced and leading
+    /// dots removed (so `..` disappears), plus `.ans` when AnsiView would not otherwise open the
+    /// file (group extensions such as `.CIP` are ANSI). Nil when nothing usable is left.
     public static func cacheName(for file: String) -> String? {
-        guard let name = safeName(file) else { return nil }
+        let parts = file.split(separator: "/").compactMap { safeName(String($0)) }
+        guard let name = parts.last else { return nil }
         let ext = (name as NSString).pathExtension.lowercased()
-        return ArtFiles.extensions.contains(ext) ? name : name + ".ans"
+        return (parts.dropLast() + [ArtFiles.extensions.contains(ext) ? name : name + ".ans"]).joined(separator: "/")
     }
 
     /// The cache file name for a pack's ZIP.
@@ -201,17 +203,18 @@ public enum SixteenColors {
     }
 }
 
-/// Keeps API requests at least `interval` seconds apart: each call says how long to wait before
-/// starting the next request, counting requests already scheduled.
+/// Keeps API requests at least `interval` seconds apart. `delay` says how long to wait before a
+/// request may start; `started` records one that did. A waiter that gives up books nothing.
 public struct RequestSpacing {
     public let interval: TimeInterval
     private var lastStart: TimeInterval?
 
     public init(interval: TimeInterval) { self.interval = interval }
 
-    public mutating func delay(now: TimeInterval) -> TimeInterval {
-        let start = max(now, (lastStart ?? -.infinity) + interval)
-        lastStart = start
-        return start - now
+    public func delay(now: TimeInterval) -> TimeInterval {
+        guard let lastStart else { return 0 }
+        return max(0, lastStart + interval - now)
     }
+
+    public mutating func started(at time: TimeInterval) { lastStart = time }
 }

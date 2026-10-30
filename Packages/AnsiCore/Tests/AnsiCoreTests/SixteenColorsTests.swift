@@ -27,6 +27,7 @@ struct SixteenColorsTests {
         #expect(SixteenColors.rawFileURL(pack: "..", file: "A.ANS") == nil)
         #expect(SixteenColors.rawFileURL(pack: "p", file: "") == nil)
         #expect(SixteenColors.cacheName(for: "../../secret.ans") == "secret.ans")
+        #expect(SixteenColors.cacheName(for: "a/../b.ans") == "a/b.ans")
         #expect(SixteenColors.cacheName(for: "..") == nil)
         #expect(SixteenColors.cacheName(for: ".hidden.ans") == "hidden.ans")
         #expect(SixteenColors.cacheName(for: "a:b.ans") == "a_b.ans")
@@ -101,7 +102,14 @@ struct SixteenColorsTests {
         #expect(SixteenColors.cacheName(for: "FILE_ID.DIZ") == "FILE_ID.DIZ")
         #expect(SixteenColors.cacheName(for: "LOGO.XB") == "LOGO.XB")
         #expect(SixteenColors.cacheName(for: "README") == "README.ans")
-        #expect(SixteenColors.cacheName(for: "SUB/A.ANS") == "A.ANS")
+        #expect(SixteenColors.cacheName(for: "SUB/A.ANS") == "SUB/A.ANS")
+    }
+
+    /// Same file name in two folders of a pack: two cache files (review finding).
+    @Test func subfoldersDoNotCollide() {
+        #expect(SixteenColors.cacheName(for: "DIR1/LOGO.ANS") == "DIR1/LOGO.ANS")
+        #expect(SixteenColors.cacheName(for: "DIR2/LOGO.ANS") == "DIR2/LOGO.ANS")
+        #expect(SixteenColors.cacheName(for: "DIR1/.x/LOGO.CIP") == "DIR1/x/LOGO.CIP.ans")
     }
 
     @Test func packCacheName() {
@@ -123,9 +131,12 @@ struct SixteenColorsTests {
     @Test func requestSpacing() {
         var spacing = RequestSpacing(interval: 1)
         #expect(spacing.delay(now: 100) == 0)
+        spacing.started(at: 100)
         #expect(spacing.delay(now: 100.25) == 0.75)
-        // The next one waits for the one just scheduled at 101.
-        #expect(spacing.delay(now: 100.5) == 1.5)
+        // A waiter that gives up (cancelled) books nothing: the next one still waits only 0.5 s.
+        #expect(spacing.delay(now: 100.5) == 0.5)
+        spacing.started(at: 101)
+        #expect(spacing.delay(now: 101.5) == 0.5)
         #expect(spacing.delay(now: 200) == 0)
     }
 

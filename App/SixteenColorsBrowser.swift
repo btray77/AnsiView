@@ -51,11 +51,18 @@ final class SixteenColorsClient {
         return request
     }
 
+    /// Waits until a request may start, then records it. A cancelled waiter (the user moved on)
+    /// throws CancellationError and never reaches the network.
     private func waitForTurn() async throws {
+        while true {
+            try Task.checkCancellation()
+            let delay = spacing.delay(now: ProcessInfo.processInfo.systemUptime)
+            if delay <= 0 { break }
+            try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
         let now = ProcessInfo.processInfo.systemUptime
-        let delay = spacing.delay(now: now)
-        if delay > 0 { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
-        requestStarts.append(ProcessInfo.processInfo.systemUptime)
+        spacing.started(at: now)
+        requestStarts.append(now)
     }
 
     private func check(_ response: URLResponse) throws {
@@ -178,6 +185,8 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     private var generation = 0
     /// True while the code (not the user) changes a table's selection.
     private var selectingInCode = false
+    /// The listing for the current selection; a new selection cancels it, so stale requests never go out.
+    private var listing: Task<Void, Never>?
 
     var statusText: String { status.stringValue }
     var retryVisible: Bool { !retryButton.isHidden }
@@ -290,6 +299,7 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     }
 
     private func failed(_ error: Error, retry: @escaping () async -> Void) {
+        if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
         spinner.stopAnimation(nil)
         status.stringValue = SixteenColorsClient.describe(error).message
         self.retry = retry
@@ -409,10 +419,37 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         Task { await openFile(row) }
     }
 
+    /// The user picked a year (also for checks): replaces any listing still waiting or loading.
+    @discardableResult
+    func chooseYear(_ row: Int) -> Task<Void, Never>? {
+        startListing { await $0.selectYear(row) }
+        return listing
+    }
+
+    /// Stops a listing in progress (the window is closing).
+    func cancelListing() { listing?.cancel() }
+
+    /// Cancels the listing for the previous selection and starts this one.
+    private func startListing(_ work: @escaping (SixteenColorsBrowser) async -> Void) {
+        listing?.cancel()
+        listing = Task { [weak self] in
+            guard let self else { return }
+            await work(self)
+        }
+    }
+
     @objc private func doubleClicked(_ sender: NSTableView) {
         let row = sender.clickedRow
+        guard row >= 0 else { return }
         if sender === fileTable { Task { await openFile(row) } }
-        if sender === packTable { Task { await openPack() } }
+        if sender === packTable {
+            // The first click started loading this pack; open it once its file list is here.
+            let pending = listing
+            Task {
+                await pending?.value
+                await openPack()
+            }
+        }
     }
 
     // MARK: Tables
@@ -455,9 +492,9 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         let row = table.selectedRow
         switch table {
         case yearTable:
-            if years.indices.contains(row) { Task { await selectYear(row) } }
+            if years.indices.contains(row) { chooseYear(row) }
         case packTable:
-            if packs.indices.contains(row) { Task { await selectPack(row) } }
+            if packs.indices.contains(row) { startListing { await $0.selectPack(row) } }
         default:
             updateButtons()
         }
@@ -493,6 +530,7 @@ final class SixteenColorsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     func windowWillClose(_ notification: Notification) {
+        (contentViewController as? SixteenColorsBrowser)?.cancelListing()
         Self.current = nil
     }
 }

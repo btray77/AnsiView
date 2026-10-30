@@ -17,9 +17,15 @@ APPCAST=${APPCAST:-docs/appcast.xml}
 
 # Read the version and key from the app inside the disk image.
 MOUNT=$(mktemp -d)
+STAGE=""
+cleanup() {
+  hdiutil detach "$MOUNT" >/dev/null 2>&1 || true
+  [[ -n $STAGE ]] && rm -rf "$STAGE"
+}
+trap cleanup EXIT
 hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT" "$DMG" >/dev/null
 APP=$(print -l "$MOUNT"/*.app(N) | head -1)
-if [[ -z $APP ]]; then hdiutil detach "$MOUNT" >/dev/null; echo "No app in $DMG"; exit 1; fi
+[[ -n $APP ]] || { echo "No app in $DMG"; exit 1; }
 SHORT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
 BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Contents/Info.plist")
 KEY=$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" "$APP/Contents/Info.plist" 2>/dev/null || true)
@@ -45,5 +51,4 @@ grep -q "<sparkle:version>$BUILD</sparkle:version>" "$OUT" || { echo "No item fo
 grep -q "releases/download/v$SHORT/${DMG:t}" "$OUT" || { echo "No download URL for ${DMG:t}"; exit 1; }
 grep -q 'sparkle:edSignature="' "$OUT" || { echo "The new item is not signed"; exit 1; }
 cp "$OUT" "$APPCAST"
-rm -rf "$STAGE"
 echo "Updated $APPCAST with AnsiView $SHORT ($BUILD). Attach ${DMG:t} to the GitHub release v$SHORT, then commit and push $APPCAST."
