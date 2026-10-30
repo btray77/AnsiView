@@ -53,6 +53,53 @@ public struct Sauce: Equatable {
         }
     }
 
+    public init(title: String, author: String, group: String, date: DateComponents?, dataType: UInt8,
+                fileType: UInt8, tInfo: [UInt16], flags: UInt8, fontName: String, comments: [String]) {
+        self.title = title
+        self.author = author
+        self.group = group
+        self.date = date
+        self.dataType = dataType
+        self.fileType = fileType
+        self.tInfo = tInfo
+        self.flags = flags
+        self.fontName = fontName
+        self.comments = comments
+    }
+
+    /// What goes after the art: the 0x1A end of file marker, the comment block when there are
+    /// comments (at most 255 lines of 64 characters), then the 128 byte record.
+    /// `fileSize` is the length of the art before the marker.
+    public func encoded(fileSize: Int) -> [UInt8] {
+        var out: [UInt8] = [0x1A]
+        let lines = Array(comments.prefix(255))
+        if !lines.isEmpty {
+            out += Array("COMNT".utf8)
+            for line in lines { out += CP437.bytes(line, length: Self.commentLength) }
+        }
+        var record = Array("SAUCE00".utf8)
+        record += CP437.bytes(title, length: 35)
+        record += CP437.bytes(author, length: 20)
+        record += CP437.bytes(group, length: 20)
+        if let date, let year = date.year, let month = date.month, let day = date.day {
+            record += Array(String(format: "%04d%02d%02d", year, month, day).utf8)
+        } else {
+            record += Array(repeating: 0x20, count: 8)
+        }
+        let size = UInt32(clamping: fileSize)
+        record += [UInt8(size & 0xFF), UInt8(size >> 8 & 0xFF), UInt8(size >> 16 & 0xFF), UInt8(size >> 24)]
+        record += [dataType, fileType]
+        for index in 0..<4 {
+            let value = index < tInfo.count ? tInfo[index] : 0
+            record += [UInt8(value & 0xFF), UInt8(value >> 8)]
+        }
+        record += [UInt8(lines.count), flags]
+        var font = Array(fontName.utf8.prefix(22))
+        font += Array(repeating: 0, count: 22 - font.count)
+        record += font
+        return out + record
+    }
+
     /// Finds a SAUCE record at the end of `bytes`. `contentLength` is where the art itself ends:
     /// before the comment block, the record, and the 0x1A end of file marker preceding them.
     public static func read(_ bytes: [UInt8]) -> (sauce: Sauce?, contentLength: Int) {

@@ -21,4 +21,11 @@ public enum CP437 {
     public static func code(for scalar: Unicode.Scalar) -> UInt8? {
         reverse[scalar]
     }
+
+    /// `text` as CP437 bytes, space padded or cut to `length`; unmappable characters become "?".
+    public static func bytes(_ text: String, length: Int) -> [UInt8] {
+        var out = text.unicodeScalars.prefix(length).map { code(for: $0) ?? 0x3F }
+        if out.count < length { out += Array(repeating: 0x20, count: length - out.count) }
+        return out
+    }
 }
