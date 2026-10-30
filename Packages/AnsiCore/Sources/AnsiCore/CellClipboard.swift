@@ -51,13 +51,48 @@ public struct CellClipboard {
     /// The cells drawn with the font at `imageScale`, blink shown. Nil when the renderer could not
     /// draw every row (over its memory limit even at scale 1), so a picture is never cut short.
     public func image() -> CGImage? {
-        guard region.width > 0, region.height > 0 else { return nil }
         // Known not to fit even at scale 1: skip the (slow, partial) render.
-        let cellWidth = font.width + (ninePixel ? 1 : 0)
-        guard region.width * cellWidth * region.height * font.height * 4 <= AnsiRenderer.maxImageBytes else { return nil }
+        guard canDrawImage else { return nil }
         let options = RenderOptions(font: font, ninePixel: ninePixel, scale: Self.imageScale, blinkVisible: true)
         guard let rendered = AnsiRenderer.render(screen, options: options), rendered.rows == region.height else { return nil }
         return rendered.image
+    }
+
+    /// True when the selection can be drawn whole (decided from its size, without drawing).
+    public var canDrawImage: Bool {
+        guard region.width > 0, region.height > 0 else { return false }
+        let cellWidth = font.width + (ninePixel ? 1 : 0)
+        return region.width * cellWidth * region.height * font.height * 4 <= AnsiRenderer.maxImageBytes
+    }
+
+    /// The text representations of a copy, cheap enough to write at once.
+    public func immediateRepresentations(_ kind: Kind) -> [(type: String, data: Data)] {
+        switch kind {
+        case .all:
+            return [(Self.cellsType, cellsData), (Self.textType, Data(text.utf8)), (Self.ansiType, Data(ansiText.utf8))]
+        case .text:
+            return [(Self.textType, Data(text.utf8))]
+        case .ansi:
+            let ansi = Data(ansiText.utf8)
+            return [(Self.textType, ansi), (Self.ansiType, ansi)]
+        case .image:
+            return []
+        }
+    }
+
+    /// The picture types a copy offers, drawn only when an app asks (`imageData(forType:)`).
+    public func deferredImageTypes(_ kind: Kind) -> [String] {
+        guard kind == .all || kind == .image, canDrawImage else { return [] }
+        return [Self.pngType, Self.tiffType]
+    }
+
+    /// PNG or TIFF bytes of the picture, or nil for another type or when it cannot be drawn.
+    public func imageData(forType type: String) -> Data? {
+        switch type {
+        case Self.pngType: return pngData()
+        case Self.tiffType: return tiffData()
+        default: return nil
+        }
     }
 
     public func pngData() -> Data? { image().flatMap { Self.encode($0, type: Self.pngType, properties: [:]) } }
@@ -71,31 +106,35 @@ public struct CellClipboard {
     }
 
     /// The pasteboard types and bytes for a copy of `kind`, in the order they are offered.
+    /// Every representation with its bytes (the pictures drawn now), in the order they are offered.
     public func representations(_ kind: Kind) -> [(type: String, data: Data)] {
-        var out: [(type: String, data: Data)] = []
-        func addImages() {
-            guard let image = image() else { return }
+        var out = immediateRepresentations(kind)
+        let types = deferredImageTypes(kind)
+        if !types.isEmpty, let image = image() {
             if let png = Self.encode(image, type: Self.pngType, properties: [:]) { out.append((Self.pngType, png)) }
-            if let tiff = Self.encode(image, type: Self.tiffType, properties: [
-                kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFCompression: 5] as CFDictionary,
-            ]) { out.append((Self.tiffType, tiff)) }
-        }
-        switch kind {
-        case .all:
-            out.append((Self.cellsType, cellsData))
-            out.append((Self.textType, Data(text.utf8)))
-            out.append((Self.ansiType, Data(ansiText.utf8)))
-            addImages()
-        case .text:
-            out.append((Self.textType, Data(text.utf8)))
-        case .ansi:
-            let ansi = Data(ansiText.utf8)
-            out.append((Self.textType, ansi))
-            out.append((Self.ansiType, ansi))
-        case .image:
-            addImages()
+            if let tiff = Self.encode(image, type: Self.tiffType, properties: Self.tiffProperties) { out.append((Self.tiffType, tiff)) }
         }
         return out
+    }
+
+    private static let tiffProperties: [CFString: Any] = [
+        kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFCompression: 5] as CFDictionary,
+    ]
+
+    /// True when text holds escape sequences (ANSI art copied from a terminal or as ANSI).
+    public static func looksLikeANSI(_ text: String) -> Bool { text.contains("\u{1B}[") }
+
+    /// ANSI text read as art: the cells up to the last one drawn on, or nil when nothing is.
+    public static func region(fromANSI text: String) -> CanvasRegion? {
+        let screen = AnsiParser.parse(Data(text.utf8), fileExtension: "ans")
+        let rows = TextConvert.trimmedRows(screen)
+        let blank = AnsiCell()
+        let width = rows.map { row in (row.prefix(screen.columns).lastIndex { $0 != blank } ?? -1) + 1 }.max() ?? 0
+        guard width > 0 else { return nil }
+        let clipped = min(width, EditCanvas.maxColumns)
+        return CanvasRegion(cells: rows.prefix(AnsiTerminal.maxRows).map { row in
+            (0..<clipped).map { $0 < row.count ? row[$0] : blank }
+        })
     }
 
     /// Cells copied by AnsiView, or nil for other data.
@@ -104,6 +143,8 @@ public struct CellClipboard {
     /// What a paste reads from a pasteboard offering `types` (ruling 4).
     public enum PasteChoice: Equatable {
         case cells
+        /// AnsiView's ANSI text type, read back as art.
+        case ansi
         case image(String)
         case text
     }
@@ -112,6 +153,7 @@ public struct CellClipboard {
     /// then text (apps such as Word put a picture of copied text beside the text); then a picture.
     public static func pasteChoice(types: [String]) -> PasteChoice? {
         if types.contains(cellsType) { return .cells }
+        if types.contains(ansiType) { return .ansi }
         let image = imageTypes.first { types.contains($0) }
         let hasText = types.contains(textType) || types.contains("NSStringPboardType")
         if let image, !hasText { return .image(image) }

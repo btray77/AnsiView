@@ -153,6 +153,7 @@ public final class CanvasEditor {
     }
 
     public func setIceColors(_ on: Bool) {
+        guard floating == nil else { return }
         perform(on ? "iCE Colours On" : "iCE Colours Off") { $0.canvas.setIceColors(on) }
         if !on, background >= 8 { background -= 8 }
         changed()
@@ -228,7 +229,10 @@ public final class CanvasEditor {
     /// Floats `region` with its top left at (`x`, `y`), or at the cursor. Replaces any floating block.
     public func beginFloating(_ region: CanvasRegion, x: Int? = nil, y: Int? = nil) {
         guard region.width > 0, region.height > 0 else { return }
-        floating = FloatingPaste(region: region, x: 0, y: 0)
+        // Cells copied from art with other colour rules are converted the way this canvas holds them.
+        let ice = canvas.iceColors
+        let converted = CanvasRegion(cells: region.cells.map { $0.map { EditCanvas.cell($0, iceColors: ice) } })
+        floating = FloatingPaste(region: converted, x: 0, y: 0)
         moveFloating(toX: x ?? cursor.x, y: y ?? cursor.y)
     }
 
@@ -376,8 +380,10 @@ public final class CanvasEditor {
 
     // MARK: Helpers
 
-    /// Runs one undoable change. Nothing is registered when the canvas did not change.
+    /// Runs one undoable change. Nothing is registered when the canvas did not change. Nothing
+    /// runs while a paste floats: it is placed or cancelled first.
     private func perform(_ name: String, _ change: (CanvasEditor) -> Void) {
+        guard floating == nil else { return }
         let before = (canvas, revision)
         change(self)
         clampToCanvas()
@@ -435,6 +441,7 @@ public final class CanvasEditor {
     private func clampToCanvas() {
         cursor = (min(canvas.columns - 1, max(0, cursor.x)), min(canvas.height - 1, max(0, cursor.y)))
         if let rect = selection { selection = canvas.clip(rect) }
+        if let block = floating, block.x >= canvas.columns { floating?.x = canvas.columns - 1 }
     }
 
     private func changed() { onChange?() }

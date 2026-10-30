@@ -229,20 +229,25 @@ public struct EditCanvas: Equatable {
         guard on != iceColors else { return }
         iceColors = on
         for y in rows.indices {
-            for x in rows[y].indices {
-                var cell = rows[y][x]
-                if on {
-                    if cell.blink, let index = Palette.vgaIndex(of: cell.bg), index < 8 {
-                        cell.bg = Palette.vga[index + 8]
-                    }
-                    cell.blink = false
-                } else if Self.isBrightVGA(cell.bg) {
-                    cell.bg = Self.darkened(cell.bg)
-                    cell.blink = true
-                }
-                rows[y][x] = cell
-            }
+            for x in rows[y].indices { rows[y][x] = Self.cell(rows[y][x], iceColors: on) }
         }
+    }
+
+    /// A cell as a canvas with or without iCE colours holds it: with iCE, blink on a dark VGA
+    /// background becomes the bright background; without, a bright VGA background becomes the
+    /// dark one plus blink.
+    public static func cell(_ cell: AnsiCell, iceColors on: Bool) -> AnsiCell {
+        var cell = cell
+        if on {
+            if cell.blink, let index = Palette.vgaIndex(of: cell.bg), index < 8 {
+                cell.bg = Palette.vga[index + 8]
+            }
+            cell.blink = false
+        } else if isBrightVGA(cell.bg) {
+            cell.bg = darkened(cell.bg)
+            cell.blink = true
+        }
+        return cell
     }
 
     /// The canvas as a screen for rendering and saving. Trimmed drops trailing blank rows,

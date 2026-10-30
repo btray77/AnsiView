@@ -179,6 +179,7 @@ final class AnsiPlayerViewController: NSViewController {
 
     /// The selected cells of the screen on display (`displayedScreen`), or nil.
     private(set) var selection: CellRect?
+    private var selectionWasInTerminalMode = false
 
     /// Selects cells of the displayed screen (clipped to it), or clears with nil.
     func select(_ rect: CellRect?) {
@@ -681,8 +682,12 @@ final class AnsiPlayerViewController: NSViewController {
         let padded = displayedScreen
         if isTerminalMode { options.scale = AnsiRenderer.preferredScale(rows: TerminalViewport.rows) }
         options.blinkVisible = blinkVisible
-        // The grid can change size (a tall piece leaving its playback window): keep the selection inside it.
-        if selection != nil { select(selection) }
+        // A tall piece entering or leaving its 25 row playback window shows other rows under the
+        // same cells: the selection no longer means the same art, so it is dropped.
+        if isTerminalMode != selectionWasInTerminalMode {
+            selectionWasInTerminalMode = isTerminalMode
+            if selection != nil { select(nil) }
+        }
         let image = AnsiRenderer.render(padded, options: options)?.image
         canvas.image = PlaybackSpeed.crtEffect ? image.flatMap { CRTFilter().apply($0) } ?? image : image
         if isViewLoaded { fitToWindow() }
@@ -755,6 +760,7 @@ final class AnsiCanvasView: NSView {
     private func layoutMarquee() {
         guard let cells = marqueeCells else { marquee.isHidden = true; return }
         marquee.frame = bounds
+        marquee.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         var area = CellGrid.rect(for: cells.rect, in: bounds.size, columns: cells.columns, rows: cells.rows)
         // The layer's origin is at the bottom unless AppKit flipped its geometry for this flipped view.
         if !(layer?.isGeometryFlipped ?? false) { area.origin.y = bounds.height - area.maxY }
@@ -813,12 +819,22 @@ final class AnsiCanvasView: NSView {
     }
 
     @objc override func selectAll(_ sender: Any?) {
-        guard let player, player.allowsSelection else { return }
+        guard let player, player.allowsSelection else {
+            // Quick Look: not ours to answer; pass it on as if this view did not implement it.
+            nextResponder?.tryToPerform(#selector(selectAll(_:)), with: sender)
+            return
+        }
         player.selectAll()
     }
 
-    override func cancelOperation(_ sender: Any?) {
-        if let player, player.selection != nil { player.select(nil) } else { super.cancelOperation(sender) }
+    /// Escape or Command-period clears a selection. NSView does not implement this action, so
+    /// it is passed on rather than sent to super (which would raise).
+    @objc override func cancelOperation(_ sender: Any?) {
+        if let player, player.selection != nil {
+            player.select(nil)
+        } else {
+            nextResponder?.tryToPerform(#selector(cancelOperation(_:)), with: sender)
+        }
     }
 
     /// The app's context menu for a viewer with selection (Copy, Copy As, Select All); none in Quick Look.

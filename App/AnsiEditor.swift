@@ -415,8 +415,11 @@ final class EditorCanvasView: NSView {
              #selector(copyAsImage(_:)):
             return editor.selection != nil && editor.floating == nil
         case #selector(paste(_:)), #selector(pasteAtContextCell(_:)): return ArtPasteboard.canPaste(pasteboard)
-        case #selector(toggleIceColors(_:)):
-            item.state = editor.canvas.iceColors ? .on : .off
+        // A floating paste is placed or cancelled before anything else changes the canvas.
+        case #selector(delete(_:)), #selector(fillWithCharacter(_:)), #selector(fillWithColour(_:)),
+             #selector(toggleIceColors(_:)), #selector(canvasSize(_:)), #selector(editSauce(_:)):
+            if editor.floating != nil { return false }
+            if item.action == #selector(toggleIceColors(_:)) { item.state = editor.canvas.iceColors ? .on : .off }
             return true
         default: return true
         }
