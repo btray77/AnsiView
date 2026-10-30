@@ -21,7 +21,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Telnet client | `Telnet.swift`, `BBSClient.swift`, `App/BBSTerminal.swift` | negotiation, NAWS, TTYPE, raw TCP |
 | Playback speed / baud | `Playback.swift` | 300 to 115200 and unlimited |
 | Export | PNG, JPEG, WebP, GIF, APNG, MP4, HTML, text, modern ANSI | |
-| File transfers | none | |
+| File transfers | XMODEM, YMODEM, ZMODEM, Kermit engines and terminal UI (`App/TerminalTransfers.swift`) | |
 | ANSI music | `AnsiMusic.swift`, `PlayString.swift`, `MusicScheduler.swift`, synth, `App/Music*`, `App/ViewerMusic.swift`, `App/TerminalMusic.swift` | engine and editor merged; playback in viewer, terminal and MP4 export on branch `ansiview-2.0-music-playback` |
 | TDF fonts | `TheDrawFont.swift`, `FIGletFont.swift`, `TextArt.swift`, `FontLibrary.swift`, `App/TextToASCII.swift`, `App/FontManager.swift` | TDF read/write, FIGlet, Text to ASCII, Font Manager |
 | Screen designer / templates | none | |
@@ -68,14 +68,14 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 
 | Requirement | Status | Item / plan |
 |---|---|---|
-| XMODEM (checksum), XMODEM-CRC, XMODEM-1K | engine done: both directions vs lrzsz lsx/lrx, SHA-256 match; terminal UI pending | transfers core |
-| YMODEM, YMODEM batch | engine done: both directions vs lrzsz lsb/lrb; YMODEM-G receive vs lsb (send only vs our own receiver); terminal UI pending | transfers core |
-| ZMODEM (with resume and auto-start detection) | engine done: both directions vs lrzsz lsz/lrz with options, resume both ways, auto-start; terminal UI pending | transfers core |
-| Kermit | engine done: both directions vs C-Kermit 9.0.302, long packets, windows up to 31, attributes; no text mode/RESEND/server mode; terminal UI pending | transfers core |
-| Progress, speed, ETA, logging, errors, cancel and cleanup | planned | transfers |
-| Path traversal protection, size limits, downloads folder in sandbox | done in engine (sanitizer, limits, marked .part resume) | transfers core |
+| XMODEM (checksum), XMODEM-CRC, XMODEM-1K | done: engine both directions vs lrzsz lsx/lrx; terminal UI both directions vs lsx/lrx over telnet, SSH, WebSocket (harness, SHA-256 match; live app check needs owner) | transfers core |
+| YMODEM, YMODEM batch | done: engine and terminal UI both directions vs lrzsz lsb/lrb (telnet, raw, WebSocket); YMODEM-G download vs lsb, upload only vs our own `ansixfer` receiver (lrb never asks for G) | transfers core |
+| ZMODEM (with resume and auto-start detection) | done: terminal UI both directions vs lsz/lrz over telnet, raw TCP, SSH, WebSocket (and telnet inside WebSocket, and a BBS refusing BINARY), ask bar on auto-start (download and upload), cancel keeps the .part and the next download resumes (harness) | transfers core |
+| Kermit | done: terminal UI both directions vs C-Kermit 9.0.302 over telnet (also with BINARY refused), raw TCP, SSH; ask bar on its S packet and receiver NAK; no text mode/RESEND/server mode | transfers core |
+| Progress, speed, ETA, logging, errors, cancel and cleanup | done (harness): panel with file N of M, bytes, total, bar, speed, ETA, protocol, block size, errors and retries, resume offset, BINARY warning; summary with SHA-256, folder, Reveal in Finder, log; per entry transfer log (Terminal > Transfer Log); Escape or Cancel sends CAN, ZMODEM keeps its .part, others remove it | transfers UI (`2026-10-30-ansiview-2.0-transfers-ui.md`) |
+| Path traversal protection, size limits, downloads folder in sandbox | done in engine (sanitizer, limits, marked .part resume); download folder per entry or a default, kept as a security scoped bookmark with a write check (sandboxed write after picking needs an owner check in the real app) | transfers core + transfers UI |
 | Interop proof against independent implementations (lrzsz `sz`/`rz`, C-Kermit) | done: `Scripts/transfer-interop.sh`, 347/347 on the coordinator's run | transfers core |
-| Over telnet (with IAC escaping), raw TCP, SSH, WebSocket | channel ready (transports: `BBSClient.send`/`onData`, `isByteClean`); transfer hookup planned | transports + transfers |
+| Over telnet (with IAC escaping), raw TCP, SSH, WebSocket | done (harness, local servers): telnet with BINARY asked both ways and IAC escaping, raw TCP, SSH, WebSocket; pull mode with write completions (backpressure); RLogin uses the same path but was not run | transports + transfers |
 | Others: YMODEM-G and ZMODEM-8k done; Hydra recommended if bidirectional is wanted; SEAlink low priority; BiModem and Puma have no public spec | researched | transfers core |
 
 ## 4. Screen designer

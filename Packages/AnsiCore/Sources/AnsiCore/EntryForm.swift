@@ -37,6 +37,12 @@ public enum EntryForm {
         fields.append(.choice("musicMode", section: terminal, label: "ANSI music", hint: MusicMode.entryHint, options: MusicMode.allCases.map(\.entryLabel), index: MusicMode.allCases.firstIndex(of: e.musicMode) ?? 2))
         fields.append(.choice("modemSound", section: terminal, label: "Modem sound", hint: "Plays the synthesized dial tones and handshake while connecting. The first choice follows Playback > Modem Sounds.", options: ModemSoundChoice.allCases.map(\.label), index: ModemSoundChoice.allCases.firstIndex(of: e.modemSound) ?? 0))
 
+        let transfers = "File transfers"
+        fields.append(.choice("transferProtocol", section: transfers, label: "Protocol", hint: "Preselected in Terminal > Upload and Download. Pick ZMODEM if the BBS offers it; it is fast, sends names and resumes.", options: TransferProtocolKind.allCases.map(\.displayName), index: TransferProtocolKind.allCases.firstIndex(of: e.transferProtocol) ?? 5))
+        fields.append(.action("chooseDownloadFolder", section: transfers, label: "Download folder", hint: "Where files from this BBS are saved. Enter chooses one; without one the default folder (first asked, Downloads) is used.", caption: e.downloadFolderName ?? "Choose..."))
+        fields.append(.action("clearDownloadFolder", section: transfers, label: "Forget folder", hint: "Forgets this BBS's download folder, so its files go to the default folder again.", caption: "Forget"))
+        fields.append(.toggle("zmodemAutoAccept", section: transfers, label: "Auto-accept ZMODEM", hint: "When on, a ZMODEM download the BBS starts begins at once. When off, a bar asks first, in case it was a false alarm.", isOn: e.zmodemAutoAccept))
+
         let login = "Login"
         fields.append(.text("username", section: login, label: "Username", hint: "Your name or handle on this BBS. The login script and Terminal > Send Username type it.", value: e.username ?? "", maxLength: 80))
         fields.append(.secret("password", section: login, label: "Password", hint: "Saved only in your Mac's Keychain, never in the directory or an export. Needs a username. Terminal > Send Password types it.", value: password, maxLength: 120))
@@ -115,6 +121,8 @@ public enum EntryForm {
             if let f = form.field("step.\(i).timeout") { e.loginScript[i].timeout = Double(f.number) }
         }
         if let f = form.field("captureOnConnect") { e.captureOnConnect = f.isOn }
+        if let f = choice("transferProtocol") { e.transferProtocol = TransferProtocolKind.allCases[safe: f.index] ?? .zmodem }
+        if let f = form.field("zmodemAutoAccept") { e.zmodemAutoAccept = f.isOn }
         for slot in 0..<MacroSet.slotCount {
             guard let v = text("macro.\(slot)") else { continue }
             while e.macros.count <= slot { e.macros.append("") }
@@ -133,6 +141,9 @@ public enum EntryForm {
         case "clearFolder":
             e.captureFolderBookmark = nil
             e.captureFolderName = nil
+        case "clearDownloadFolder":
+            e.downloadFolderBookmark = nil
+            e.downloadFolderName = nil
         case "clearKey":
             e.sshKeyBookmark = nil
             e.sshKeyName = nil

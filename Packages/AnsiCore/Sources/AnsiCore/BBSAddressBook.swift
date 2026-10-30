@@ -104,6 +104,14 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     public var rloginClientIsPassword: Bool
     /// Which escape sequences play ANSI music (SyncTERM's default: ESC[| and ESC[N).
     public var musicMode: MusicMode
+    /// The file transfer protocol preselected in Upload and Download (the last one used).
+    public var transferProtocol: TransferProtocolKind
+    /// A security scoped bookmark to this BBS's downloads folder; nil uses the app's default folder.
+    public var downloadFolderBookmark: Data?
+    /// The downloads folder's path, shown in the editor.
+    public var downloadFolderName: String?
+    /// ZMODEM downloads the BBS starts begin without asking (the ask bar is skipped).
+    public var zmodemAutoAccept: Bool
 
     public static let standardTerminalTypes = ["ANSI", "ANSI-BBS", "VT100"]
 
@@ -151,6 +159,10 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         rloginServerUser = ""
         rloginClientIsPassword = false
         musicMode = .bananaCom
+        transferProtocol = .zmodem
+        downloadFolderBookmark = nil
+        downloadFolderName = nil
+        zmodemAutoAccept = false
     }
 
     public var address: String {
@@ -176,6 +188,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         case sshKeyBookmark, sshKeyName, sshTrustNewHostKey, webSocketPath, webSocketSecure, webSocketSubprotocols
         case webSocketTelnet, rloginClientUser, rloginServerUser, rloginClientIsPassword
         case musicMode
+        case transferProtocol, downloadFolderBookmark, downloadFolderName, zmodemAutoAccept
     }
 
     /// Missing or out of range fields fall back to the defaults, so older (plan 7) or hand edited books load.
@@ -219,6 +232,10 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         if let value = try? c.decode(String.self, forKey: .rloginServerUser) { rloginServerUser = value }
         if let value = try? c.decode(Bool.self, forKey: .rloginClientIsPassword) { rloginClientIsPassword = value }
         if let value = try? c.decode(MusicMode.self, forKey: .musicMode) { musicMode = value }
+        if let value = try? c.decode(TransferProtocolKind.self, forKey: .transferProtocol) { transferProtocol = value }
+        downloadFolderBookmark = try? c.decode(Data.self, forKey: .downloadFolderBookmark)
+        downloadFolderName = try? c.decode(String.self, forKey: .downloadFolderName)
+        if let value = try? c.decode(Bool.self, forKey: .zmodemAutoAccept) { zmodemAutoAccept = value }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -260,10 +277,33 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         try c.encode(rloginServerUser, forKey: .rloginServerUser)
         try c.encode(rloginClientIsPassword, forKey: .rloginClientIsPassword)
         try c.encode(musicMode, forKey: .musicMode)
+        try c.encode(transferProtocol, forKey: .transferProtocol)
+        try c.encodeIfPresent(downloadFolderBookmark, forKey: .downloadFolderBookmark)
+        try c.encodeIfPresent(downloadFolderName, forKey: .downloadFolderName)
+        try c.encode(zmodemAutoAccept, forKey: .zmodemAutoAccept)
     }
 
     private static func clampSize(_ value: Int) -> Int {
         min(TerminalEmulator.sizeRange.upperBound, max(TerminalEmulator.sizeRange.lowerBound, value))
+    }
+}
+
+/// The per entry file transfer settings a terminal window can change.
+public enum TransferSetting: Sendable {
+    case protocolChoice, downloadFolder
+}
+
+public extension BBSEntry {
+    /// This entry with only the named transfer settings taken from `other` (an open terminal's
+    /// copy), so edits made in the directory meanwhile are kept.
+    func merging(transferSettings: Set<TransferSetting>, from other: BBSEntry) -> BBSEntry {
+        var e = self
+        if transferSettings.contains(.protocolChoice) { e.transferProtocol = other.transferProtocol }
+        if transferSettings.contains(.downloadFolder) {
+            e.downloadFolderBookmark = other.downloadFolderBookmark
+            e.downloadFolderName = other.downloadFolderName
+        }
+        return e
     }
 }
 

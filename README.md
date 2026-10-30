@@ -443,6 +443,48 @@ SSH and RLogin already send the username, so the login script does not run by it
 values unchanged (telnet doubles 255 and needs BINARY both ways for CR; SSH, WebSocket binary
 frames and RLogin after its handshake are clean).
 
+#### File transfers
+
+The terminal sends and receives files with XMODEM, XMODEM-CRC, XMODEM-1K, YMODEM, YMODEM-G,
+ZMODEM and Kermit over every connection type (telnet, raw TCP, SSH, WebSocket, RLogin).
+
+- **Which protocol?** ZMODEM if the BBS offers it: it is the fastest, sends names and sizes,
+  starts by itself and resumes an interrupted download. Otherwise YMODEM (several files with
+  names), then XMODEM-1K. Kermit is slower but works on lines that are not 8 bit clean. YMODEM-G
+  is very fast but stops at the first line error. The (?) buttons explain each one.
+- **Download:** start the download on the BBS, then Terminal > Download... (Option-Command-D),
+  pick the protocol (XMODEM also asks for a file name, since it sends none). ZMODEM and Kermit
+  downloads need no menu: when the BBS starts one, a bar at the bottom of the terminal asks
+  "The BBS wants to send files with ZMODEM: Receive / Ignore". It asks because ordinary text can
+  look like a transfer start; Ignore shows what arrived as text and does not ask again for a
+  minute (type Ctrl-X five times to stop the BBS's sender at once). The dialing directory entry's
+  "Auto-accept ZMODEM" setting skips the question for ZMODEM downloads.
+- **Upload:** start the upload on the BBS, then Terminal > Upload File(s)... (Option-Command-U),
+  choose files and the protocol. When the BBS starts a ZMODEM or Kermit receive by itself, the
+  bar offers "Choose Files to Upload". XMODEM sends one file at a time.
+- **While a transfer runs** the terminal shows a panel: file name, file N of M, bytes, total,
+  a progress bar, speed, time left, protocol, block size, errors and retries, and where a
+  resumed download continued. The screen is paused (the BBS's bytes go only to the protocol),
+  ANSI music stops, and keys do nothing except Escape, which cancels like the Cancel button and
+  Terminal > Cancel Transfer. On cancel AnsiView sends the cancel sequence so the BBS stops too.
+- **At the end** the panel lists every file with its size and SHA-256, where it was saved
+  (Reveal in Finder), and the protocol log. Terminal > Transfer Log shows every transfer with
+  that BBS; the logs are kept in AnsiView's container
+  (`~/Library/Containers/com.traynham.AnsiView/Data/Library/Application Support/AnsiView/Transfer Logs`).
+- **Where files go:** each dialing directory entry can have its own download folder (File
+  transfers section of the entry editor, or Change... in the Download dialog); otherwise the
+  first download asks for a default folder (the panel opens in Downloads) and AnsiView keeps
+  its permission (a security scoped bookmark: the app is sandboxed and can write only where you
+  chose). Names from the BBS are cleaned (no paths, no device names), existing files are never
+  overwritten (`name-1.ext`), and a file arrives as `name.part` until it is complete.
+- **Partial files and resume:** a cancelled or failed ZMODEM download keeps its `.part`, and the
+  next ZMODEM download of the same file continues from there. Other protocols cannot resume, so
+  their partial file is removed.
+- **Telnet:** before a transfer AnsiView asks the BBS for telnet binary mode both ways. If the
+  BBS refuses, the panel warns; ZMODEM then also escapes the bytes telnet could change and
+  Kermit uses 8th bit prefixing, but XMODEM and YMODEM may fail on such a line.
+- The entry editor remembers the protocol you used last for each BBS.
+
 ### Copy and paste
 
 Drag over the art in any AnsiView window (the viewer, slideshows and presentation mode, not

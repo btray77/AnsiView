@@ -21,12 +21,25 @@ final class TerminalMusic {
 
     deinit { output?.stop() }
 
+    /// True during a file transfer: no music plays or holds (a playing tune stops).
+    private(set) var suspended = false
+
+    /// A file transfer starts: music stops; returns the bytes `bytes` and any bytes that waited
+    /// for foreground music, for the screen at once.
+    func suspend(drawing bytes: [UInt8]) -> [UInt8] {
+        suspended = true
+        return screenBytes(bytes)
+    }
+
+    /// The transfer ended: music plays again from the next tune that arrives.
+    func resumeAfterTransfer() { suspended = false }
+
     /// True while foreground music holds the screen (the line pacer should not release more).
     var isHolding: Bool { gate.isHolding(at: clock()) }
 
     /// The bytes due on screen (empty to release what waited); returns what the emulator may show.
     func screenBytes(_ bytes: [UInt8]) -> [UInt8] {
-        for event in gate.setPlays(PlaybackSpeed.ansiMusic && output != nil, at: clock()) { perform(event) }
+        for event in gate.setPlays(PlaybackSpeed.ansiMusic && output != nil && !suspended, at: clock()) { perform(event) }
         let out = gate.feed(bytes, at: clock())
         for event in out.events { perform(event) }
         return out.visual

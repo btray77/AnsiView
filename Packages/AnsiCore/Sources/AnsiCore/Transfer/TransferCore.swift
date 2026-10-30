@@ -17,7 +17,7 @@ public final class ManualTransferClock: TransferClock {
     public func advance(_ seconds: TimeInterval) { now += seconds }
 }
 
-public enum TransferProtocolKind: String, CaseIterable, Sendable {
+public enum TransferProtocolKind: String, CaseIterable, Codable, Sendable {
     case xmodem
     case xmodemCRC = "xmodem-crc"
     case xmodem1K = "xmodem-1k"

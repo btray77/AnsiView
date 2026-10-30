@@ -147,6 +147,21 @@ final class SSHTransport: BBSTransport {
         }
     }
 
+    func write(_ bytes: [UInt8], completion: @escaping () -> Void) {
+        guard let session, opened, !done, !bytes.isEmpty else {
+            completion()
+            return
+        }
+        let queue = self.queue
+        session.eventLoop.execute {
+            var buffer = session.allocator.buffer(capacity: bytes.count)
+            buffer.writeBytes(bytes)
+            let promise = session.eventLoop.makePromise(of: Void.self)
+            promise.futureResult.whenComplete { _ in queue.async { completion() } }
+            session.writeAndFlush(SSHChannelData(type: .channel, data: .byteBuffer(buffer)), promise: promise)
+        }
+    }
+
     func resize(columns: Int, rows: Int) {
         self.columns = columns
         self.rows = rows
