@@ -731,7 +731,7 @@ final class TransferPanelView: NSView {
 
     let title = NSTextField(labelWithString: "")
     let fileName = NSTextField(labelWithString: "")
-    let bar = NSProgressIndicator()
+    let bar = TransferProgressBar()
     let warning = NSTextField(wrappingLabelWithString: "")
     let note = NSTextField(labelWithString: "")
     private var values: [String: NSTextField] = [:]
@@ -769,10 +769,7 @@ final class TransferPanelView: NSView {
         fileName.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
         fileName.lineBreakMode = .byTruncatingMiddle
         fileName.toolTip = "The file going across now."
-        bar.isIndeterminate = false
-        bar.minValue = 0
-        bar.maxValue = 1
-        bar.style = .bar
+        bar.heightAnchor.constraint(equalToConstant: 10).isActive = true
         bar.toolTip = "How much of the current file has gone across."
         warning.textColor = .systemOrange
         warning.font = .systemFont(ofSize: 12, weight: .semibold)
@@ -855,13 +852,7 @@ final class TransferPanelView: NSView {
         title.stringValue = m.title
         fileName.stringValue = m.fileName
         fileName.isHidden = false
-        if let fraction = m.fraction {
-            bar.isIndeterminate = false
-            bar.doubleValue = fraction
-        } else {
-            bar.isIndeterminate = true
-            bar.startAnimation(nil)
-        }
+        bar.fraction = m.fraction
         bar.isHidden = false
         values["file"]?.stringValue = m.fileLine
         values["bytes"]?.stringValue = m.bytesLine
@@ -891,7 +882,6 @@ final class TransferPanelView: NSView {
         title.stringValue = s.headline
         title.toolTip = s.headline
         title.lineBreakMode = .byTruncatingTail
-        bar.stopAnimation(nil)
         bar.isHidden = true
         grid.isHidden = true
         fileName.isHidden = s.folder == nil
@@ -914,6 +904,40 @@ final class TransferPanelView: NSView {
     @objc func close() { onClose?() }
     @objc func reveal() { onReveal?() }
     @objc func showLog() { onShowLog?() }
+}
+
+/// A plain progress bar (drawn, so it looks the same in every window state); nil fraction
+/// (size unknown) shows a hatched bar.
+final class TransferProgressBar: NSView {
+    var fraction: Double? { didSet { needsDisplay = true } }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let track = NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2)
+        NSColor(calibratedWhite: 0.3, alpha: 1).setFill()
+        track.fill()
+        guard let fraction else {
+            NSGraphicsContext.saveGraphicsState()
+            track.addClip()
+            NSColor.systemBlue.withAlphaComponent(0.5).setFill()
+            var x = bounds.minX - bounds.height
+            while x < bounds.maxX {
+                let stripe = NSBezierPath()
+                stripe.move(to: NSPoint(x: x, y: bounds.minY))
+                stripe.line(to: NSPoint(x: x + bounds.height, y: bounds.maxY))
+                stripe.line(to: NSPoint(x: x + bounds.height * 2, y: bounds.maxY))
+                stripe.line(to: NSPoint(x: x + bounds.height, y: bounds.minY))
+                stripe.fill()
+                x += bounds.height * 3
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            return
+        }
+        let width = bounds.width * CGFloat(max(0, min(1, fraction)))
+        guard width > 0 else { return }
+        NSColor.systemBlue.setFill()
+        NSBezierPath(roundedRect: NSRect(x: bounds.minX, y: bounds.minY, width: max(width, bounds.height), height: bounds.height),
+                     xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+    }
 }
 
 // MARK: - Transfer log window
