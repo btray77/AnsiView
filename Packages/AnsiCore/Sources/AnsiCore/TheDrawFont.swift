@@ -93,7 +93,7 @@ public enum TDFError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .notTDF: return "This file is not a TheDraw font file (.TDF)."
-        case .tooLarge: return "This font file is larger than 16 MB, which no TheDraw font file is."
+        case .tooLarge: return "This font file is larger than 64 MB, which no TheDraw font file is."
         case .noFonts: return "This TheDraw font file has no readable font in it."
         case .blockTooLarge(let name):
             return "The font \"\(name)\" is too large for a TheDraw font file (its glyphs need more than 65,535 bytes)."
@@ -105,8 +105,8 @@ public enum TDFError: LocalizedError, Equatable {
 public enum TDFFile {
     public static let signature: [UInt8] = [0x13] + Array("TheDraw FONTS file".utf8) + [0x1A]
     static let fontMarker: [UInt8] = [0x55, 0xAA, 0x00, 0xFF]
-    public static let maxFileSize = 16 << 20
-    public static let maxFonts = 2048
+    public static let maxFileSize = 64 << 20
+    public static let maxFonts = 10_000
     public static let maxRows = 64
     public static let maxRowCells = 255
     static let headerSize = 213

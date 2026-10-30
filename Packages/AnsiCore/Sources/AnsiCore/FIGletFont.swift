@@ -215,11 +215,16 @@ public struct FIGletFont: Equatable {
     /// the character, else the other case, else the font's character 0 (the FIGfont missing
     /// character). Nil means nothing is drawn.
     func glyphCode(for scalar: Unicode.Scalar) -> (code: Int, found: Bool)? {
+        // An empty glyph (no columns) is how many fonts leave a character out.
+        func has(_ code: Int) -> Bool {
+            guard let rows = glyphs[code] else { return false }
+            return code == 32 || rows.contains { !$0.isEmpty }
+        }
         let code = Int(scalar.value)
-        if glyphs[code] != nil { return (code, true) }
+        if has(code) { return (code, true) }
         let text = String(scalar)
         for other in [text.uppercased(), text.lowercased()] where other != text {
-            if let s = other.unicodeScalars.first, other.unicodeScalars.count == 1, glyphs[Int(s.value)] != nil {
+            if let s = other.unicodeScalars.first, other.unicodeScalars.count == 1, has(Int(s.value)) {
                 return (Int(s.value), true)
             }
         }
