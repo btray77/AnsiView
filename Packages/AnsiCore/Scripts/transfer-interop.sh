@@ -7,11 +7,11 @@
 #   swift build -c release --product ansixfer      (in Packages/AnsiCore)
 #   Scripts/transfer-interop.sh <work-dir> [test ...]
 #
-# Tests: files xmodem ymodem zmodem zresume kermit telnet throughput (default: all)
+# Tests: files xmodem ymodem zmodem zresume kermit auto telnet throughput (default: all)
 set -u
 WORK=${1:?work directory}
 shift
-TESTS=${*:-files xmodem ymodem zmodem zresume kermit telnet throughput}
+TESTS=${*:-files xmodem ymodem zmodem zresume kermit auto telnet throughput}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 X=${ANSIXFER:-$HERE/.build/release/ansixfer}
 F=$WORK/files
@@ -224,6 +224,30 @@ t_throughput() {
         wait
         if [ "${kind#xmodem}" != "$kind" ]; then check_padded "$kind throughput" "$F/big10m.bin" "$out/big10m.bin"; else check "$kind throughput" "$F/big10m.bin" "$out/big10m.bin"; fi
     done
+}
+
+t_auto() {
+    # A "BBS" prints a banner, then starts a transfer program; ansixfer auto acts like the
+    # terminal: it shows the text until the detector sees the start, then runs the engine.
+    local out=$WORK/auto
+    fresh "$out"
+    echo "+ ansixfer auto --exec \"banner; lsz r1048576.bin everybyte.bin\""
+    "$X" auto --quiet --dir "$out" --exec "printf 'Welcome to the test BBS\r\nStarting ZMODEM download...\r\n'; sleep 1; cd '$F' && lsz -q r1048576.bin everybyte.bin" 2>&1 | grep -E "^\[auto\]|^terminal|^result|^elapsed"
+    check "auto zmodem lsz->ours" "$F/r1048576.bin" "$out/r1048576.bin"
+    check "auto zmodem lsz->ours" "$F/everybyte.bin" "$out/everybyte.bin"
+    fresh "$out"
+    echo "+ ansixfer auto r1025.bin --exec \"banner; lrz\""
+    (cd "$F" && "$X" auto --quiet --dir "$out" r1025.bin --exec "printf 'Upload with ZMODEM now\r\n'; cd '$out' && lrz -q -y") 2>&1 | grep -E "^\[auto\]|^terminal|^result|^elapsed"
+    check "auto zmodem ours->lrz" "$F/r1025.bin" "$out/r1025.bin"
+    fresh "$out"
+    echo "+ ansixfer auto --pty \"banner; kermit -s r1025.bin\""
+    "$X" auto --quiet --dir "$out" --pty "printf 'Kermit download\r\n'; cd '$F' && $KERMIT -i -s r1025.bin" 2>&1 | grep -E "^\[auto\]|^terminal|^result|^elapsed"
+    check "auto kermit ckermit->ours" "$F/r1025.bin" "$out/R1025.BIN"
+    fresh "$out"
+    placeholders "$out"
+    echo "+ ansixfer auto r1025.bin --pty \"banner; kermit -w -r\""
+    (cd "$F" && "$X" auto --quiet --dir "$out" r1025.bin --pty "printf 'Kermit upload\r\n'; cd '$out' && $KERMIT -i -w -r") 2>&1 | grep -E "^\[auto\]|^terminal|^result|^elapsed"
+    check "auto kermit ours->ckermit" "$F/r1025.bin" "$out/r1025.bin"
 }
 
 for t in $TESTS; do

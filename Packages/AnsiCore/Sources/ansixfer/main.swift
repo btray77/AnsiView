@@ -8,6 +8,9 @@ import Foundation
 let usage = """
 usage: ansixfer send <protocol> [options] <file>... <channel>
        ansixfer receive <protocol> [options] --dir <directory> <channel>
+       ansixfer auto [options] --dir <directory> [file...] <channel>
+           acts like a terminal: shows the other side's output until it starts ZMODEM or Kermit,
+           then receives (or sends the files, when the other side waits to receive)
 protocols: xmodem xmodem-crc xmodem-1k ymodem ymodem-g zmodem kermit
 channels:  --exec "<command>"     child on a socket pair (its stdin and stdout)
            --pty "<command>"      child on a pseudo terminal in raw mode
@@ -49,14 +52,20 @@ enum Channel {
 
 var arguments = Array(CommandLine.arguments.dropFirst())
 guard arguments.count >= 2 else { die(usage) }
-let direction: TransferDirection
+var direction = TransferDirection.receive
+var kind = TransferProtocolKind.zmodem
+var autoMode = false
 switch arguments.removeFirst() {
 case "send": direction = .send
 case "receive", "recv": direction = .receive
+case "auto": autoMode = true
 case "--help", "-h": print(usage); exit(0)
 default: die(usage)
 }
-guard let kind = TransferProtocolKind(rawValue: arguments.removeFirst()) else { die("unknown protocol\n" + usage) }
+if !autoMode {
+    guard let chosen = TransferProtocolKind(rawValue: arguments.removeFirst()) else { die("unknown protocol\n" + usage) }
+    kind = chosen
+}
 
 var options = TransferOptions()
 var sinkOptions = DownloadsDirectorySink.Options()
@@ -208,20 +217,46 @@ func openChannel(_ channel: Channel) -> Int32 {
 // MARK: Session
 
 let clock = SystemTransferClock()
-let session: FileTransferSession
-switch direction {
-case .send:
-    guard !files.isEmpty else { die("nothing to send") }
-    let outgoing = files.map { path -> OutgoingFile in
-        do { return try OutgoingFile(url: URL(fileURLWithPath: path)) } catch { die("cannot read \(path): \(error)", 1) }
+
+extension TransferEvent {
+    var isProblem: Bool {
+        switch self {
+        case .failed, .cancelled, .fileSkipped: return true
+        default: return false
+        }
     }
-    session = FileTransferSession(sending: outgoing, kind: kind, options: options, clock: clock)
-case .receive:
-    guard let directory else { die("receive needs --dir") }
-    let url = URL(fileURLWithPath: directory, isDirectory: true)
-    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    session = FileTransferSession(receivingInto: DownloadsDirectorySink(directory: url, options: sinkOptions), kind: kind,
-                                  options: options, clock: clock, xmodemFileName: xmodemName)
+}
+
+var lastProgressLine = 0.0
+
+func makeSession(_ kind: TransferProtocolKind, _ direction: TransferDirection) -> FileTransferSession {
+    let session: FileTransferSession
+    switch direction {
+    case .send:
+        guard !files.isEmpty else { die("nothing to send") }
+        let outgoing = files.map { path -> OutgoingFile in
+            do { return try OutgoingFile(url: URL(fileURLWithPath: path)) } catch { die("cannot read \(path): \(error)", 1) }
+        }
+        session = FileTransferSession(sending: outgoing, kind: kind, options: options, clock: clock)
+    case .receive:
+        guard let directory else { die("receive needs --dir") }
+        let url = URL(fileURLWithPath: directory, isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        session = FileTransferSession(receivingInto: DownloadsDirectorySink(directory: url, options: sinkOptions), kind: kind,
+                                      options: options, clock: clock, xmodemFileName: xmodemName)
+    }
+    session.onEvent = { event in
+        if !quiet || event.isProblem {
+            note("[\(kind.rawValue) \(direction.rawValue)] " + FileTransferSession.describe(event))
+        }
+    }
+    session.onProgress = { p in
+        guard !quiet, clock.now - lastProgressLine >= 1 else { return }
+        lastProgressLine = clock.now
+        let size = p.fileSize.map { "/\($0)" } ?? ""
+        note(String(format: "[progress] %@ %d%@ bytes, %.0f B/s", p.fileName ?? "-", p.fileBytes, size, p.bytesPerSecond))
+    }
+    return session
 }
 
 var interrupted: sig_atomic_t = 0
@@ -249,50 +284,61 @@ if useTelnet {
     telnet = channel
 }
 
-session.onEvent = { event in
-    if !quiet || event.isProblem {
-        note("[\(kind.rawValue) \(direction.rawValue)] " + FileTransferSession.describe(event))
-    }
-}
-var lastProgressLine = 0.0
-session.onProgress = { p in
-    guard !quiet, clock.now - lastProgressLine >= 1 else { return }
-    lastProgressLine = clock.now
-    let size = p.fileSize.map { "/\($0)" } ?? ""
-    note(String(format: "[progress] %@ %d%@ bytes, %.0f B/s", p.fileName ?? "-", p.fileBytes, size, p.bytesPerSecond))
+var session: FileTransferSession?
+var detector = TransferStartDetector()
+var terminalBytes = 0
+var terminalText: [UInt8] = []
+let opened = clock.now
+var started = clock.now
+if !autoMode {
+    session = makeSession(kind, direction)
+    session!.start()
 }
 
-extension TransferEvent {
-    var isProblem: Bool {
-        switch self {
-        case .failed, .cancelled, .fileSkipped: return true
-        default: return false
-        }
-    }
-}
-
-session.start()
 var buffer = [UInt8](repeating: 0, count: 65536)
 var eof = false
 var finishedAt: Double?
 var killed = false
-let started = clock.now
+
+/// Bytes from the line: to the session, or (auto mode, before a start) through the detector.
+func incoming(_ bytes: [UInt8]) {
+    if let session {
+        session.feed(bytes)
+        return
+    }
+    guard let match = detector.scan(bytes) else {
+        terminalBytes += bytes.count
+        terminalText += bytes.prefix(max(0, 400 - terminalText.count))
+        return
+    }
+    terminalBytes += match.terminalBytes.count
+    terminalText += match.terminalBytes.prefix(max(0, 400 - terminalText.count))
+    kind = match.kind.kind
+    direction = match.kind.direction
+    note(String(format: "[auto] after %d terminal bytes (%.2f s): %@ start detected, %@ with %@", terminalBytes, clock.now - opened,
+                match.kind.rawValue, direction == .receive ? "receiving" : "sending", kind.displayName))
+    let created = makeSession(kind, direction)
+    started = clock.now
+    created.start()
+    created.feed(match.transferBytes)
+    session = created
+}
 
 loop: while true {
     if interrupted != 0 {
         interrupted = 0
-        session.cancel(reason: "interrupted")
+        if let session { session.cancel(reason: "interrupted") } else { break loop }
     }
-    if let limit = abortAfter, !session.isFinished, session.engine.progress.sessionBytes >= limit {
+    if let limit = abortAfter, let session, !session.isFinished, session.engine.progress.sessionBytes >= limit {
         abortAfter = nil
         session.cancel(reason: "test abort after \(limit) bytes")
     }
-    if let limit = killAfter, session.engine.progress.sessionBytes >= limit {
+    if let limit = killAfter, let session, session.engine.progress.sessionBytes >= limit {
         note("[test] stopping dead after \(session.engine.progress.sessionBytes) bytes")
         killed = true
         break loop
     }
-    if pending.count < 65536 {
+    if pending.count < 65536, let session {
         let out = session.takeOutput(max: 65536)
         if !out.isEmpty { pending += telnet?.encode(out) ?? out }
     }
@@ -311,7 +357,7 @@ loop: while true {
                     pending += decoded.reply
                     bytes = decoded.data
                 }
-                session.feed(bytes)
+                incoming(bytes)
             } else if n == 0 || (errno != EAGAIN && errno != EINTR) {
                 eof = true
             }
@@ -321,6 +367,10 @@ loop: while true {
             let n = pending.withUnsafeBytes { write(writeFD, $0.baseAddress, $0.count) }
             if n > 0 { pending.removeFirst(n) } else if n < 0, errno != EAGAIN, errno != EINTR { pending.removeAll(); eof = true }
         }
+    }
+    guard let session else {
+        if eof { break loop }
+        continue
     }
     session.tick()
     if eof, !session.isFinished {
@@ -334,9 +384,6 @@ loop: while true {
 }
 
 let elapsed = clock.now - started
-if !killed, telnet == nil || true {
-    // Nothing else to do; closing the channel lets a child see end of file.
-}
 if fd >= 0 { close(fd) }
 var childStatus = "none"
 if let pid = childPid {
@@ -357,8 +404,12 @@ if let pid = childPid {
     }
 }
 
-let moved = session.engine.progress.sessionBytes
-switch session.outcome {
+if autoMode {
+    let shown = String(decoding: terminalText, as: UTF8.self).replacingOccurrences(of: "\r", with: "\\r").replacingOccurrences(of: "\n", with: "\\n")
+    print("terminal: \(terminalBytes) bytes shown before the transfer: \"\(shown)\"")
+}
+let moved = session?.engine.progress.sessionBytes ?? 0
+switch session?.outcome {
 case .completed(let done):
     print("result: completed")
     for file in done {
@@ -370,10 +421,10 @@ case .failed(let reason):
 case .cancelled(let reason):
     print("result: cancelled: \(reason)")
 case nil:
-    print("result: stopped")
+    print(session == nil ? "result: no transfer started" : "result: stopped")
 }
 print(String(format: "elapsed=%.3f s file_bytes=%d rate=%.0f B/s child=%@", elapsed, moved, elapsed > 0 ? Double(moved) / elapsed : 0, childStatus))
-switch session.outcome {
+switch session?.outcome {
 case .completed: exit(0)
 case .cancelled: exit(3)
 default: exit(1)
