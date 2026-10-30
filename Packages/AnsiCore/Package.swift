@@ -8,7 +8,7 @@ let package = Package(
         .library(name: "AnsiCore", targets: ["AnsiCore"]),
     ],
     targets: [
-        .target(name: "AnsiCore"),
+        .target(name: "AnsiCore", resources: [.copy("Resources/Fonts")]),
         .testTarget(name: "AnsiCoreTests", dependencies: ["AnsiCore"]),
     ],
     swiftLanguageVersions: [.v5]
