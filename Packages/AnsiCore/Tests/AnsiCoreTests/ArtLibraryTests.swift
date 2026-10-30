@@ -85,6 +85,19 @@ struct ArtLibraryTests {
         #expect(listed.first { $0.url.lastPathComponent == "one.ans" }?.size == 1)
     }
 
+    @Test func listingKeepsTheFolderPathAsGiven() throws {
+        // The temporary folder is under /var, a symbolic link to /private/var: listed paths must
+        // start with the folder's path as given, so rescans recognise the files they read before.
+        let dir = try tempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("a"), withIntermediateDirectories: true)
+        try Data("A".utf8).write(to: dir.appendingPathComponent("a/x.ans"))
+        for form in [dir.standardizedFileURL, dir.resolvingSymlinksInPath()] {
+            let listed = LibraryScanner.listing(folder: form)
+            #expect(listed.map(\.url.path) == [form.path + "/a/x.ans"])
+        }
+    }
+
     @Test func packRecordsOnePerEntry() throws {
         let dir = try tempFolder()
         defer { try? FileManager.default.removeItem(at: dir) }

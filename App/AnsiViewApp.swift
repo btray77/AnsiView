@@ -300,6 +300,11 @@ struct AnsiViewApp: App {
             // SwiftUI takes at most ten entries per builder, so the later menus share a Group.
             Group {
                 CommandGroup(before: .windowList) {
+                    Button("Library") { LibraryWindowController.show() }
+                        .keyboardShortcut("l", modifiers: [.command, .shift])
+                        .help("Your art folders in one place: search, tags, ratings, favourites, smart folders, artist and group pages.")
+                    Button("Duplicates in Library") { DuplicatesWindowController.show(store: .shared) }
+                        .help("Copies of the same art across the library's folders and packs, to review and move to the Trash.")
                     Button("ANSI Music Editor") { MusicEditorWindowController.show() }
                         .keyboardShortcut("m", modifiers: [.command, .shift])
                     Button("Text to ASCII") { TextToASCIIWindowController.show(editor: nil) }

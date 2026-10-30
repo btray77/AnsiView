@@ -118,6 +118,16 @@ public enum LibraryScanner {
         guard let walker = FileManager.default.enumerator(
             at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles, .skipsPackageDescendants])
         else { return [] }
+        // The enumerator may answer with another spelling of the folder (/private/var for /var):
+        // listed paths keep the folder's path as given, so rescans match what they read before.
+        let base = folder.path.hasSuffix("/") ? String(folder.path.dropLast()) : folder.path
+        let resolved = folder.resolvingSymlinksInPath().path
+        let spellings = [base, "/private" + base, resolved, "/private" + resolved].sorted { $0.count > $1.count }
+        func given(_ url: URL) -> URL {
+            let path = url.path
+            guard let prefix = spellings.first(where: { path.hasPrefix($0 + "/") }) else { return url }
+            return URL(fileURLWithPath: base + path.dropFirst(prefix.count))
+        }
         var found: [ListedFile] = []
         for case let url as URL in walker {
             guard let values = try? url.resourceValues(forKeys: Set(keys)) else { continue }
@@ -129,7 +139,7 @@ public enum LibraryScanner {
             let ext = url.pathExtension.lowercased()
             let isPack = ext == "zip"
             guard isPack || ArtFiles.extensions.contains(ext) else { continue }
-            found.append(ListedFile(url: url, size: values.fileSize ?? 0,
+            found.append(ListedFile(url: given(url), size: values.fileSize ?? 0,
                                     modified: values.contentModificationDate ?? .distantPast, isPack: isPack))
         }
         return found
