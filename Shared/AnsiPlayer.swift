@@ -23,6 +23,10 @@ enum PlaybackSpeed {
     static let crtEffectKey = "crtEffect"
     static var crtEffect: Bool { defaults.bool(forKey: crtEffectKey) }
 
+    /// Synthesized modem sounds during playback (app only; Quick Look stays silent).
+    static let modemSoundsKey = "modemSounds"
+    static var modemSounds: Bool { defaults.bool(forKey: modemSoundsKey) }
+
     /// Hold the last frame of a playback until clicked, instead of going straight to the finished art.
     static let holdFinalFrameKey = "holdFinalFrame"
     static var holdFinalFrame: Bool { defaults.bool(forKey: holdFinalFrameKey) }
@@ -54,6 +58,14 @@ enum PlaybackSpeed {
         let index = choices.firstIndex(of: baud) ?? choices.firstIndex(of: defaultBaud)!
         return choices[min(choices.count - 1, max(0, index + direction))]
     }
+}
+
+/// What the line sounds like: the handshake before the art, noise while bytes flow, or nothing.
+enum PlaybackSoundState { case connecting, streaming, quiet }
+
+/// Plays the line sounds for a player. The app supplies one; Quick Look does not.
+protocol PlaybackSound: AnyObject {
+    func playbackStateChanged(_ state: PlaybackSoundState)
 }
 
 /// The playback speed of one file's window. The app's speed commands act on the focused one.
@@ -142,6 +154,14 @@ final class AnsiPlayerViewController: NSViewController {
     var isTerminalMode: Bool { analysis.canvasRows > TerminalViewport.rows && !screenIsFinal }
     /// Rows on screen now: the terminal window during playback of tall art, else the whole canvas.
     var displayedRows: Int { isTerminalMode ? TerminalViewport.rows : analysis.canvasRows }
+    /// Line sounds; used only while `PlaybackSpeed.modemSounds` is on.
+    var sound: PlaybackSound?
+    private var soundState = PlaybackSoundState.quiet
+    /// Waits for the handshake to finish before the art starts drawing.
+    private var connectTimer: Timer?
+    var isConnecting: Bool { connectTimer != nil }
+    private var soundsOn: Bool { sound != nil && PlaybackSpeed.modemSounds }
+
     /// True when playback reached the end and is holding its last frame until clicked.
     private(set) var isHolding = false
     /// Called each time a playback in progress reaches the finished art (end of stream without a
@@ -156,7 +176,7 @@ final class AnsiPlayerViewController: NSViewController {
         CGSize(width: contentSize.width, height: contentSize.height + (timeline == nil ? 0 : Self.timelineBarHeight))
     }
 
-    var isPlaying: Bool { frameTimer != nil }
+    var isPlaying: Bool { frameTimer != nil || connectTimer != nil }
     /// Bytes of the stream played so far.
     var playbackPosition: Int { terminal.position }
     var isPaused: Bool { !isPlaying && terminal.position > 0 && !terminal.isFinished }
@@ -323,8 +343,31 @@ final class AnsiPlayerViewController: NSViewController {
         showTerminal()
         Logger(subsystem: "com.traynham.ansiview", category: "playback")
             .info("Playback started at \(self.speed.baud, privacy: .public) baud")
-        showHUD("\(PlaybackSpeed.label(speed.baud))  \u{00B7}  click to skip")
+        guard soundsOn else {
+            showHUD("\(PlaybackSpeed.label(speed.baud))  \u{00B7}  click to skip")
+            startTimer()
+            return
+        }
+        // Dial and handshake first; the art arrives after CONNECT.
+        showHUD("Dialing...  \u{00B7}  click to skip")
+        setSound(.connecting)
+        let timer = Timer(timeInterval: ModemSound.handshakeSeconds, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.connected() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        connectTimer = timer
+    }
+
+    private func connected() {
+        connectTimer = nil
+        showHUD("CONNECT \(speed.baud)")
         startTimer()
+    }
+
+    private func setSound(_ state: PlaybackSoundState) {
+        guard state != soundState else { return }
+        soundState = state
+        sound?.playbackStateChanged(state)
     }
 
     /// Finishes playback and shows the finished art.
@@ -413,11 +456,15 @@ final class AnsiPlayerViewController: NSViewController {
         }
         RunLoop.main.add(timer, forMode: .common)
         frameTimer = timer
+        if soundsOn { setSound(.streaming) }
     }
 
     private func stopPlayback() {
         frameTimer?.invalidate()
         frameTimer = nil
+        connectTimer?.invalidate()
+        connectTimer = nil
+        setSound(.quiet)
     }
 
     private func advanceFrame() {
@@ -447,6 +494,15 @@ final class AnsiPlayerViewController: NSViewController {
         if PlaybackSpeed.crtEffect != shownCRT {
             shownCRT = PlaybackSpeed.crtEffect
             redraw()
+        }
+        if !soundsOn {
+            setSound(.quiet)
+            if isConnecting {
+                connectTimer?.invalidate()
+                connected()
+            }
+        } else if frameTimer != nil {
+            setSound(.streaming)
         }
         speed.refresh()
         let baud = speed.baud

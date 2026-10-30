@@ -42,6 +42,8 @@ struct AnsiViewApp: App {
     private var crtEffect = false
     @AppStorage(PlaybackSpeed.holdFinalFrameKey, store: PlaybackSpeed.defaults)
     private var holdFinalFrame = false
+    @AppStorage(PlaybackSpeed.modemSoundsKey, store: PlaybackSpeed.defaults)
+    private var modemSounds = false
     /// The focused art window's speed; speed commands change that file's remembered speed.
     @FocusedObject private var focusedSpeed: PlayerSpeed?
 
@@ -94,6 +96,7 @@ struct AnsiViewApp: App {
                 }
                 Divider()
                 Toggle("Hold Final Frame", isOn: $holdFinalFrame)
+                Toggle("Modem Sounds", isOn: $modemSounds)
             }
         }
     }
@@ -120,7 +123,9 @@ struct AnsiPlayerView: NSViewControllerRepresentable {
     let speed: PlayerSpeed
 
     func makeNSViewController(context: Context) -> AnsiPlayerViewController {
-        AnsiPlayerViewController(source: source, speed: speed)
+        let controller = AnsiPlayerViewController(source: source, speed: speed)
+        controller.sound = ModemSoundPlayer()
+        return controller
     }
 
     func updateNSViewController(_ controller: AnsiPlayerViewController, context: Context) {}
