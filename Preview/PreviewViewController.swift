@@ -13,6 +13,8 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
     func preparePreviewOfFile(at url: URL) async throws {
         let data = try Data(contentsOf: url)
         let player = AnsiPlayerViewController(source: ArtFile(data: data, fileExtension: url.pathExtension))
+        // Left and Right keep moving between selected files in Quick Look; the scrub bar still works.
+        player.handlesArrowKeys = false
         addChild(player)
         player.view.frame = view.bounds
         player.view.autoresizingMask = [.width, .height]

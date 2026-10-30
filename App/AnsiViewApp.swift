@@ -81,9 +81,7 @@ struct AnsiViewApp: App {
                 Button("Skip to End") { send(#selector(AnsiCanvasView.skipAnimation(_:))) }
                     .keyboardShortcut(".")
                 Button("Previous Frame") { send(#selector(AnsiCanvasView.previousFrame(_:))) }
-                    .keyboardShortcut(.leftArrow, modifiers: [])
                 Button("Next Frame") { send(#selector(AnsiCanvasView.nextFrame(_:))) }
-                    .keyboardShortcut(.rightArrow, modifiers: [])
                 Divider()
                 Button("Faster") { speedBinding.wrappedValue = PlaybackSpeed.step(speedBinding.wrappedValue, by: 1) }
                     .keyboardShortcut("]")

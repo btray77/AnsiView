@@ -154,6 +154,10 @@ final class AnsiPlayerViewController: NSViewController {
     var isTerminalMode: Bool { analysis.canvasRows > TerminalViewport.rows && !screenIsFinal }
     /// Rows on screen now: the terminal window during playback of tall art, else the whole canvas.
     var displayedRows: Int { isTerminalMode ? TerminalViewport.rows : analysis.canvasRows }
+    /// Left and Right arrows step frames. Quick Look turns this off so the arrows keep moving
+    /// between the selected files.
+    var handlesArrowKeys = true
+
     /// Line sounds; used only while `PlaybackSpeed.modemSounds` is on.
     var sound: PlaybackSound?
     private var soundState = PlaybackSoundState.quiet
@@ -441,7 +445,7 @@ final class AnsiPlayerViewController: NSViewController {
     private func skipOrReplay() {
         if isHolding {
             finishHold()
-        } else if isPlaying {
+        } else if isPlaying || isPaused {
             skipToEnd()
         } else if analysis.isAnimated {
             replay()
@@ -615,10 +619,15 @@ final class AnsiCanvasView: NSView {
     }
 
     /// Left and Right arrows step frames (Quick Look has no menus to carry the shortcuts).
+    /// Only animated art in a host that wants them takes the arrows; otherwise they pass on.
     override func keyDown(with event: NSEvent) {
+        guard let player, player.timeline != nil, player.handlesArrowKeys else {
+            super.keyDown(with: event)
+            return
+        }
         switch event.keyCode {
-        case 123: player?.stepFrame(-1)
-        case 124: player?.stepFrame(1)
+        case 123: player.stepFrame(-1)
+        case 124: player.stepFrame(1)
         default: super.keyDown(with: event)
         }
     }
