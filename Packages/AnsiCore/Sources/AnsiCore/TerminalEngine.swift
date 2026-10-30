@@ -16,6 +16,8 @@ public protocol TerminalEngine {
     var scrollbackCount: Int { get }
     /// The font this platform draws with; nil uses the entry's font.
     var font: BitmapFont? { get }
+    /// How much wider than its font pixels the screen is shown (teletext filled a 4:3 television).
+    var horizontalStretch: Double { get }
 
     mutating func feed(_ bytes: [UInt8])
     /// Bytes the terminal must send back (status reports), cleared by the call.
@@ -39,6 +41,7 @@ public protocol TerminalEngine {
 
 public extension TerminalEngine {
     var font: BitmapFont? { nil }
+    var horizontalStretch: Double { 1 }
     func bytes(for key: TerminalKey, backspaceSendsDelete: Bool) -> [UInt8] {
         TerminalInput.bytes(for: key, backspaceSendsDelete: backspaceSendsDelete)
     }

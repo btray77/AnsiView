@@ -36,6 +36,8 @@ public struct TeletextTerminal: TerminalEngine {
     }
 
     public var font: BitmapFont? { PlatformFonts.teletext }
+    /// 40 cells of 12x20 pixels fill a 4:3 picture: each pixel is shown a third wider than tall.
+    public var horizontalStretch: Double { 4.0 / 3.0 }
     public var cursor: (row: Int, column: Int) { (row, column) }
     public var scrollbackCount: Int { scrollback.count }
     public mutating func takeReplies() -> [UInt8] { [] }

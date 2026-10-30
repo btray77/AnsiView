@@ -22,6 +22,13 @@ public enum PlatformFonts {
 
     /// A base character in an 8 pixel cell, one column in; thick doubles every stroke to the right.
     static func letter(_ c: Character, thick: Bool, shiftDown: Int = 0) -> Glyph {
+        if thick, let wide = GlyphsBase.thick[c] {
+            var g = blank
+            for y in 0..<8 where y - shiftDown >= 0 {
+                for (x, ch) in wide[y - shiftDown].enumerated() where ch == "#" { g[y * 8 + x] = true }
+            }
+            return g
+        }
         let rows = GlyphsBase.rows(c)
         var g = blank
         for y in 0..<8 {

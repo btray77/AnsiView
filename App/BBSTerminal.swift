@@ -25,7 +25,7 @@ final class TerminalView: NSView {
     /// The art's rectangle in the view: scaled to fit, aspect kept, centered.
     private var artRect: NSRect {
         guard let controller else { return .zero }
-        let width = CGFloat(controller.emulator.columns * font.width)
+        let width = CGFloat(controller.emulator.columns * font.width) * CGFloat(controller.emulator.horizontalStretch)
         let height = CGFloat(controller.emulator.rows * font.height)
         let scale = max(0.1, min(bounds.width / width, bounds.height / height))
         let size = NSSize(width: (width * scale).rounded(), height: (height * scale).rounded())
@@ -86,7 +86,9 @@ final class TerminalView: NSView {
         if controller.cursorOn, emulator.cursorVisible, controller.scrollOffset == 0 {
             let cellWidth = art.width / CGFloat(emulator.columns)
             let cursor = emulator.cursor
-            let cell = emulator.grid[cursor.row][cursor.column]
+            let shown = controller.visibleScreen().rows
+            guard cursor.row < shown.count, cursor.column < shown[cursor.row].count else { return }
+            let cell = shown[cursor.row][cursor.column]
             let thickness = max(2, (rowHeight / 8).rounded())
             NSColor(red: CGFloat(cell.fg.r) / 255, green: CGFloat(cell.fg.g) / 255, blue: CGFloat(cell.fg.b) / 255, alpha: 1).setFill()
             NSRect(x: art.minX + CGFloat(cursor.column) * cellWidth,
@@ -148,7 +150,20 @@ final class TerminalViewController: NSViewController {
     var savedEntry: (() -> BBSEntry?)?
     /// File transfers (App/TerminalTransfers.swift).
     private(set) lazy var transfers = TerminalTransfers(terminal: self)
-    private(set) var emulator: TerminalEmulator
+    private(set) var emulator: any TerminalEngine
+    /// Watches the start of the session for another terminal type (only suggests).
+    private var detector = TerminalDetector()
+    /// What the BBS sent since connecting (up to `replayLimit`), replayed when the type is switched.
+    private var sessionStart: [UInt8] = []
+    static let replayLimit = 256 * 1024
+    /// The suggestion bar shown when the detector thinks the BBS expects another terminal type.
+    let suggestionBar = NSStackView()
+    private let suggestionLabel = NSTextField(labelWithString: "")
+    private(set) var suggestedEmulation: TerminalEmulation?
+    /// Called when the terminal type was switched here, to save it in the directory.
+    var onEmulationChange: ((BBSEntry) -> Void)?
+    /// Asks about TLS certificates macOS does not trust (the harness swaps in one that answers by itself).
+    lazy var certificates = CertificatePrompt(window: { [weak self] in self?.view.window })
     private(set) var client: BBSClient?
     let terminalView = TerminalView()
     var sound: PlaybackSound?
@@ -200,8 +215,8 @@ final class TerminalViewController: NSViewController {
         self.entry = entry
         self.globalMacros = globalMacros
         self.passwords = passwords
-        emulator = TerminalEmulator(columns: entry.columns, rows: entry.rows, encoding: entry.encoding)
-        emulator.iceColors = entry.iceColors
+        emulator = TerminalEngines.make(entry.emulation, columns: entry.columns, rows: entry.rows,
+                                        encoding: entry.encoding, iceColors: entry.iceColors)
         baud = entry.baud
         pacer = LinePacer(baud: entry.baud)
         super.init(nibName: nil, bundle: nil)
@@ -232,8 +247,9 @@ final class TerminalViewController: NSViewController {
     override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 960, height: 622))
         terminalView.controller = self
-        terminalView.font = BitmapFont.named(entry.fontName)
+        terminalView.font = emulator.font ?? BitmapFont.named(entry.fontName)
         terminalView.translatesAutoresizingMaskIntoConstraints = false
+        buildSuggestionBar()
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         statusLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         statusLabel.textColor = .secondaryLabelColor
@@ -241,8 +257,12 @@ final class TerminalViewController: NSViewController {
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         container.addSubview(terminalView)
         container.addSubview(statusLabel)
+        container.addSubview(suggestionBar)
         transfers.install(over: terminalView, in: container)
         NSLayoutConstraint.activate([
+            suggestionBar.topAnchor.constraint(equalTo: container.topAnchor, constant: 4),
+            suggestionBar.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            suggestionBar.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 8),
             terminalView.topAnchor.constraint(equalTo: container.topAnchor),
             terminalView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             terminalView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -270,8 +290,12 @@ final class TerminalViewController: NSViewController {
         transfers.reset()
         pacer = LinePacer(baud: baud)
         music.reset(mode: entry.musicMode)
-        emulator = TerminalEmulator(columns: emulator.columns, rows: emulator.rows, encoding: entry.encoding)
-        emulator.iceColors = entry.iceColors
+        emulator = TerminalEngines.make(entry.emulation, columns: emulator.columns, rows: emulator.rows,
+                                        encoding: entry.encoding, iceColors: entry.iceColors)
+        terminalView.font = emulator.font ?? BitmapFont.named(entry.fontName)
+        detector = TerminalDetector()
+        sessionStart = []
+        hideSuggestion()
         scrollOffset = 0
         shownBells = 0
         loginRunner = nil
@@ -286,6 +310,7 @@ final class TerminalViewController: NSViewController {
         let client = BBSClient(host: entry.host, port: entry.port, settings: settings,
                                columns: emulator.columns, rows: emulator.rows, terminalTypes: entry.terminalTypes,
                                transport: makeTransport())
+        client.certificateVerifier = certificates
         client.onData = { [weak self] bytes in self?.receive(bytes) }
         client.onState = { [weak self] state in self?.clientChanged(state) }
         self.client = client
@@ -410,7 +435,7 @@ final class TerminalViewController: NSViewController {
             NSSound.beep()
             return
         }
-        send(TerminalInput.text(password, encoding: entry.encoding) + [13])
+        send(emulator.text(password, encoding: entry.encoding) + returnBytes)
     }
 
     func disconnect() {
@@ -474,6 +499,10 @@ final class TerminalViewController: NSViewController {
         }
         // Prompts are matched as they arrive, not as the speed emulation shows them.
         watch(bytes)
+        if sessionStart.count < Self.replayLimit { sessionStart += bytes.prefix(Self.replayLimit - sessionStart.count) }
+        if !detector.isFinished, let suggestion = detector.feed(bytes), suggestion != entry.emulation {
+            suggest(suggestion)
+        }
         pacer.push(bytes)
         if baud == 0 { tick(elapsed: 0) }
     }
@@ -489,6 +518,7 @@ final class TerminalViewController: NSViewController {
             emulator.feed(due)
             let replies = emulator.takeReplies()
             if !replies.isEmpty { client?.send(replies) }
+            applySpeedRequest()
         }
         if emulator.bells != shownBells {
             shownBells = emulator.bells
@@ -581,7 +611,7 @@ final class TerminalViewController: NSViewController {
     }
 
     func scrollBack(by lines: Int) {
-        let offset = min(max(0, scrollOffset + lines), emulator.scrollback.count)
+        let offset = min(max(0, scrollOffset + lines), emulator.scrollbackCount)
         guard offset != scrollOffset else { return }
         scrollOffset = offset
         terminalView.needsDisplay = true
@@ -649,10 +679,10 @@ final class TerminalViewController: NSViewController {
             }
         }
         if let key {
-            send(TerminalInput.bytes(for: key, backspaceSendsDelete: entry.backspaceSendsDelete))
+            send(emulator.bytes(for: key, backspaceSendsDelete: entry.backspaceSendsDelete))
             return
         }
-        if flags.contains(.control), let letter = ignoring.first, let bytes = TerminalInput.control(letter) {
+        if flags.contains(.control), let letter = ignoring.first, let bytes = emulator.control(letter) {
             send(bytes)
             return
         }
@@ -662,7 +692,89 @@ final class TerminalViewController: NSViewController {
     }
 
     func sendText(_ text: String) {
-        send(TerminalInput.text(text, encoding: entry.encoding))
+        send(emulator.text(text, encoding: entry.encoding))
+    }
+
+    /// Return as this terminal type sends it (CR, ATASCII EOL, the Prestel # key).
+    private var returnBytes: [UInt8] { emulator.bytes(for: .returnKey, backspaceSendsDelete: false) }
+
+    // MARK: Terminal type
+
+    /// A SyncTERM speed request (CSI Ps1 ; Ps2 * r) sets the simulated line speed.
+    private func applySpeedRequest() {
+        guard var ansi = emulator as? TerminalEmulator, let speed = ansi.takeSpeedRequest() else { return }
+        emulator = ansi
+        setBaud(speed)
+    }
+
+    /// Switches this session to another terminal type, replays what the BBS sent so far, and saves it.
+    func switchEmulation(to emulation: TerminalEmulation) {
+        hideSuggestion()
+        guard emulation != entry.emulation else { return }
+        let old = entry.emulation
+        if entry.columns == old.defaultColumns { entry.columns = emulation.defaultColumns }
+        if entry.rows == old.defaultRows { entry.rows = emulation.defaultRows }
+        if entry.terminalType.caseInsensitiveCompare(old.terminalNames[0]) == .orderedSame {
+            entry.terminalType = emulation.terminalNames[0]
+        }
+        entry.emulation = emulation
+        emulator = TerminalEngines.make(emulation, columns: entry.columns, rows: entry.rows, encoding: entry.encoding,
+                                        iceColors: entry.iceColors)
+        terminalView.font = emulator.font ?? BitmapFont.named(entry.fontName)
+        emulator.feed(sessionStart)
+        _ = emulator.takeReplies()
+        client?.resize(columns: emulator.columns, rows: emulator.rows)
+        scrollOffset = 0
+        terminalView.needsDisplay = true
+        onEmulationChange?(entry)
+        updateStatus()
+    }
+
+    /// Teletext Reveal: shows concealed text (quiz answers and the like).
+    func toggleReveal() {
+        guard var teletext = emulator as? TeletextTerminal else { NSSound.beep(); return }
+        teletext.reveal.toggle()
+        emulator = teletext
+        terminalView.needsDisplay = true
+    }
+
+    private func buildSuggestionBar() {
+        suggestionBar.orientation = .horizontal
+        suggestionBar.spacing = 8
+        suggestionBar.edgeInsets = NSEdgeInsets(top: 4, left: 10, bottom: 4, right: 10)
+        suggestionBar.wantsLayer = true
+        suggestionBar.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.95).cgColor
+        suggestionBar.layer?.cornerRadius = 6
+        suggestionBar.translatesAutoresizingMaskIntoConstraints = false
+        suggestionLabel.font = .systemFont(ofSize: 12)
+        let switchButton = NSButton(title: "Switch", target: self, action: #selector(acceptSuggestion))
+        let ignore = NSButton(title: "Not Now", target: self, action: #selector(dismissSuggestion))
+        suggestionBar.addArrangedSubview(suggestionLabel)
+        suggestionBar.addArrangedSubview(switchButton)
+        suggestionBar.addArrangedSubview(ignore)
+        suggestionBar.isHidden = true
+    }
+
+    /// Shows the bar; the terminal type only changes if the user presses Switch.
+    func suggest(_ emulation: TerminalEmulation) {
+        suggestedEmulation = emulation
+        suggestionLabel.stringValue = "This BBS looks like it expects \(emulation.label). Switch the terminal type?"
+        suggestionBar.isHidden = false
+    }
+
+    private func hideSuggestion() {
+        suggestedEmulation = nil
+        suggestionBar.isHidden = true
+    }
+
+    @objc func acceptSuggestion() {
+        if let suggestion = suggestedEmulation { switchEmulation(to: suggestion) }
+        view.window?.makeFirstResponder(terminalView)
+    }
+
+    @objc func dismissSuggestion() {
+        hideSuggestion()
+        view.window?.makeFirstResponder(terminalView)
     }
 
     /// Types macro `slot` (Option-1 is 0); false when neither the entry nor the globals define it.
@@ -675,7 +787,7 @@ final class TerminalViewController: NSViewController {
 
     func sendUsername() {
         guard let name = entry.username, !name.isEmpty else { return }
-        send(TerminalInput.text(name, encoding: entry.encoding) + [13])
+        send(emulator.text(name, encoding: entry.encoding) + returnBytes)
     }
 
     private func send(_ bytes: [UInt8]) {
@@ -755,7 +867,10 @@ final class TerminalViewController: NSViewController {
 
     private func updateStatus() {
         var parts = [entry.address, stateText, baud == 0 ? "Unlimited" : "\(baud) baud",
-                     "\(emulator.columns)x\(emulator.rows)", entry.encoding.label]
+                     "\(emulator.columns)x\(emulator.rows)", entry.emulation.label]
+        // Platform types have their own character set; the setting applies to the ANSI and VT types.
+        if emulator.font == nil { parts.append(entry.encoding.label) }
+        if entry.mode == .telnet, entry.telnetSecure { parts.append("Telnet over TLS") }
         if entry.mode != .telnet { parts.append(entry.mode == .webSocket && entry.webSocketSecure ? "WebSocket (wss)" : entry.mode.label) }
         if let transportProblem { parts.append(transportProblem) }
         if let captureName { parts.append("Capturing to \(captureName)") }
@@ -798,6 +913,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
                 }
             }
             controller.terminal.savedEntry = { [weak store] in store?.entry(entry.id) }
+            controller.terminal.onEmulationChange = { [weak store] changed in
+                store?.update { d in
+                    guard let i = d.entries.firstIndex(where: { $0.id == changed.id }) else { return }
+                    d.entries[i].emulation = changed.emulation
+                    d.entries[i].columns = changed.columns
+                    d.entries[i].rows = changed.rows
+                    d.entries[i].terminalType = changed.terminalType
+                }
+            }
         }
         open.insert(controller)
         return controller
@@ -830,8 +954,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
     private init(entry: BBSEntry) {
         terminal = TerminalViewController(entry: entry)
         terminal.sound = ModemSoundPlayer()
-        let font = BitmapFont.named(entry.fontName)
-        let art = NSSize(width: entry.columns * font.width, height: entry.rows * font.height)
+        let engine = TerminalEngines.make(entry.emulation, columns: entry.columns, rows: entry.rows, encoding: entry.encoding,
+                                          iceColors: false)
+        let font = engine.font ?? BitmapFont.named(entry.fontName)
+        let art = NSSize(width: CGFloat(entry.columns * font.width) * CGFloat(engine.horizontalStretch),
+                         height: CGFloat(entry.rows * font.height))
         let visible = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
         let scale = max(0.5, min(1.5, (visible.width - 40) / art.width, (visible.height - 80) / art.height))
         let size = NSSize(width: (art.width * scale).rounded(), height: (art.height * scale).rounded() + 22)

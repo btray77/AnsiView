@@ -115,6 +115,16 @@ enum GlyphsBase {
         "✓": [".....", "....#", "...#.", "#.#..", ".#...", ".....", ".....", "....."],
     ]
 
+    /// Letters whose single pixel gaps would close when strokes are doubled: drawn 7 wide for the
+    /// thick (C64, Atari, Topaz style) fonts.
+    static let thick: [Character: [String]] = [
+        "M": ["##...##", "###.###", "#######", "##.#.##", "##...##", "##...##", "##...##", "......."],
+        "W": ["##...##", "##...##", "##...##", "##.#.##", "#######", "###.###", "##...##", "......."],
+        "m": [".......", ".......", "##.##..", "#######", "##.#.##", "##.#.##", "##...##", "......."],
+        "w": [".......", ".......", "##...##", "##...##", "##.#.##", "#######", ".##.##.", "......."],
+        "N": ["##...##", "###..##", "####.##", "##.####", "##..###", "##...##", "##...##", "......."],
+    ]
+
     /// The glyph for a character as rows of booleans, 5 wide and 8 high (blank when not drawn).
     static func rows(_ c: Character) -> [[Bool]] {
         let source = ascii[c] ?? ascii[" "]!
