@@ -239,7 +239,44 @@ keys you assign yourself work outside the Text tool.
   (an animation's earlier frames, an ANSiMation or other SAUCE file type, an XBin's embedded
   font or palette, data hidden after the end of file marker) is listed when the file opens, and
   saving tells you first about characters with no CP437 equivalent or colours a format cannot
-  hold.
+  hold. (To edit an animation's frames, use Tools > Import Animation..., below.)
+
+### Animation
+
+A flipbook editor for ANSI animation, built into the editor (Tools > Animation Timeline, or
+any project or import with more than one frame). Design and rulings:
+`docs/superpowers/plans/2026-10-30-ansiview-2.0-animation.md`.
+
+- **Frames.** **New Frame** (Control-Command-N) copies the current screen after it, so you only
+  change what moves. Duplicate, Delete, and the arrows (Control-Command-[ and ]) step through
+  frames. Each frame has its own layers and a **delay**: seconds it stays on screen once drawn.
+  The strip under the canvas shows every frame: click to edit, drag to reorder, right-click to
+  duplicate or delete. Frame commands are undoable.
+- **Onion skin** draws the previous frame faintly over the one you are editing; cells that did
+  not change look normal, cells that did show a ghost.
+- **Record** keeps the timing of your drawing, so an As drawn export replays your pauses (each
+  capped at 2 seconds).
+- **Play** opens a preview that runs the exported file through AnsiView's own ANSI interpreter at
+  the chosen speed (300 to 115200 baud), with the order, frame and elapsed time.
+- **Export...** writes ANSI (`.ans`), GIF or MP4. After the first frame only the cells that
+  changed are sent, with cursor positioning, in one of three orders: **As drawn** (the default,
+  the order you made the changes), **Top down** (row by row) or **Full redraw** (clear and draw
+  the whole frame). The sheet shows the file size of each order.
+- **Delays without any special codes.** Plain ANSI has no "wait" command, so a delay is padding
+  that costs time at the chosen baud rate: carriage returns (CR, 0x0D). A CR moves the cursor to
+  column 1 and draws nothing, and further CRs do nothing, on ANSI.SYS, VT100 style terminals,
+  SyncTERM and AnsiView. A 1 second delay at 2400 baud is 240 CRs (10 bits per character). The
+  delay only shows where the file is played at that speed (a modem, a BBS that paces output, or a
+  viewer that emulates baud rates, as AnsiView does); a viewer that draws instantly shows none. A
+  terminal set to add a line feed after each CR (rare, off by default) would scroll.
+- **Custom extension, off by default.** "AnsiView frame markers" add `ESC[?2416;<frame>;<ms>z`
+  after each frame so AnsiView can import the frames and delays back exactly. It is not standard
+  ANSI; the export sheet says whether a file uses it.
+- **Import Animation...** opens an animated `.ans` as frames, split where the screen settles: a
+  clear screen, a pause of 48 or more bytes that change nothing visible (0.2 s at 2400 baud), a
+  frame marker, or drawing over a cell already changed in the frame being collected.
+- **Project files** (`.ansiproj` version 2) keep every frame, delay and drawing order. A project
+  with one frame is still written as version 1.
 
 ### BBS terminal
 
