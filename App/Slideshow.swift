@@ -88,6 +88,7 @@ final class SlideshowViewController: NSViewController {
         next.music = makeSound == nil ? nil : AudioMusicOutput()
         next.handlesArrowKeys = false
         ViewerCopy.enable(next)
+        ViewerTools.enable(next)
         next.zoom = zoom
         next.onZoomChange = { [weak self] zoom in self?.zoom = zoom }
         next.onFinished = { [weak self] in self?.scheduleAdvance() }

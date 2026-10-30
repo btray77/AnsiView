@@ -80,6 +80,8 @@ struct AnsiViewApp: App {
     private var autoAdvance = false
     @AppStorage(SlideshowSettings.dwellKey, store: PlaybackSpeed.defaults)
     private var dwell = SlideshowSettings.defaultDwell
+    @AppStorage(ViewerTools.minimapKey) private var showMinimap = true
+    @ObservedObject private var palettes = PaletteLibrary.shared
     /// The focused art window's speed; speed commands change that file's remembered speed.
     @FocusedObject private var focusedSpeed: PlayerSpeed?
 
@@ -93,6 +95,16 @@ struct AnsiViewApp: App {
 
     init() {
         Updates.start()
+    }
+
+    /// A palette menu item: on when it is the chosen palette; choosing it applies it to the focused window.
+    private func paletteBinding(_ name: String?) -> Binding<Bool> {
+        Binding(get: { palettes.currentName == name },
+                set: { on in
+                    guard on else { return }
+                    palettes.choose(name)
+                    send(#selector(AnsiCanvasView.applyChosenPalette(_:)))
+                })
     }
 
     var body: some Scene {
@@ -149,6 +161,18 @@ struct AnsiViewApp: App {
                     }
                 }
             }
+            // Find in art (plan 9 ruling 2): replaces the text editing group; text fields still get
+            // the standard finder when no art view answers.
+            CommandGroup(replacing: .textEditing) {
+                Menu("Find") {
+                    Button("Find...") { FindCommands.send(#selector(AnsiCanvasView.showArtFind(_:)), textFinderTag: .showFindInterface) }
+                        .keyboardShortcut("f")
+                    Button("Find Next") { FindCommands.send(#selector(AnsiCanvasView.artFindNext(_:)), textFinderTag: .nextMatch) }
+                        .keyboardShortcut("g")
+                    Button("Find Previous") { FindCommands.send(#selector(AnsiCanvasView.artFindPrevious(_:)), textFinderTag: .previousMatch) }
+                        .keyboardShortcut("g", modifiers: [.command, .shift])
+                }
+            }
             CommandGroup(after: .pasteboard) {
                 // Sent to the focused editor or viewer canvas; Copy writes all of these at once.
                 Menu("Copy As") {
@@ -196,6 +220,29 @@ struct AnsiViewApp: App {
                 Divider()
                 Button("Presentation Mode") { send(#selector(AnsiPlayerViewController.presentArt(_:))) }
                     .keyboardShortcut("f", modifiers: [.command, .shift])
+                Divider()
+                Button("Auto Scroll") { send(#selector(AnsiCanvasView.toggleAutoScroll(_:))) }
+                    .keyboardShortcut("a", modifiers: [.command, .shift])
+                    .help("Scrolls tall art smoothly down the window. While it runs: + and - change speed, Space pauses, Escape stops.")
+                Toggle("Show Minimap", isOn: $showMinimap)
+                    .help("A strip at the right of tall art showing the whole piece; click or drag in it to jump.")
+                Menu("Palette") {
+                    Toggle("Art's Own Colours", isOn: paletteBinding(nil))
+                    Divider()
+                    ForEach(palettes.all, id: \.name) { palette in
+                        Toggle(palette.name, isOn: paletteBinding(palette.name))
+                    }
+                    Divider()
+                    Button("Next Palette") {
+                        palettes.chooseNext()
+                        send(#selector(AnsiCanvasView.applyChosenPalette(_:)))
+                    }
+                    .keyboardShortcut("p", modifiers: [.command, .option])
+                    Button("Load Palette File...") { palettes.chooseAndLoad() }
+                        .help("JASC .pal, GIMP .gpl, Adobe .act, or an XBin, ADF or IDF file's own palette.")
+                    Button("Remove Loaded Palettes") { palettes.removeLoaded() }
+                        .disabled(palettes.loaded.isEmpty)
+                }
                 Divider()
             }
             CommandMenu("Art") {
@@ -348,6 +395,7 @@ struct AnsiPlayerView: NSViewControllerRepresentable {
         controller.sound = ModemSoundPlayer()
         controller.music = AudioMusicOutput()
         ViewerCopy.enable(controller)
+        ViewerTools.enable(controller)
         return controller
     }
 

@@ -364,6 +364,46 @@ final class AnsiPlayerViewController: NSViewController {
     /// Top row of the terminal window; nil until playback places it.
     private(set) var viewportTop: Int?
 
+    // MARK: Hooks for the app's viewer tools (plan 9). Quick Look sets none of them, so its
+    // previews draw exactly as before.
+
+    /// Colours to show the art in (16, VGA order): the piece's own colours map to these by index.
+    /// Nil (the default, and always in Quick Look) shows the art's own colours.
+    var paletteOverride: [RGB]? {
+        didSet {
+            colorMap = paletteOverride.map { PaletteRemap.map(from: PaletteRemap.sourcePalette(for: source), to: $0) } ?? [:]
+            if isViewLoaded { redraw() }
+        }
+    }
+    private var colorMap: [RGB: RGB] = [:]
+
+    /// Called once the view has loaded (the app installs its find bar, minimap and auto scroll).
+    var onViewLoaded: ((AnsiPlayerViewController) -> Void)?
+    /// Called after each redraw (a new frame, a blink, a palette change).
+    var onRedraw: (() -> Void)?
+    /// The scroll view holding the art.
+    var scrollView: NSScrollView { scroll }
+    /// Room kept free at the right of the art (for the app's minimap strip); 0 by default.
+    var trailingInset: CGFloat = 0 {
+        didSet { scrollTrailing?.constant = -trailingInset }
+    }
+    private var scrollTrailing: NSLayoutConstraint?
+
+    /// The finished screen as it is drawn now (palette applied).
+    var finalScreenAsShown: AnsiScreen {
+        colorMap.isEmpty ? analysis.finalScreen : PaletteRemap.apply(colorMap, to: analysis.finalScreen)
+    }
+
+    /// Outlines cells of the displayed screen (search matches); `current` is filled. Empty by default.
+    func highlight(_ rects: [CellRect], current: Int?) {
+        canvas.showHighlights(rects, current: current, columns: source.columns, rows: displayedRows)
+    }
+
+    /// Where cells of the displayed screen are, in the art view's coordinates.
+    func canvasRect(for cells: CellRect) -> CGRect {
+        CellGrid.rect(for: cells, in: canvas.bounds.size, columns: source.columns, rows: displayedRows)
+    }
+
     /// The art plus the scrub bar, for hosts that size a window to fit.
     var idealViewSize: CGSize {
         CGSize(width: contentSize.width,
@@ -421,9 +461,11 @@ final class AnsiPlayerViewController: NSViewController {
         container.addSubview(hud)
         installMusicBadge(in: container)
 
+        let trailing = scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -trailingInset)
+        scrollTrailing = trailing
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            trailing,
             scroll.topAnchor.constraint(equalTo: container.topAnchor),
             hud.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
             hud.bottomAnchor.constraint(equalTo: scroll.bottomAnchor, constant: -10),
@@ -443,6 +485,7 @@ final class AnsiPlayerViewController: NSViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.speedMayHaveChanged() }
         }
+        onViewLoaded?(self)
     }
 
     /// VoiceOver reads the art as static text: the finished art's words (not the frame on screen,
@@ -866,7 +909,7 @@ final class AnsiPlayerViewController: NSViewController {
 
     private func redraw() {
         var options = renderOptions
-        let padded = displayedScreen
+        let padded = colorMap.isEmpty ? displayedScreen : PaletteRemap.apply(colorMap, to: displayedScreen)
         if isTerminalMode { options.scale = AnsiRenderer.preferredScale(rows: TerminalViewport.rows) }
         options.blinkVisible = blinkVisible
         // A tall piece entering or leaving its 25 row playback window shows other rows under the
@@ -878,6 +921,7 @@ final class AnsiPlayerViewController: NSViewController {
         let image = AnsiRenderer.render(padded, options: options)?.image
         canvas.image = PlaybackSpeed.crtEffect ? image.flatMap { CRTFilter().apply($0) } ?? image : image
         if isViewLoaded { fitToWindow() }
+        onRedraw?()
     }
 }
 
@@ -962,6 +1006,57 @@ final class AnsiCanvasView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         layoutMarquee()
+        layoutHighlights()
+    }
+
+    /// Search match outlines, created only when the app first shows some (never in Quick Look).
+    private var highlightLayer: CAShapeLayer?
+    private var currentLayer: CAShapeLayer?
+    private var highlightCells: (rects: [CellRect], current: Int?, columns: Int, rows: Int)?
+
+    func showHighlights(_ rects: [CellRect], current: Int?, columns: Int, rows: Int) {
+        highlightCells = rects.isEmpty ? nil : (rects, current, columns, rows)
+        if highlightLayer == nil, !rects.isEmpty {
+            let all = CAShapeLayer(), now = CAShapeLayer()
+            all.fillColor = NSColor.systemYellow.withAlphaComponent(0.22).cgColor
+            all.strokeColor = NSColor.systemYellow.cgColor
+            all.lineWidth = 1.5
+            now.fillColor = NSColor.systemOrange.withAlphaComponent(0.5).cgColor
+            now.strokeColor = NSColor.white.cgColor
+            now.lineWidth = 2
+            for shape in [all, now] {
+                shape.actions = ["path": NSNull(), "hidden": NSNull(), "position": NSNull(), "bounds": NSNull()]
+                layer?.insertSublayer(shape, below: marquee)
+            }
+            highlightLayer = all
+            currentLayer = now
+        }
+        layoutHighlights()
+    }
+
+    private func layoutHighlights() {
+        guard let all = highlightLayer, let now = currentLayer else { return }
+        guard let cells = highlightCells else { all.isHidden = true; now.isHidden = true; return }
+        let flip = !(layer?.isGeometryFlipped ?? false)
+        func area(_ rect: CellRect) -> CGRect {
+            var r = CellGrid.rect(for: rect, in: bounds.size, columns: cells.columns, rows: cells.rows)
+            if flip { r.origin.y = bounds.height - r.maxY }
+            return r.insetBy(dx: -1, dy: -1)
+        }
+        let path = CGMutablePath()
+        for rect in cells.rects { path.addRect(area(rect)) }
+        for shape in [all, now] {
+            shape.frame = bounds
+            shape.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        }
+        all.path = path
+        all.isHidden = false
+        if let index = cells.current, cells.rects.indices.contains(index) {
+            now.path = CGPath(rect: area(cells.rects[index]), transform: nil)
+            now.isHidden = false
+        } else {
+            now.isHidden = true
+        }
     }
 
     @available(*, unavailable)
