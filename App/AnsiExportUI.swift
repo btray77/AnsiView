@@ -20,112 +20,97 @@ extension AnsiCanvasView {
     }
 }
 
+/// The popups behind an export: format, size, speed, frame rate, GIF palette and size limit.
+/// Rows that do not apply to the chosen format are disabled.
 @MainActor
-enum ExportController {
-    private static let sizeLabels = ["1x (640 px wide)", "2x (1280 px wide)", "3x (1920 px wide)"]
+final class ExportOptionsView {
+    static let sizeLabels = ["1x (640 px wide)", "2x (1280 px wide)", "3x (1920 px wide)"]
+    static let frameRates: [Double] = [5, 10, 15, 20, 30]
+    static let limits: [(String, SizeLimit)] = [
+        ("None", .none), ("1 MB", .maxBytes(1_000_000)), ("2 MB", .maxBytes(2_000_000)),
+        ("5 MB", .maxBytes(5_000_000)), ("10 MB", .maxBytes(10_000_000)),
+        ("Fit 800 x 600", .maxPixels(width: 800, height: 600)),
+        ("Fit 1280 x 720", .maxPixels(width: 1280, height: 720)),
+        ("Fit 1920 x 1080", .maxPixels(width: 1920, height: 1080)),
+    ]
+    static let speeds = PlaybackSpeed.choices.filter { $0 > 0 }
 
-    static func exportStill(from player: AnsiPlayerViewController, in window: NSWindow) {
-        let panel = NSSavePanel()
-        let format = popup(StillFormat.allCases.map(\.rawValue), selected: 0)
-        let size = popup(sizeLabels, selected: 1)
-        panel.accessoryView = accessory([("Format:", format), ("Size:", size)])
-        panel.nameFieldStringValue = baseName(window) + ".png"
-        panel.allowedContentTypes = [StillFormat.png.contentType]
-        panel.isExtensionHidden = false
-        retarget(panel, format) { StillFormat.allCases[$0].contentType }
+    let kinds: [ExportKind]
+    let format: NSPopUpButton
+    let size: NSPopUpButton
+    let speed: NSPopUpButton
+    let frameRate: NSPopUpButton
+    let palette: NSPopUpButton
+    let limit: NSPopUpButton
+    /// Called after the format changes (after the rows are enabled or disabled).
+    var onFormatChange: ((ExportKind) -> Void)?
+    private var target: PopupTarget?
 
-        // The frame on screen: the finished art, or wherever a paused animation stopped.
-        let screen = player.screen
-        let rows = player.analysis.canvasRows
-        panel.beginSheetModal(for: window) { response in
-            guard response == .OK, let url = panel.url else { return }
-            var padded = screen
-            while padded.rows.count < rows {
-                padded.rows.append(Array(repeating: AnsiCell(), count: padded.columns))
-            }
-            do {
-                try AnsiExporter.exportStill(padded, format: StillFormat.allCases[format.indexOfSelectedItem],
-                                             scale: size.indexOfSelectedItem + 1, to: url)
-            } catch {
-                NSAlert(error: error).beginSheetModal(for: window)
-            }
-        }
-    }
-
-    static func exportAnimation(from player: AnsiPlayerViewController, in window: NSWindow) {
-        let panel = NSSavePanel()
-        let format = popup(AnimationFormat.allCases.map(\.rawValue), selected: 0)
-        let size = popup(sizeLabels, selected: 0)
-        let speeds = PlaybackSpeed.choices.filter { $0 > 0 }
-        let speed = popup(speeds.map(PlaybackSpeed.label),
-                          selected: speeds.firstIndex(of: player.speed.baud) ?? speeds.firstIndex(of: PlaybackSpeed.defaultBaud)!)
-        panel.accessoryView = accessory([("Format:", format), ("Size:", size), ("Speed:", speed)])
-        panel.nameFieldStringValue = baseName(window) + ".gif"
-        panel.allowedContentTypes = [AnimationFormat.gif.contentType]
-        panel.isExtensionHidden = false
-        retarget(panel, format) { AnimationFormat.allCases[$0].contentType }
-
-        let source = player.source
-        panel.beginSheetModal(for: window) { response in
-            guard response == .OK, let url = panel.url else { return }
-            let chosenFormat = AnimationFormat.allCases[format.indexOfSelectedItem]
-            let scale = size.indexOfSelectedItem + 1
-            let baud = speeds[speed.indexOfSelectedItem]
-            DispatchQueue.main.async {
-                runWithProgress(in: window, title: "Exporting \(chosenFormat.rawValue)") { report in
-                    let frames = AnsiFrameSequence.make(source, baud: baud)
-                    try AnsiExporter.exportAnimation(frames, format: chosenFormat, scale: scale, to: url,
-                                                     progress: report)
-                }
+    init(kinds: [ExportKind], selected: ExportKind? = nil, scale: Int = 2, baud: Int = PlaybackSpeed.defaultBaud) {
+        self.kinds = kinds
+        format = Self.popup(kinds.map(\.label), selected: selected.flatMap { kinds.firstIndex(of: $0) } ?? 0)
+        size = Self.popup(Self.sizeLabels, selected: max(0, min(2, scale - 1)))
+        speed = Self.popup(Self.speeds.map(PlaybackSpeed.label),
+                           selected: Self.speeds.firstIndex(of: baud) ?? Self.speeds.firstIndex(of: PlaybackSpeed.defaultBaud)!)
+        frameRate = Self.popup(Self.frameRates.map { "\(Int($0)) fps" }, selected: 2)
+        palette = Self.popup(GIFPalette.allCases.map(\.label), selected: 0)
+        limit = Self.popup(Self.limits.map(\.0), selected: 0)
+        let target = PopupTarget { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.updateEnabled()
+                self.onFormatChange?(self.kind)
             }
         }
+        format.target = target
+        format.action = #selector(PopupTarget.changed(_:))
+        self.target = target
+        updateEnabled()
     }
 
-    /// File > Export Text: the frame on screen as HTML, terminal ANSI or plain text.
-    static func exportText(from player: AnsiPlayerViewController, in window: NSWindow) {
-        let panel = NSSavePanel()
-        let formats = TextFormat.allCases
-        let format = popup(formats.map(\.label), selected: 0)
-        panel.accessoryView = accessory([("Format:", format)])
-        panel.nameFieldStringValue = baseName(window) + "." + formats[0].fileExtension
-        panel.allowedContentTypes = [contentType(formats[0])]
-        panel.isExtensionHidden = false
-        retarget(panel, format) { contentType(formats[$0]) }
+    var kind: ExportKind { kinds[max(0, format.indexOfSelectedItem)] }
 
-        let screen = player.screen
-        panel.beginSheetModal(for: window) { response in
-            guard response == .OK, let url = panel.url else { return }
-            do {
-                try TextConvert.data(screen, format: formats[format.indexOfSelectedItem]).write(to: url)
-            } catch {
-                NSAlert(error: error).beginSheetModal(for: window)
-            }
+    var settings: ExportSettings {
+        var settings = ExportSettings()
+        settings.kind = kind
+        settings.scale = size.indexOfSelectedItem + 1
+        settings.baud = Self.speeds[speed.indexOfSelectedItem]
+        settings.fps = Self.frameRates[frameRate.indexOfSelectedItem]
+        settings.palette = GIFPalette.allCases[palette.indexOfSelectedItem]
+        settings.limit = Self.limits[limit.indexOfSelectedItem].1
+        return settings
+    }
+
+    func updateEnabled() {
+        let kind = self.kind
+        size.isEnabled = !kind.isText
+        speed.isEnabled = kind.isAnimation
+        frameRate.isEnabled = kind.isAnimation
+        palette.isEnabled = kind == .animation(.gif)
+        limit.isEnabled = !kind.isText
+    }
+
+    /// The rows to show, as label and popup.
+    func rows(format showFormat: Bool = true, animation: Bool = true) -> [(String, NSPopUpButton)] {
+        var rows: [(String, NSPopUpButton)] = []
+        if showFormat { rows.append(("Format:", format)) }
+        rows.append(("Size:", size))
+        if animation {
+            rows += [("Speed:", speed), ("Frame Rate:", frameRate), ("GIF Palette:", palette)]
         }
+        rows.append(("Size Limit:", limit))
+        return rows
     }
 
-    static func contentType(_ format: TextFormat) -> UTType {
-        switch format {
-        case .html: return .html
-        case .ansi, .ansi256: return UTType(filenameExtension: "ans") ?? .plainText
-        case .text, .utf8: return .plainText
-        }
-    }
-
-    // MARK: Helpers
-
-    private static func baseName(_ window: NSWindow) -> String {
-        let title = window.representedURL?.deletingPathExtension().lastPathComponent ?? window.title
-        return title.isEmpty ? "ANSI Art" : title
-    }
-
-    private static func popup(_ titles: [String], selected: Int) -> NSPopUpButton {
+    static func popup(_ titles: [String], selected: Int) -> NSPopUpButton {
         let button = NSPopUpButton(frame: .zero, pullsDown: false)
         button.addItems(withTitles: titles)
         button.selectItem(at: selected)
         return button
     }
 
-    private static func accessory(_ rows: [(String, NSPopUpButton)]) -> NSView {
+    /// A panel accessory view: a grid of labelled popups.
+    static func accessory(_ rows: [(String, NSPopUpButton)]) -> NSView {
         let grid = NSGridView(views: rows.map { [NSTextField(labelWithString: $0.0), $0.1] })
         grid.column(at: 0).xPlacement = .trailing
         grid.rowSpacing = 8
@@ -137,63 +122,155 @@ enum ExportController {
             grid.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
             grid.centerXAnchor.constraint(equalTo: container.centerXAnchor),
         ])
-        container.frame.size = NSSize(width: 360, height: grid.fittingSize.height + 24)
+        container.frame.size = NSSize(width: 380, height: grid.fittingSize.height + 24)
         return container
     }
+}
 
-    /// Keeps the save panel's file extension in step with the chosen format.
-    private static func retarget(_ panel: NSSavePanel, _ popup: NSPopUpButton, type: @escaping (Int) -> UTType) {
-        let target = PopupTarget { index in
-            let newType = type(index)
-            panel.allowedContentTypes = [newType]
-            if let ext = newType.preferredFilenameExtension {
-                let name = (panel.nameFieldStringValue as NSString).deletingPathExtension
-                panel.nameFieldStringValue = name + "." + ext
-            }
-        }
-        popup.target = target
-        popup.action = #selector(PopupTarget.changed(_:))
-        objc_setAssociatedObject(popup, &PopupTarget.key, target, .OBJC_ASSOCIATION_RETAIN)
+@MainActor
+enum ExportController {
+    static func exportStill(from player: AnsiPlayerViewController, in window: NSWindow) {
+        let options = ExportOptionsView(kinds: StillFormat.allCases.map(ExportKind.still), scale: 2)
+        // The frame on screen: the finished art, or wherever a paused animation stopped.
+        save(options, rows: options.rows(animation: false), source: player.source, screen: player.screen,
+             in: window, title: "Exporting Image")
     }
 
-    /// Runs `work` off the main thread behind a sheet with a progress bar.
-    private static func runWithProgress(
-        in window: NSWindow, title: String, work: @escaping (_ report: @escaping (Double) -> Void) throws -> Void
-    ) {
-        let sheet = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 90), styleMask: [.titled],
-                            backing: .buffered, defer: false)
-        let label = NSTextField(labelWithString: title + "...")
-        let bar = NSProgressIndicator()
-        bar.isIndeterminate = false
-        bar.minValue = 0
-        bar.maxValue = 1
-        let stack = NSStackView(views: [label, bar])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-        bar.widthAnchor.constraint(equalToConstant: 280).isActive = true
-        sheet.contentView = stack
-        window.beginSheet(sheet)
+    static func exportAnimation(from player: AnsiPlayerViewController, in window: NSWindow) {
+        let options = ExportOptionsView(kinds: AnimationFormat.allCases.map(ExportKind.animation), scale: 1,
+                                        baud: player.speed.baud)
+        save(options, rows: options.rows(), source: player.source, screen: nil, in: window,
+             title: "Exporting Animation")
+    }
 
+    /// File > Export Text: the frame on screen as HTML, terminal ANSI or plain text.
+    static func exportText(from player: AnsiPlayerViewController, in window: NSWindow) {
+        let options = ExportOptionsView(kinds: TextFormat.allCases.map(ExportKind.text))
+        save(options, rows: [("Format:", options.format)], source: player.source, screen: player.screen,
+             in: window, title: "Exporting Text")
+    }
+
+    /// Asks for a file name with the options as the accessory view, then exports behind a
+    /// progress sheet.
+    private static func save(_ options: ExportOptionsView, rows: [(String, NSPopUpButton)], source: ArtFile,
+                             screen: AnsiScreen?, in window: NSWindow, title: String) {
+        let panel = NSSavePanel()
+        panel.accessoryView = ExportOptionsView.accessory(rows)
+        panel.nameFieldStringValue = baseName(window) + "." + options.kind.fileExtension
+        panel.allowedContentTypes = [contentType(options.kind)]
+        panel.isExtensionHidden = false
+        options.onFormatChange = { kind in
+            panel.allowedContentTypes = [contentType(kind)]
+            let name = (panel.nameFieldStringValue as NSString).deletingPathExtension
+            panel.nameFieldStringValue = name + "." + kind.fileExtension
+        }
+        panel.beginSheetModal(for: window) { response in
+            withExtendedLifetime(options) {}
+            guard response == .OK, let url = panel.url else { return }
+            let settings = options.settings
+            DispatchQueue.main.async {
+                runWithProgress(in: window, title: title) { report, isCancelled in
+                    try AnsiExporter.export(source, screen: screen, settings: settings, to: url,
+                                            progress: report, isCancelled: isCancelled)
+                }
+            }
+        }
+    }
+
+    static func contentType(_ kind: ExportKind) -> UTType {
+        switch kind {
+        case .still(let format): return format.contentType
+        case .animation(let format): return format.contentType
+        case .text(.html): return .html
+        case .text(.ansi), .text(.ansi256): return UTType(filenameExtension: "ans") ?? .plainText
+        case .text: return .plainText
+        }
+    }
+
+    // MARK: Helpers
+
+    private static func baseName(_ window: NSWindow) -> String {
+        let title = window.representedURL?.deletingPathExtension().lastPathComponent ?? window.title
+        return title.isEmpty ? "ANSI Art" : title
+    }
+
+    /// A sheet with a label, a progress bar and a Cancel button.
+    @MainActor
+    final class ProgressSheet {
+        let panel: NSPanel
+        let label: NSTextField
+        let bar = NSProgressIndicator()
+        let cancelButton: NSButton
+        /// Read from the export thread.
+        let flag = CancelFlag()
+        private var buttonTarget: ButtonTarget?
+
+        init(title: String) {
+            panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 120), styleMask: [.titled],
+                            backing: .buffered, defer: false)
+            label = NSTextField(labelWithString: title + "...")
+            label.lineBreakMode = .byTruncatingMiddle
+            bar.isIndeterminate = false
+            bar.minValue = 0
+            bar.maxValue = 1
+            cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
+            cancelButton.keyEquivalent = "\u{1B}"
+            let target = ButtonTarget { [weak self] in self?.cancel() }
+            cancelButton.target = target
+            cancelButton.action = #selector(ButtonTarget.pressed)
+            buttonTarget = target
+            let stack = NSStackView(views: [label, bar, cancelButton])
+            stack.orientation = .vertical
+            stack.alignment = .trailing
+            stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 16, right: 20)
+            bar.widthAnchor.constraint(equalToConstant: 320).isActive = true
+            label.widthAnchor.constraint(equalToConstant: 320).isActive = true
+            panel.contentView = stack
+        }
+
+        func cancel() {
+            flag.cancel()
+            cancelButton.isEnabled = false
+            label.stringValue = "Cancelling..."
+        }
+    }
+
+    /// Runs `work` off the main thread behind a progress sheet with Cancel. Errors (other than a
+    /// cancel) and a byte limit that could not be met are shown as alerts.
+    static func runWithProgress(
+        in window: NSWindow, title: String,
+        work: @escaping (_ report: @escaping (Double) -> Void, _ isCancelled: @escaping () -> Bool) throws -> ExportOutcome
+    ) {
+        let sheet = ProgressSheet(title: title)
+        let flag = sheet.flag
+        window.beginSheet(sheet.panel)
         DispatchQueue.global(qos: .userInitiated).async {
             var failure: Error?
+            var outcome: ExportOutcome?
             do {
-                try work { fraction in
-                    DispatchQueue.main.async { bar.doubleValue = fraction }
-                }
+                outcome = try work({ fraction in
+                    DispatchQueue.main.async { MainActor.assumeIsolated { sheet.bar.doubleValue = fraction } }
+                }, { flag.isCancelled })
             } catch {
                 failure = error
             }
-            DispatchQueue.main.async {
-                window.endSheet(sheet)
-                if let failure { NSAlert(error: failure).beginSheetModal(for: window) }
-            }
+            DispatchQueue.main.async { MainActor.assumeIsolated {
+                window.endSheet(sheet.panel)
+                if let failure {
+                    if case AnsiExportError.cancelled = failure { return }
+                    NSAlert(error: failure).beginSheetModal(for: window)
+                } else if let outcome, outcome.overLimit {
+                    let alert = NSAlert()
+                    alert.messageText = "The file is larger than the size limit."
+                    alert.informativeText = "Even the smallest version is \(ByteCountFormatter.string(fromByteCount: Int64(outcome.bytes), countStyle: .file)). It was saved anyway."
+                    alert.beginSheetModal(for: window)
+                }
+            } }
         }
     }
 }
 
-private final class PopupTarget: NSObject {
-    static var key = 0
+final class PopupTarget: NSObject {
     let onChange: (Int) -> Void
 
     init(_ onChange: @escaping (Int) -> Void) {
@@ -203,4 +280,32 @@ private final class PopupTarget: NSObject {
     @objc func changed(_ sender: NSPopUpButton) {
         onChange(sender.indexOfSelectedItem)
     }
+}
+
+/// A cancel request shared between the main thread and an export thread.
+final class CancelFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+}
+
+final class ButtonTarget: NSObject {
+    let action: () -> Void
+
+    init(_ action: @escaping () -> Void) {
+        self.action = action
+    }
+
+    @objc func pressed() { action() }
 }

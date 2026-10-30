@@ -9,6 +9,9 @@ import UniformTypeIdentifiers
 // ansirender --animate gif|webp|mp4 <baud> <scale> <input> <output>
 // ansirender --stats <input>...
 // ansirender --convert html|ansi|ansi256|text|utf8 [--inline] [--no-font] <input> [output]   (stdout when output is - or missing)
+// ansirender --export <format> [options] <input> <output>
+//   formats: png jpeg webp gif awebp mp4 html ansi ansi256 text utf8
+//   options: --scale N --baud N --fps N --palette auto|vga|system --max-bytes N --max-size WxH
 // ansirender --roundtrip <input>...   (checks that ANSI conversion reads back as the same cells)
 let args = CommandLine.arguments
 func fail(_ message: String, _ code: Int32) -> Never {
@@ -51,6 +54,88 @@ if args[1] == "--convert", args.count >= 4, let format = TextFormat(rawValue: ar
     } else {
         do { try data.write(to: URL(fileURLWithPath: rest[1])) } catch { fail("could not write \(rest[1])", 1) }
         print("wrote \(rest[1]): \(data.count) bytes")
+    }
+    exit(0)
+}
+
+/// Export options and the positional arguments left after them.
+struct CommandOptions {
+    var settings = ExportSettings()
+    var overwrite = false
+    var positional: [String] = []
+}
+
+func parseOptions(_ arguments: ArraySlice<String>, kind: ExportKind) -> CommandOptions {
+    var options = CommandOptions()
+    options.settings.kind = kind
+    options.settings.baud = PlaybackSpeed.defaultBaud
+    var rest = Array(arguments)
+    func value(_ name: String) -> String {
+        guard !rest.isEmpty else { fail("\(name) needs a value", 2) }
+        return rest.removeFirst()
+    }
+    while let argument = rest.first {
+        if !argument.hasPrefix("--") {
+            options.positional.append(rest.removeFirst())
+            continue
+        }
+        rest.removeFirst()
+        switch argument {
+        case "--scale":
+            guard let n = Int(value(argument)), (1...8).contains(n) else { fail("--scale takes 1 to 8", 2) }
+            options.settings.scale = n
+        case "--baud":
+            guard let n = Int(value(argument)), n >= 0 else { fail("--baud takes a number (0 draws instantly)", 2) }
+            options.settings.baud = n
+        case "--fps":
+            guard let n = Double(value(argument)), (1...60).contains(n) else { fail("--fps takes 1 to 60", 2) }
+            options.settings.fps = n
+        case "--palette":
+            switch value(argument) {
+            case "auto": options.settings.palette = .automatic
+            case "vga": options.settings.palette = .vga16
+            case "system": options.settings.palette = .system
+            default: fail("--palette takes auto, vga or system", 2)
+            }
+        case "--max-bytes":
+            guard let n = Int(value(argument)), n > 0 else { fail("--max-bytes takes a positive number", 2) }
+            options.settings.limit = .maxBytes(n)
+        case "--max-size":
+            let parts = value(argument).lowercased().split(separator: "x").compactMap { Int($0) }
+            guard parts.count == 2, parts[0] > 0, parts[1] > 0 else { fail("--max-size takes WxH, for example 800x600", 2) }
+            options.settings.limit = .maxPixels(width: parts[0], height: parts[1])
+        case "--overwrite":
+            options.overwrite = true
+        default:
+            fail("unknown option \(argument)", 2)
+        }
+    }
+    return options
+}
+
+func exportKind(_ name: String) -> ExportKind {
+    guard let kind = ExportKind.commandNames.first(where: { $0.0 == name })?.1 else {
+        fail("unknown format \(name); use one of \(ExportKind.commandNames.map(\.0).joined(separator: " "))", 2)
+    }
+    return kind
+}
+
+if args[1] == "--export", args.count >= 3 {
+    let options = parseOptions(args.dropFirst(3), kind: exportKind(args[2]))
+    guard options.positional.count == 2 else { fail("usage: ansirender --export <format> [options] <input> <output>", 2) }
+    let start = Date()
+    do {
+        let outcome = try AnsiExporter.export(loadArt(options.positional[0]), settings: options.settings,
+                                              to: URL(fileURLWithPath: options.positional[1]))
+        var line = "wrote \(options.positional[1]): \(outcome.bytes) bytes"
+        if let attempt = outcome.attempt {
+            line += String(format: ", scale %g", attempt.scale)
+            if attempt.fps > 0 { line += String(format: ", %g fps", attempt.fps) }
+        }
+        if outcome.overLimit { line += ", OVER THE LIMIT (smallest result kept)" }
+        print(line + String(format: ", %.1f s", Date().timeIntervalSince(start)))
+    } catch {
+        fail("\(options.positional[0]): \(error.localizedDescription)", 1)
     }
     exit(0)
 }

@@ -61,11 +61,13 @@ enum AnsiFrameSequence {
 enum AnsiExportError: LocalizedError {
     case renderFailed
     case encodeFailed(String)
+    case cancelled
 
     var errorDescription: String? {
         switch self {
         case .renderFailed: return "The art could not be rendered."
         case .encodeFailed(let detail): return "The file could not be written (\(detail))."
+        case .cancelled: return "The export was cancelled."
         }
     }
 }
@@ -98,12 +100,160 @@ enum AnimationFormat: String, CaseIterable {
     var contentType: UTType { UTType(filenameExtension: fileExtension) ?? .data }
 }
 
+/// Everything AnsiView can export a piece as.
+enum ExportKind: Hashable {
+    case still(StillFormat), animation(AnimationFormat), text(TextFormat)
+
+    static let all: [ExportKind] = StillFormat.allCases.map(ExportKind.still)
+        + AnimationFormat.allCases.map(ExportKind.animation) + TextFormat.allCases.map(ExportKind.text)
+
+    /// Names used by `ansirender`.
+    static let commandNames: [(String, ExportKind)] = [
+        ("png", .still(.png)), ("jpeg", .still(.jpeg)), ("webp", .still(.webp)),
+        ("gif", .animation(.gif)), ("awebp", .animation(.webp)), ("mp4", .animation(.mp4)),
+        ("html", .text(.html)), ("ansi", .text(.ansi)), ("ansi256", .text(.ansi256)),
+        ("text", .text(.text)), ("utf8", .text(.utf8)),
+    ]
+
+    var label: String {
+        switch self {
+        case .still(let format): return format.rawValue
+        case .animation(let format): return format.rawValue
+        case .text(let format): return format.label
+        }
+    }
+
+    var fileExtension: String {
+        switch self {
+        case .still(let format): return format.fileExtension
+        case .animation(let format): return format.fileExtension
+        case .text(let format): return format.fileExtension
+        }
+    }
+
+    var isAnimation: Bool { if case .animation = self { return true } else { return false } }
+    var isText: Bool { if case .text = self { return true } else { return false } }
+}
+
+/// The choices behind one export.
+struct ExportSettings {
+    var kind: ExportKind = .still(.png)
+    /// Pixels per font pixel.
+    var scale = 2
+    /// Playback speed for animations (0 draws instantly).
+    var baud = 2400
+    /// Frames per second sampled from the playback.
+    var fps = 15.0
+    var palette: GIFPalette = .automatic
+    var limit: SizeLimit = .none
+}
+
+/// What an export produced.
+struct ExportOutcome {
+    let bytes: Int
+    /// A byte limit could not be met; the smallest result was kept.
+    let overLimit: Bool
+    /// The scale and frame rate used (nil for text).
+    let attempt: ExportAttempt?
+}
+
 enum AnsiExporter {
+    // MARK: Settings driven export
+
+    /// Exports `source` (or `screen`, the frame on screen, for stills and text) with `settings`.
+    /// A byte limit exports to a temporary folder until a result fits, then moves it to `url`.
+    @discardableResult
+    static func export(
+        _ source: ArtFile, screen: AnsiScreen? = nil, settings: ExportSettings, to url: URL,
+        progress: @escaping (Double) -> Void = { _ in }, isCancelled: @escaping () -> Bool = { false }
+    ) throws -> ExportOutcome {
+        let analysis = AnsiAnalysis(source)
+        var still = screen ?? analysis.finalScreen
+
+        if case .text(let format) = settings.kind {
+            let data = TextConvert.data(still, format: format)
+            try data.write(to: url, options: .atomic)
+            progress(1)
+            var over = false
+            if case .maxBytes(let target) = settings.limit { over = data.count > target }
+            return ExportOutcome(bytes: data.count, overLimit: over, attempt: nil)
+        }
+
+        while still.rows.count < analysis.canvasRows {
+            still.rows.append(Array(repeating: AnsiCell(), count: still.columns))
+        }
+        let animated = settings.kind.isAnimation
+        func write(_ attempt: ExportAttempt, to destination: URL) throws {
+            switch settings.kind {
+            case .still(let format):
+                try writeStill(still, format: format, scale: attempt.scale, to: destination)
+                progress(1)
+            case .animation(let format):
+                let frames = AnsiFrameSequence.make(source, baud: settings.baud, fps: attempt.fps)
+                try writeAnimation(frames, format: format, scale: attempt.scale, palette: settings.palette,
+                                   to: destination, progress: progress, isCancelled: isCancelled)
+            case .text:
+                break
+            }
+        }
+        let requested = ExportAttempt(scale: Double(max(1, settings.scale)), fps: animated ? settings.fps : 0)
+
+        switch settings.limit {
+        case .none:
+            try write(requested, to: url)
+            return ExportOutcome(bytes: fileSize(url), overLimit: false, attempt: requested)
+        case .maxPixels(let width, let height):
+            let scale = SizeFit.scale(artPixels: onePixelSize(still), requestedScale: settings.scale,
+                                      maxPixels: CGSize(width: width, height: height))
+            let attempt = ExportAttempt(scale: scale, fps: requested.fps)
+            try write(attempt, to: url)
+            return ExportOutcome(bytes: fileSize(url), overLimit: false, attempt: attempt)
+        case .maxBytes(let target):
+            let folder = FileManager.default.temporaryDirectory
+                .appendingPathComponent("AnsiView-export-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let ladder = SizeFit.ladder(requestedScale: settings.scale, fps: settings.fps, animated: animated)
+            var attempt = ladder[0]
+            var best: (url: URL, bytes: Int, attempt: ExportAttempt)?
+            var number = 0
+            while true {
+                if isCancelled() { throw AnsiExportError.cancelled }
+                number += 1
+                let candidate = folder.appendingPathComponent("attempt\(number).\(settings.kind.fileExtension)")
+                try write(attempt, to: candidate)
+                let bytes = fileSize(candidate)
+                if best == nil || bytes < best!.bytes { best = (candidate, bytes, attempt) }
+                if bytes <= target { break }
+                guard let next = SizeFit.next(after: attempt, bytes: bytes, target: target, ladder: ladder) else { break }
+                attempt = next
+            }
+            guard let best else { throw AnsiExportError.encodeFailed("no result") }
+            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+            try FileManager.default.copyItem(at: best.url, to: url)
+            return ExportOutcome(bytes: best.bytes, overLimit: best.bytes > target, attempt: best.attempt)
+        }
+    }
+
+    /// The art's size at 1x: one pixel per font pixel.
+    static func onePixelSize(_ screen: AnsiScreen) -> CGSize {
+        let options = RenderOptions(for: screen, scale: 1)
+        let cellWidth = options.font.width + (options.ninePixel ? 1 : 0)
+        return CGSize(width: screen.columns * cellWidth, height: max(1, screen.rows.count) * options.font.height)
+    }
+
+    private static func fileSize(_ url: URL) -> Int {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+    }
+
     // MARK: Stills
 
     static func exportStill(_ screen: AnsiScreen, format: StillFormat, scale: Int, to url: URL) throws {
-        guard let image = AnsiRenderer.render(screen, options: RenderOptions(for: screen, scale: scale))?.image
-        else { throw AnsiExportError.renderFailed }
+        try writeStill(screen, format: format, scale: Double(scale), to: url)
+    }
+
+    private static func writeStill(_ screen: AnsiScreen, format: StillFormat, scale: Double, to url: URL) throws {
+        let image = try renderImage(screen, scale: scale, blinkVisible: true)
         switch format {
         case .png, .jpeg:
             let type = format == .png ? UTType.png : UTType.jpeg
@@ -125,43 +275,112 @@ enum AnsiExporter {
         }
     }
 
+    /// A screen at `scale` pixels per font pixel; below 1 (or a fraction) it is drawn at the
+    /// nearest whole scale under it (at least 1) and resampled down. `even` rounds the size down
+    /// to even numbers (H.264 needs them).
+    static func renderImage(_ screen: AnsiScreen, scale: Double, blinkVisible: Bool, even: Bool = false) throws -> CGImage {
+        let whole = max(1, Int(scale.rounded(.down)))
+        let options = RenderOptions(for: screen, scale: whole, blinkVisible: blinkVisible)
+        guard let image = AnsiRenderer.render(screen, options: options)?.image else { throw AnsiExportError.renderFailed }
+        var width = image.width, height = image.height
+        if Double(whole) != scale {
+            width = max(1, Int((Double(image.width) * scale / Double(whole)).rounded()))
+            height = max(1, Int((Double(image.height) * scale / Double(whole)).rounded()))
+        }
+        if even {
+            width = max(2, width & ~1)
+            height = max(2, height & ~1)
+        }
+        if width == image.width, height == image.height { return image }
+        guard let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+        else { throw AnsiExportError.renderFailed }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let resampled = context.makeImage() else { throw AnsiExportError.renderFailed }
+        return resampled
+    }
+
     // MARK: Animations
 
+    /// The animation as before plan 4: ImageIO's own GIF colours. Used by `ansirender --animate`.
     static func exportAnimation(
         _ frames: [AnsiFrame], format: AnimationFormat, scale: Int, to url: URL,
         progress: (Double) -> Void
     ) throws {
+        try writeAnimation(frames, format: format, scale: Double(scale), palette: .system, to: url,
+                           progress: progress, isCancelled: { false })
+    }
+
+    static func writeAnimation(
+        _ frames: [AnsiFrame], format: AnimationFormat, scale: Double, palette: GIFPalette, to url: URL,
+        progress: (Double) -> Void, isCancelled: () -> Bool
+    ) throws {
+        let render: (AnsiFrame) throws -> CGImage = { frame in
+            if isCancelled() { throw AnsiExportError.cancelled }
+            return try renderImage(frame.screen, scale: scale, blinkVisible: frame.blinkVisible, even: format == .mp4)
+        }
         switch format {
-        case .gif: try writeGIF(frames, scale: scale, to: url, progress: progress)
-        case .webp: try writeAnimatedWebP(frames, scale: scale, to: url, progress: progress)
-        case .mp4: try writeMP4(frames, scale: scale, to: url, progress: progress)
+        case .gif:
+            // AnsiView's own encoder keeps the art's exact colours; resampled frames have new colours.
+            if scale == scale.rounded(.down), scale >= 1,
+               let colors = GIFColors.palette(for: frames.map(\.screen), mode: palette) {
+                try writeIndexedGIF(frames, scale: Int(scale), palette: colors, to: url,
+                                    progress: progress, isCancelled: isCancelled)
+            } else {
+                try writeGIF(frames, render: render, to: url, progress: progress)
+            }
+        case .webp: try writeAnimatedWebP(frames, render: render, to: url, progress: progress)
+        case .mp4: try writeMP4(frames, render: render, to: url, progress: progress)
         }
     }
 
-    private static func render(_ frame: AnsiFrame, scale: Int) throws -> CGImage {
-        let options = RenderOptions(for: frame.screen, scale: scale, blinkVisible: frame.blinkVisible)
-        guard let image = AnsiRenderer.render(frame.screen, options: options)?.image
-        else { throw AnsiExportError.renderFailed }
-        return image
+    /// GIF delays in hundredths of a second. The running total is rounded, not each frame, so the
+    /// animation's length does not drift; every delay is at least 2 (browsers slow shorter ones).
+    static func gifDelays(_ frames: [AnsiFrame]) -> [Int] {
+        var exactTime = 0.0
+        var written = 0
+        return frames.map { frame in
+            exactTime += frame.duration
+            let hundredths = max(2, Int((exactTime * 100).rounded()) - written)
+            written += hundredths
+            return hundredths
+        }
     }
 
-    private static func writeGIF(_ frames: [AnsiFrame], scale: Int, to url: URL, progress: (Double) -> Void) throws {
+    private static func writeIndexedGIF(
+        _ frames: [AnsiFrame], scale: Int, palette: [RGB], to url: URL,
+        progress: (Double) -> Void, isCancelled: () -> Bool
+    ) throws {
+        let delays = gifDelays(frames)
+        var encoder: GIFEncoder?
+        for (index, frame) in frames.enumerated() {
+            if isCancelled() { throw AnsiExportError.cancelled }
+            let options = RenderOptions(for: frame.screen, scale: scale, blinkVisible: frame.blinkVisible)
+            guard let image = AnsiRenderer.renderIndexed(frame.screen, options: options, palette: palette)
+            else { throw AnsiExportError.renderFailed }
+            if encoder == nil { encoder = GIFEncoder(width: image.width, height: image.height, palette: palette) }
+            encoder?.add(image, delayHundredths: delays[index])
+            progress(Double(index + 1) / Double(frames.count))
+        }
+        guard var encoder else { throw AnsiExportError.renderFailed }
+        try encoder.finish().write(to: url)
+    }
+
+    private static func writeGIF(
+        _ frames: [AnsiFrame], render: (AnsiFrame) throws -> CGImage, to url: URL, progress: (Double) -> Void
+    ) throws {
         guard let dest = CGImageDestinationCreateWithURL(
             url as CFURL, UTType.gif.identifier as CFString, frames.count, nil)
         else { throw AnsiExportError.encodeFailed("GIF destination") }
         CGImageDestinationSetProperties(dest, [
             kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0],
         ] as CFDictionary)
-        var exactTime = 0.0
-        var writtenHundredths = 0.0
+        let delays = gifDelays(frames)
         for (index, frame) in frames.enumerated() {
-            // GIF delays are stored in hundredths of a second; round the running total, not each
-            // frame, so the animation's length does not drift.
-            exactTime += frame.duration
-            let hundredths = max(2, (exactTime * 100).rounded() - writtenHundredths)
-            writtenHundredths += hundredths
-            let delay = hundredths / 100
-            CGImageDestinationAddImage(dest, try render(frame, scale: scale), [
+            let delay = Double(delays[index]) / 100
+            CGImageDestinationAddImage(dest, try render(frame), [
                 kCGImagePropertyGIFDictionary: [
                     kCGImagePropertyGIFDelayTime: delay,
                     kCGImagePropertyGIFUnclampedDelayTime: delay,
@@ -173,9 +392,9 @@ enum AnsiExporter {
     }
 
     private static func writeAnimatedWebP(
-        _ frames: [AnsiFrame], scale: Int, to url: URL, progress: (Double) -> Void
+        _ frames: [AnsiFrame], render: (AnsiFrame) throws -> CGImage, to url: URL, progress: (Double) -> Void
     ) throws {
-        let first = try render(frames[0], scale: scale)
+        let first = try render(frames[0])
         let width = Int32(first.width), height = Int32(first.height)
 
         var options = WebPAnimEncoderOptions()
@@ -193,7 +412,7 @@ enum AnsiExporter {
 
         var timestamp = 0
         for (index, frame) in frames.enumerated() {
-            let image = index == 0 ? first : try render(frame, scale: scale)
+            let image = index == 0 ? first : try render(frame)
             let rgba = try rgbaBytes(image)
             var picture = WebPPicture()
             guard WebPPictureInit(&picture) != 0 else { throw AnsiExportError.encodeFailed("WebP picture") }
@@ -222,8 +441,10 @@ enum AnsiExporter {
         try Data(bytes: bytes, count: data.size).write(to: url)
     }
 
-    private static func writeMP4(_ frames: [AnsiFrame], scale: Int, to url: URL, progress: (Double) -> Void) throws {
-        let first = try render(frames[0], scale: scale)
+    private static func writeMP4(
+        _ frames: [AnsiFrame], render: (AnsiFrame) throws -> CGImage, to url: URL, progress: (Double) -> Void
+    ) throws {
+        let first = try render(frames[0])
         let width = first.width, height = first.height
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
@@ -244,27 +465,33 @@ enum AnsiExporter {
         writer.startSession(atSourceTime: .zero)
 
         var milliseconds: Int64 = 0
-        for (index, frame) in frames.enumerated() {
-            let image = index == 0 ? first : try render(frame, scale: scale)
-            while !input.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.005) }
-            guard let pool = adaptor.pixelBufferPool else { throw AnsiExportError.encodeFailed("pixel buffer pool") }
-            var buffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
-            guard let buffer else { throw AnsiExportError.encodeFailed("pixel buffer") }
-            CVPixelBufferLockBaseAddress(buffer, [])
-            let context = CGContext(
-                data: CVPixelBufferGetBaseAddress(buffer), width: width, height: height,
-                bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
-                space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
-            context?.interpolationQuality = .none
-            context?.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-            CVPixelBufferUnlockBaseAddress(buffer, [])
-            guard adaptor.append(buffer, withPresentationTime: CMTime(value: milliseconds, timescale: 1000)) else {
-                throw AnsiExportError.encodeFailed(writer.error?.localizedDescription ?? "MP4 frame \(index)")
+        do {
+            for (index, frame) in frames.enumerated() {
+                let image = index == 0 ? first : try render(frame)
+                while !input.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.005) }
+                guard let pool = adaptor.pixelBufferPool else { throw AnsiExportError.encodeFailed("pixel buffer pool") }
+                var buffer: CVPixelBuffer?
+                CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
+                guard let buffer else { throw AnsiExportError.encodeFailed("pixel buffer") }
+                CVPixelBufferLockBaseAddress(buffer, [])
+                let context = CGContext(
+                    data: CVPixelBufferGetBaseAddress(buffer), width: width, height: height,
+                    bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+                    space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                    bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+                context?.interpolationQuality = .none
+                context?.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                CVPixelBufferUnlockBaseAddress(buffer, [])
+                guard adaptor.append(buffer, withPresentationTime: CMTime(value: milliseconds, timescale: 1000)) else {
+                    throw AnsiExportError.encodeFailed(writer.error?.localizedDescription ?? "MP4 frame \(index)")
+                }
+                milliseconds += max(1, Int64((frame.duration * 1000).rounded()))
+                progress(Double(index + 1) / Double(frames.count))
             }
-            milliseconds += max(1, Int64((frame.duration * 1000).rounded()))
-            progress(Double(index + 1) / Double(frames.count))
+        } catch {
+            writer.cancelWriting()
+            try? FileManager.default.removeItem(at: url)
+            throw error
         }
         input.markAsFinished()
         writer.endSession(atSourceTime: CMTime(value: milliseconds, timescale: 1000))
