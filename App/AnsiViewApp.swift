@@ -129,6 +129,13 @@ struct AnsiViewApp: App {
                             NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
                                 if let error { NSAlert(error: error).runModal() }
                             }
+                        },
+                        editFile: { url in
+                            guard let data = try? Data(contentsOf: url) else { NSSound.beep(); return }
+                            let art = ArtFile(data: data, fileExtension: url.pathExtension)
+                            EditorWindowController.open(canvas: EditCanvas(file: art),
+                                                        name: url.deletingPathExtension().lastPathComponent + " (edited)",
+                                                        suggestedFormat: SaveFormat.suggested(for: art.format))
                         })
                 }
                 Button("Connect to BBS...") { DialingDirectoryWindowController.show() }

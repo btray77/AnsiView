@@ -40,9 +40,18 @@ public enum SixteenColors {
         /// The file's path inside the pack.
         public let name: String
         public let artists: [String]
-        /// The small preview 16colo.rs renders, when it has one.
+        /// The small preview 16colo.rs renders (`tn`, 160 pixels wide), when it has one.
         public let thumbnail: URL?
+        /// The full size picture 16colo.rs renders (`x1`), when it has one.
+        public let fullImage: URL?
         public var isViewable: Bool { SixteenColors.isViewable(name) }
+
+        public init(name: String, artists: [String] = [], thumbnail: URL? = nil, fullImage: URL? = nil) {
+            self.name = name
+            self.artists = artists
+            self.thumbnail = thumbnail
+            self.fullImage = fullImage
+        }
     }
 
     public struct PackDetail: Equatable {
@@ -52,6 +61,15 @@ public enum SixteenColors {
         public let download: URL?
         /// In Finder order by name.
         public let files: [PackFile]
+        /// The pack's description file (usually FILE_ID.DIZ), when the API names one.
+        public let fileID: String?
+
+        /// The picture that stands for the pack (as on 16colo.rs's year pages): the description
+        /// file when it has a thumbnail, else the first file that has one.
+        public var cover: PackFile? {
+            if let fileID, let file = files.first(where: { $0.name == fileID && $0.thumbnail != nil }) { return file }
+            return files.first { $0.thumbnail != nil }
+        }
     }
 
     public enum DecodeError: LocalizedError, Equatable {
@@ -80,10 +98,25 @@ public enum SixteenColors {
 
     /// A single file of a pack. Nil for names that are empty or step outside the pack (`.` or `..`).
     public static func rawFileURL(pack: String, file: String) -> URL? {
+        packURL(pack: pack, kind: "raw", file: file, suffix: "")
+    }
+
+    /// The 160 pixel wide preview 16colo.rs renders of a file (`/pack/<p>/tn/<f>.png`).
+    public static func thumbnailURL(pack: String, file: String) -> URL? {
+        packURL(pack: pack, kind: "tn", file: file, suffix: ".png")
+    }
+
+    /// The full size picture 16colo.rs renders of a file (`/pack/<p>/x1/<f>.png`).
+    public static func fullImageURL(pack: String, file: String) -> URL? {
+        packURL(pack: pack, kind: "x1", file: file, suffix: ".png")
+    }
+
+    private static func isUnsafeComponent(_ text: String) -> Bool { text.isEmpty || text == "." || text == ".." }
+
+    private static func packURL(pack: String, kind: String, file: String, suffix: String) -> URL? {
         let parts = file.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
-        let unsafe: (String) -> Bool = { $0.isEmpty || $0 == "." || $0 == ".." }
-        guard !unsafe(pack), !pack.contains("/"), !parts.contains(where: unsafe) else { return nil }
-        let path = "pack/" + component(pack) + "/raw/" + parts.map(component).joined(separator: "/")
+        guard !isUnsafeComponent(pack), !pack.contains("/"), !parts.contains(where: isUnsafeComponent) else { return nil }
+        let path = "pack/" + component(pack) + "/" + kind + "/" + parts.map(component).joined(separator: "/") + suffix
         return URL(string: path, relativeTo: site)?.absoluteURL
     }
 
@@ -128,6 +161,42 @@ public enum SixteenColors {
         guard let name = parts.last else { return nil }
         let ext = (name as NSString).pathExtension.lowercased()
         return (parts.dropLast() + [ArtFiles.extensions.contains(ext) ? name : name + ".ans"]).joined(separator: "/")
+    }
+
+    /// Where a downloaded file of a pack lives in the disk cache: `files/<pack>/<cacheName>`.
+    public static func fileCacheName(pack: String, file: String) -> String? {
+        guard !pack.contains("/"), let folder = safeName(pack), let name = cacheName(for: file) else { return nil }
+        return "files/" + folder + "/" + name
+    }
+
+    /// Where a `tn` or `x1` picture lives in the disk cache: `images/<pack>/<tn|x1>/<file>.png`.
+    /// Nil for anything that is not such a picture on 16colo.rs, or that steps outside its folder.
+    public static func imageCacheName(for url: URL) -> String? {
+        guard url.scheme == "https", url.host == site.host else { return nil }
+        let parts = Array(url.pathComponents.drop { $0 == "/" })
+        guard parts.count >= 4, parts[0] == "pack", ["tn", "x1"].contains(parts[2]),
+              !parts.contains(where: isUnsafeComponent) else { return nil }
+        let names = [parts[1]] + Array(parts[3...])
+        let safe = names.compactMap(safeName)
+        guard safe.count == names.count else { return nil }
+        return (["images", safe[0], parts[2]] + safe.dropFirst()).joined(separator: "/")
+    }
+
+    /// Where an API response is kept on disk (read back only when offline): `api/<path>_<query>.json`.
+    public static func apiCacheName(for url: URL) -> String {
+        var parts = url.pathComponents.filter { $0 != "/" }
+        if parts.first == "v1" { parts.removeFirst() }
+        let safe = parts.compactMap(safeName)
+        var name = safe.isEmpty ? "index" : safe.joined(separator: "/")
+        if let query = url.query, !query.isEmpty {
+            name += "_" + query.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
+        }
+        return "api/" + name + ".json"
+    }
+
+    /// True when the data starts with the PNG signature (so an HTML error page is never kept as a picture).
+    public static func isPNG(_ data: Data) -> Bool {
+        data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
     }
 
     /// The cache file name for a pack's ZIP.
@@ -191,15 +260,17 @@ public enum SixteenColors {
         let files = (result["files"] as? [String: Any] ?? [:]).map { fileName, value -> PackFile in
             let entry = value as? [String: Any] ?? [:]
             let file = entry["file"] as? [String: Any] ?? [:]
-            let thumbnail = ((file["tn"] as? [String: Any])?["uri"] as? String).flatMap(downloadURL)
-            return PackFile(name: fileName, artists: entry["artists"] as? [String] ?? [], thumbnail: thumbnail)
+            func image(_ key: String) -> URL? { ((file[key] as? [String: Any])?["uri"] as? String).flatMap(downloadURL) }
+            return PackFile(name: fileName, artists: entry["artists"] as? [String] ?? [], thumbnail: image("tn"),
+                            fullImage: image("x1"))
         }
         let sorted = files.sorted { a, b in
             let order = a.name.localizedStandardCompare(b.name)
             return order == .orderedSame ? a.name < b.name : order == .orderedAscending
         }
         return PackDetail(name: name, year: int(result["year"]), archive: result["archive"] as? String,
-                          download: (result["download"] as? String).flatMap(downloadURL), files: sorted)
+                          download: (result["download"] as? String).flatMap(downloadURL), files: sorted,
+                          fileID: (result["fileid"] as? String).flatMap { $0.isEmpty ? nil : $0 })
     }
 }
 
@@ -217,4 +288,47 @@ public struct RequestSpacing {
     }
 
     public mutating func started(at time: TimeInterval) { lastStart = time }
+}
+
+/// Requests waiting for their turn, in the order they may go: by priority, then first come first
+/// served. One lane serves every request to 16colo.rs, so a selection never waits behind a grid
+/// of thumbnails, and a cancelled waiter (the user moved on) never comes out.
+public struct RequestLane {
+    public enum Priority: Int, Comparable {
+        /// Listings and the selected file (its art and its full size picture).
+        case user
+        /// Thumbnails of visible grid items.
+        case grid
+        /// Thumbnails of visible pack rows.
+        case packRow
+
+        public static func < (a: Priority, b: Priority) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    private var waiting: [(ticket: Int, priority: Priority)] = []
+    private var lastTicket = 0
+
+    public init() {}
+
+    public var count: Int { waiting.count }
+
+    /// Joins the lane; the ticket identifies this waiter.
+    public mutating func enqueue(_ priority: Priority) -> Int {
+        lastTicket += 1
+        waiting.append((lastTicket, priority))
+        return lastTicket
+    }
+
+    /// Leaves the lane. Unknown or already finished tickets are ignored.
+    public mutating func cancel(_ ticket: Int) {
+        waiting.removeAll { $0.ticket == ticket }
+    }
+
+    /// The waiter that goes next (and leaves the lane), or nil when nobody waits.
+    public mutating func next() -> Int? {
+        guard let best = waiting.indices.min(by: { a, b in
+            waiting[a].priority != waiting[b].priority ? waiting[a].priority < waiting[b].priority : waiting[a].ticket < waiting[b].ticket
+        }) else { return nil }
+        return waiting.remove(at: best).ticket
+    }
 }
