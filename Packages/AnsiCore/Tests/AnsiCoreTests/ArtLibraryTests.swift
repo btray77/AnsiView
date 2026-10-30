@@ -206,6 +206,15 @@ struct LibraryDataTests {
         #expect(SmartFolder(name: "x", matchAll: false, rules: []).matches(r, notes: notes, now: now))
     }
 
+    @Test func smartFolderUsesAGivenHaystack() {
+        // Review fix: the library passes its cached haystack instead of folding the text per rule.
+        let r = record(text: "nothing here", identity: "a")
+        let cached = SearchHaystack(name: "", title: "", author: "", group: "", comments: "", text: "a dragon")
+        let folder = SmartFolder(name: "x", matchAll: true, rules: [.textContains("dragon")])
+        #expect(!folder.matches(r, notes: PieceNotes(), now: now))
+        #expect(folder.matches(r, haystack: cached, notes: PieceNotes(), now: now))
+    }
+
     @Test func builtInSmartFolders() {
         let folders = SmartFolder.builtIn
         #expect(folders.map(\.name) == ["Favourites", "Rated 4 Stars or More", "Untagged", "Recently Added"])

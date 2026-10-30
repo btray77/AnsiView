@@ -175,7 +175,8 @@ final class ViewerTools: NSObject, NSSearchFieldDelegate {
             player.highlight([], current: nil)
             updateFindStatus()
         }
-        minimapImageKey = nil
+        // The finished art only changes with the palette, which the picture's key already covers,
+        // so a blink or a playback frame never draws the minimap again.
         updateMinimap()
     }
 
@@ -487,6 +488,8 @@ final class ViewerTools: NSObject, NSSearchFieldDelegate {
     // MARK: Minimap (ruling 5)
 
     let minimap = MinimapView()
+    /// Minimap pictures drawn so far (for checks).
+    private(set) var minimapRenders = 0
     private var minimapImageKey: String?
 
     var minimapShown: Bool { !minimap.isHidden }
@@ -526,6 +529,7 @@ final class ViewerTools: NSObject, NSSearchFieldDelegate {
         let key = "\(player.paletteOverride.map { $0.map { "\($0.r).\($0.g).\($0.b)" }.joined() } ?? "own")"
         if minimapImageKey != key {
             minimapImageKey = key
+            minimapRenders += 1
             let screen = player.finalScreenAsShown
             let font = screen.font
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in

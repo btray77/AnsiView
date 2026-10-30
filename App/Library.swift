@@ -34,9 +34,14 @@ final class LibraryStore {
     private(set) var lastScan = (read: 0, kept: 0, seconds: 0.0)
     /// For checks: true if any file was ever read on the main thread.
     private(set) var scannedOnMainThread = false
+    /// Folders whose security scope is open now (for checks).
+    var scopedFolderIDs: Set<UUID> { Set(scoped.keys) }
     /// Folders whose bookmark could not be resolved.
     private(set) var missingFolders: Set<UUID> = []
-    private var scoped: [URL] = []
+    /// Open security scopes, by folder: started once, stopped when the folder is removed.
+    private var scoped: [UUID: URL] = [:]
+    /// Changes made while a scan runs, applied again when it finishes (review Important 1).
+    private var forgottenDuringScan = Set<String>()
     private let queue: OperationQueue = {
         let queue = OperationQueue()
         queue.qualityOfService = .utility
@@ -56,7 +61,7 @@ final class LibraryStore {
 
     deinit {
         queue.cancelAllOperations()
-        scoped.forEach { $0.stopAccessingSecurityScopedResource() }
+        scoped.values.forEach { $0.stopAccessingSecurityScopedResource() }
     }
 
     private func setRecords(_ new: [IndexRecord]) {
@@ -65,6 +70,7 @@ final class LibraryStore {
             return order == .orderedSame ? a.key < b.key : order == .orderedAscending
         }
         haystacks = records.map(\.haystack)
+        directory = nil
     }
 
     private func notify() { NotificationCenter.default.post(name: Self.changed, object: self) }
@@ -81,6 +87,7 @@ final class LibraryStore {
 
     /// Resolves every folder's bookmark and keeps its security scope open while the store lives.
     private func openFolders() {
+        var changed = false
         for (i, entry) in data.folders.enumerated() {
             guard let bookmark = entry.bookmark else { continue }
             var stale = false
@@ -89,12 +96,28 @@ final class LibraryStore {
                 missingFolders.insert(entry.id)
                 continue
             }
-            if url.startAccessingSecurityScopedResource() { scoped.append(url) }
-            if stale || url.standardizedFileURL.path != entry.path {
-                data.folders[i].path = url.standardizedFileURL.path
-                data.folders[i].bookmark = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil,
-                                                                 relativeTo: nil)
+            if url.startAccessingSecurityScopedResource() { scoped[entry.id] = url }
+            let path = url.standardizedFileURL.path
+            if path != entry.path {
+                // The folder moved: its pieces keep their records (and tags) under the new path.
+                setRecords(records.map { record in
+                    guard record.path.hasPrefix(entry.path + "/") else { return record }
+                    var moved = record
+                    moved.path = path + record.path.dropFirst(entry.path.count)
+                    return moved
+                })
+                data.folders[i].path = path
+                changed = true
             }
+            if stale {
+                data.folders[i].bookmark = (try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil,
+                                                                  relativeTo: nil)) ?? entry.bookmark
+                changed = true
+            }
+        }
+        if changed {
+            saveData()
+            saveIndex()
         }
     }
 
@@ -103,8 +126,9 @@ final class LibraryStore {
         let path = url.standardizedFileURL.path
         guard !data.folders.contains(where: { $0.path == path }) else { rescan(); return }
         let bookmark = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
-        if url.startAccessingSecurityScopedResource() { scoped.append(url) }
-        data.folders.append(LibraryFolder(path: path, bookmark: bookmark))
+        let folder = LibraryFolder(path: path, bookmark: bookmark)
+        if url.startAccessingSecurityScopedResource() { scoped[folder.id] = url }
+        data.folders.append(folder)
         saveData()
         notify()
         rescan()
@@ -114,6 +138,8 @@ final class LibraryStore {
     func removeFolder(_ id: UUID) {
         guard let entry = data.folders.first(where: { $0.id == id }) else { return }
         data.folders.removeAll { $0.id == id }
+        scoped.removeValue(forKey: id)?.stopAccessingSecurityScopedResource()
+        missingFolders.remove(id)
         setRecords(records.filter { !$0.path.hasPrefix(entry.path + "/") })
         saveData()
         saveIndex()
@@ -140,6 +166,15 @@ final class LibraryStore {
         isIndexing = true
         progress = (0, 0)
         notify()
+        forgottenDuringScan = []
+        // A folder that cannot be listed now (an unmounted disk, a lost bookmark) is marked
+        // missing and keeps its records; it is not treated as empty.
+        for folder in data.folders {
+            var isDirectory: ObjCBool = false
+            let readable = FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory) && isDirectory.boolValue
+                && FileManager.default.isReadableFile(atPath: folder.path)
+            if readable { missingFolders.remove(folder.id) } else { missingFolders.insert(folder.id) }
+        }
         let folders = data.folders.filter { !missingFolders.contains($0.id) }.map { URL(fileURLWithPath: $0.path) }
         let existing = records
         let thumbnails = self.thumbnails
@@ -162,9 +197,19 @@ final class LibraryStore {
         var remaining = files.count
         let now = Date()
         func finish() {
-            var kept = keep
-            kept += fresh
-            setRecords(kept)
+            // Records outside the folders just read (missing folders) are carried over; folders
+            // removed and pieces forgotten while the scan ran stay gone.
+            let scannedRoots = data.folders.filter { !missingFolders.contains($0.id) }.map { $0.path + "/" }
+            let allRoots = data.folders.map { $0.path + "/" }
+            let carried = records.filter { record in
+                !scannedRoots.contains { record.path.hasPrefix($0) } && allRoots.contains { record.path.hasPrefix($0) }
+            }
+            let forgotten = forgottenDuringScan
+            let merged = (keep + fresh).filter { record in
+                !forgotten.contains(record.key) && allRoots.contains { record.path.hasPrefix($0) }
+            } + carried
+            forgottenDuringScan = []
+            setRecords(merged)
             saveIndex()
             lastScan = (files.count, keep.count, ProcessInfo.processInfo.systemUptime - started)
             isIndexing = false
@@ -208,6 +253,7 @@ final class LibraryStore {
 
     /// Takes trashed (or otherwise gone) files out of the index.
     func forget(keys: Set<String>) {
+        if isIndexing { forgottenDuringScan.formUnion(keys) }
         setRecords(records.filter { !keys.contains($0.key) })
         saveIndex()
         notify()
@@ -250,8 +296,19 @@ final class LibraryStore {
 
     // MARK: Listing
 
-    var artists: [ArtistEntry] { ArtistDirectory.artists(records) }
-    var groups: [ArtistEntry] { ArtistDirectory.groups(records) }
+    /// Times the artist and group lists were worked out (for checks).
+    private(set) var directoryBuilds = 0
+    private var directory: (artists: [ArtistEntry], groups: [ArtistEntry])?
+    /// Worked out once after each change of records, then reused.
+    private var currentDirectory: (artists: [ArtistEntry], groups: [ArtistEntry]) {
+        if let directory { return directory }
+        directoryBuilds += 1
+        let made = (ArtistDirectory.artists(records), ArtistDirectory.groups(records))
+        directory = made
+        return made
+    }
+    var artists: [ArtistEntry] { currentDirectory.artists }
+    var groups: [ArtistEntry] { currentDirectory.groups }
 
     /// Indexes into `records` for a sidebar source, narrowed by a search.
     func matching(_ source: LibrarySource, query: String) -> [Int] {
@@ -261,7 +318,9 @@ final class LibraryStore {
         switch source {
         case .all: base = Array(records.indices)
         case .smart(let folder):
-            base = records.indices.filter { folder.matches(records[$0], notes: data.notes(for: records[$0].identity), now: now) }
+            base = records.indices.filter {
+                folder.matches(records[$0], haystack: haystacks[$0], notes: data.notes(for: records[$0].identity), now: now)
+            }
         case .tag(let tag):
             base = records.indices.filter { SmartRule.tagIs(tag).matches(records[$0], notes: data.notes(for: records[$0].identity), now: now) }
         case .artist(let key): base = artists.first { $0.key == key }?.pieces ?? []

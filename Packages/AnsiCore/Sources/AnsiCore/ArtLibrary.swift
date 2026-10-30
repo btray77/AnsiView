@@ -231,6 +231,12 @@ public enum SmartRule: Codable, Equatable {
     case addedWithinDays(Int)
 
     public func matches(_ record: IndexRecord, notes: PieceNotes, now: Date) -> Bool {
+        matches(record, haystack: nil, notes: notes, now: now)
+    }
+
+    /// The same, using a haystack the caller already built for the record (the library caches one
+    /// per piece, so text rules do not fold the art's words again on every evaluation).
+    public func matches(_ record: IndexRecord, haystack: SearchHaystack?, notes: PieceNotes, now: Date) -> Bool {
         func has(_ field: String, _ value: String) -> Bool {
             let words = ArtSearch.words(value)
             let folded = ArtSearch.fold(field)
@@ -243,7 +249,7 @@ public enum SmartRule: Codable, Equatable {
         case .untagged: return notes.tags.isEmpty
         case .ratingAtLeast(let stars): return notes.rating >= stars
         case .favourite: return notes.favourite
-        case .textContains(let value): return record.haystack.matches(words: ArtSearch.words(value))
+        case .textContains(let value): return (haystack ?? record.haystack).matches(words: ArtSearch.words(value))
         case .titleContains(let value): return has(record.title, value)
         case .authorContains(let value): return has(record.author, value)
         case .groupContains(let value): return has(record.group, value)
@@ -273,9 +279,13 @@ public struct SmartFolder: Codable, Equatable {
     }
 
     public func matches(_ record: IndexRecord, notes: PieceNotes, now: Date) -> Bool {
+        matches(record, haystack: nil, notes: notes, now: now)
+    }
+
+    public func matches(_ record: IndexRecord, haystack: SearchHaystack?, notes: PieceNotes, now: Date) -> Bool {
         guard !rules.isEmpty else { return true }
-        return matchAll ? rules.allSatisfy { $0.matches(record, notes: notes, now: now) }
-            : rules.contains { $0.matches(record, notes: notes, now: now) }
+        return matchAll ? rules.allSatisfy { $0.matches(record, haystack: haystack, notes: notes, now: now) }
+            : rules.contains { $0.matches(record, haystack: haystack, notes: notes, now: now) }
     }
 
     /// Always in the sidebar; not saved, not editable.

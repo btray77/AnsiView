@@ -24,8 +24,11 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource,
     private let queue: OperationQueue = {
         let queue = OperationQueue()
         queue.qualityOfService = .userInitiated
+        queue.maxConcurrentOperationCount = ProcessInfo.processInfo.activeProcessorCount
         return queue
     }()
+    /// Pieces whose text a search has already asked for (read at most once).
+    private var textRequested = Set<Int>()
     private var order: WorkOrder
     private var inFlight = 0
     private let workers = max(2, ProcessInfo.processInfo.activeProcessorCount)
@@ -41,6 +44,8 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource,
     private(set) var renderedFromFile = 0
     /// The first pieces whose thumbnails were started, in order (for checks).
     private(set) var startedOrder: [Int] = []
+    /// Pieces read for their text by searches (for checks).
+    private(set) var textReads = 0
 
     /// Collection indexes on show, in order (all of them unless a search is filtering).
     private(set) var shownIndexes: [Int]
@@ -248,7 +253,10 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource,
             }
             if renderedCount == collection.items.count { onAllRendered?() }
         }
-        if let haystack = result.haystack { haystacks[index] = haystack }
+        if let haystack = result.haystack, haystacks[index] == nil {
+            haystacks[index] = haystack
+            textArrived()
+        }
         pumpThumbnails()
     }
 
@@ -274,23 +282,29 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource,
         let missing = collection.items.indices.filter { haystacks[$0] == nil }
         guard !missing.isEmpty else { finishSearch(); return }
         isSearching = true
-        let generation = searchGeneration
-        var remaining = missing.count
         statusLabel.stringValue = "Reading \(missing.count) pieces..."
-        for index in missing {
+        // Pieces already being read (for an earlier query or a thumbnail) are not queued again;
+        // whichever read finishes last completes the search.
+        for index in missing where textRequested.insert(index).inserted {
             queue.addOperation { [collection, weak self] in
                 let file = collection.artFile(at: index)
                 let hay = Self.haystack(collection.items[index].name, file, AnsiAnalysis(file).finalScreen)
                 DispatchQueue.main.async {
                     guard let self else { return }
+                    self.textReads += 1
                     self.haystacks[index] = hay
-                    remaining -= 1
-                    guard generation == self.searchGeneration else { return }
-                    if remaining == 0 { self.finishSearch() }
-                    else if remaining % 200 == 0 { self.statusLabel.stringValue = "Reading \(remaining) more pieces..." }
+                    self.textArrived()
                 }
             }
         }
+    }
+
+    /// A piece's text arrived: the search finishes when every piece has its text.
+    private func textArrived() {
+        guard isSearching, !query.isEmpty else { return }
+        let remaining = collection.items.count - haystacks.count
+        if remaining == 0 { finishSearch() }
+        else if remaining % 200 == 0 { statusLabel.stringValue = "Reading \(remaining) more pieces..." }
     }
 
     private func finishSearch() {
