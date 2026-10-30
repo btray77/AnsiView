@@ -69,3 +69,32 @@ licensed packs with credit, while AnsiView's own code stays MIT.
 
 ### iOS and iPadOS (plan 8)
 27. iPhone and iPad app with a Files app Quick Look preview, reusing the core.
+
+### Browsing, viewing and collections (plan 9)
+Added 2026-10-30 at the owner's request.
+35. Thumbnail grid in the 16colo.rs browser: each pack shows a grid of its files using the `tn` previews the API already lists (`/pack/<p>/tn/<f>.png`, 160 px wide), so art is seen without opening it. Click enlarges (using `x1`); opening is a separate action. Previews are cached on disk and fetched with the existing 1 s request spacing.
+36. Pack list rows show the pack's first preview image.
+37. Grid / list toggle in both the 16colo.rs browser and local galleries.
+38. Search text inside art across a file, folder or pack.
+39. Side by side compare of two pieces, with differing cells highlighted.
+40. Smooth auto scroll mode for tall art at adjustable speed.
+41. Minimap strip for tall art to jump anywhere.
+42. Load custom palette files and switch palettes live while viewing.
+43. Library: user tags, favourites, star ratings and smart folders.
+44. Artist and group pages built from SAUCE data (local files, plus 16colo.rs where available).
+45. Duplicate finder across folders and packs.
+46. Show a pack's FILE_ID.DIZ and NFO automatically when opening it.
+47. Background indexing and thumbnailing of very large packs and folders.
+
+### Output, system integration and formats (plan 10)
+48. macOS screensaver that plays a folder of art, including animation.
+49. Desktop wallpaper export at the screen's exact resolution (centred or tiled).
+50. Copy as a Discord / Slack ANSI colour code block.
+51. MP4 export with the modem sound in sync with playback.
+52. Text art generator: type words, get block letter art in original font styles.
+53. Shortcuts and AppleScript actions (render to image, convert to text).
+54. Finder Quick Actions: convert to PNG or GIF without opening the app.
+55. Menu bar "art of the day" from the library or 16colo.rs.
+56. Localization infrastructure, with string catalogs ready for translation.
+57. RIPscrip viewing.
+58. Sixel and Kitty graphics output from `ansirender` for modern terminals.
