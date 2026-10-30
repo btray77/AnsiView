@@ -133,6 +133,8 @@ public struct ArtFile {
     public let identity: String
     /// Size of the whole file in bytes, SAUCE record included.
     public let byteCount: Int
+    /// The 16 colours an XBin, ADF or IDF file carries (nil for VGA art), for palette switching.
+    public let embeddedPalette: [RGB]?
 
     /// The byte stream for stream formats; empty for binary formats.
     public var stream: [UInt8] {
@@ -169,6 +171,7 @@ public struct ArtFile {
         }
 
         self.format = format
+        self.embeddedPalette = BinaryFormats.embeddedPalette(body, format: format)
         self.sauce = sauce
         self.iceColors = iceColors
         self.ninePixel = sauce?.letterSpacing == .nine
