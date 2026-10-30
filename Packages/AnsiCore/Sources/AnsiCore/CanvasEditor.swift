@@ -208,6 +208,10 @@ public final class CanvasEditor {
         public let region: CanvasRegion
         public var x: Int
         public var y: Int
+        /// Where a lifted selection came from (a move); nil for a paste.
+        public var liftedFrom: CellRect? = nil
+        /// A lifted block that leaves the original in place (Option-drag, or the setting).
+        public var leavesCopy = false
     }
 
     /// The block being placed, shown over the canvas until it is stamped or cancelled.
@@ -222,6 +226,10 @@ public final class CanvasEditor {
     public var displayCanvas: EditCanvas {
         guard let floating else { return canvas }
         var shown = canvas
+        if let source = floating.liftedFrom, !floating.leavesCopy {
+            let vacated = vacatedCell
+            shown.fill(source) { _ in vacated }
+        }
         shown.paste(floating.region, x: floating.x, y: floating.y, transparent: transparentPaste)
         return shown
     }
@@ -267,10 +275,76 @@ public final class CanvasEditor {
         guard let block = floating else { return }
         floating = nil
         let transparent = transparentPaste
-        perform("Paste") { $0.canvas.paste(block.region, x: block.x, y: block.y, transparent: transparent) }
+        let vacated = vacatedCell
+        let name = block.liftedFrom == nil ? "Paste" : (block.leavesCopy ? "Duplicate" : "Move")
+        perform(name) { editor in
+            if let source = block.liftedFrom, !block.leavesCopy { editor.canvas.fill(source) { _ in vacated } }
+            editor.canvas.paste(block.region, x: block.x, y: block.y, transparent: transparent)
+        }
         selectionAnchor = nil
         selection = canvas.clip(CellRect(x: block.x, y: block.y, width: block.region.width, height: block.region.height))
         cursor = (block.x, min(canvas.height - 1, block.y))
+        changed()
+    }
+
+    // MARK: Moving a selection (owner request, ruling 8)
+
+    /// Moving a selection keeps the original in place (a copy) instead of clearing it.
+    public var leaveCopyWhenMoving = false
+
+    /// What a moved block leaves behind: a space in the current background on the bottom
+    /// layer; on an upper layer the unset (transparent) cell.
+    public var vacatedCell: AnsiCell {
+        activeLayer == 0 ? AnsiCell(code: 0x20, fg: Palette.vga[7], bg: backgroundColor) : AnsiCell()
+    }
+
+    /// Lifts the selection into a floating block that moves like a paste. Nothing changes
+    /// until it is stamped; cancelling leaves the canvas as it was. False without a selection.
+    @discardableResult
+    public func liftSelection(duplicate: Bool = false) -> Bool {
+        guard floating == nil, let rect = selection else { return false }
+        floating = FloatingPaste(region: canvas.region(rect), x: rect.x, y: rect.y, liftedFrom: rect,
+                                 leavesCopy: duplicate || leaveCopyWhenMoving)
+        changed()
+        return true
+    }
+
+    /// Option-arrow: moves the selection (lifting it first) or the floating block.
+    public func moveSelection(dx: Int, dy: Int, duplicate: Bool = false) {
+        if floating == nil, !liftSelection(duplicate: duplicate) { return }
+        moveFloating(dx: dx, dy: dy)
+    }
+
+    // MARK: Transforms
+
+    /// Whether `transform` can apply to the selection: a quarter turn needs the turned block
+    /// to fit the canvas width from the selection's left edge.
+    public func canTransformSelection(_ transform: CellTransform) -> Bool {
+        guard floating == nil, let rect = selection else { return false }
+        return !transform.swapsSize || rect.x + rect.height <= canvas.columns
+    }
+
+    /// Mirrors or rotates the selection in place (one undo step); the selection follows the block.
+    @discardableResult
+    public func transformSelection(_ transform: CellTransform) -> Bool {
+        guard canTransformSelection(transform), let rect = selection else { return false }
+        let turned = canvas.region(rect).transformed(transform)
+        let vacated = vacatedCell
+        perform(transform.title) { editor in
+            if transform.swapsSize { editor.canvas.fill(rect) { _ in vacated } }
+            editor.canvas.paste(turned, x: rect.x, y: rect.y)
+        }
+        selection = canvas.clip(CellRect(x: rect.x, y: rect.y, width: turned.width, height: turned.height))
+        changed()
+        return true
+    }
+
+    /// Replaces the canvas (every layer) with the selection.
+    public func cropToSelection() {
+        guard floating == nil, let rect = selection else { return }
+        perform("Crop to Selection") { editor in editor.forEachLayer { $0.crop(to: rect) } }
+        selection = canvas.clip(CellRect(x: 0, y: 0, width: rect.width, height: rect.height))
+        cursor = (0, 0)
         changed()
     }
 
@@ -377,6 +451,14 @@ public final class CanvasEditor {
         savedRevision = revision
         changed()
     }
+
+    // MARK: Layers
+
+    /// The layer being edited (0 is the bottom).
+    public private(set) var activeLayer = 0
+
+    /// Applies a change to every layer (size and metadata changes).
+    func forEachLayer(_ body: (inout EditCanvas) -> Void) { body(&canvas) }
 
     // MARK: Helpers
 
