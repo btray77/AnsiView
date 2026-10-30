@@ -108,8 +108,16 @@ final class FrameStripView: NSView {
         let width = Self.gap + CGFloat(count) * (Self.thumbnailWidth + Self.gap)
         setFrameSize(NSSize(width: max(width, superview?.bounds.width ?? width), height: stripHeight))
         needsDisplay = true
-        scrollToVisible(thumbnailRect(editor.currentFrame).insetBy(dx: -Self.gap, dy: 0))
+        // Follow the current frame only when it changes, so a scrolled strip stays put (review M10).
+        if editor.currentFrame != lastShownFrame || count != lastCount {
+            lastShownFrame = editor.currentFrame
+            lastCount = count
+            scrollToVisible(thumbnailRect(editor.currentFrame).insetBy(dx: -Self.gap, dy: 0))
+        }
     }
+
+    private var lastShownFrame = -1
+    private var lastCount = -1
 
     /// The frame's picture, re-rendered only when its cells changed.
     private func image(_ index: Int) -> CGImage? {
@@ -131,7 +139,8 @@ final class FrameStripView: NSView {
                                                     .foregroundColor: NSColor.secondaryLabelColor]
         for index in frames.indices {
             let rect = thumbnailRect(index)
-            guard rect.insetBy(dx: -4, dy: -4).intersects(dirtyRect) || rect.maxY + Self.labelHeight >= dirtyRect.minY else { continue }
+            // Only frames the dirty rectangle reaches horizontally are drawn (review M9).
+            guard rect.minX - 4 <= dirtyRect.maxX, rect.maxX + 4 >= dirtyRect.minX else { continue }
             NSColor.black.setFill()
             rect.fill()
             if let image = image(index) {
@@ -310,8 +319,20 @@ final class AnimationTimelineView: NSView {
         scroll.hasVerticalScroller = false
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
-        strip.onSelect = { [weak self] index in self?.editor.selectFrame(index) }
-        strip.onMove = { [weak self] from, to in self?.editor.moveFrame(from: from, to: to) }
+        // A delay being typed is applied to its own frame before another is chosen (review M11);
+        // nothing changes frames while a paste floats (review M18).
+        strip.onSelect = { [weak self] index in
+            guard let self else { return }
+            self.window?.makeFirstResponder(nil)
+            if self.editor.floating != nil, index != self.editor.currentFrame { NSSound.beep(); return }
+            self.editor.selectFrame(index)
+        }
+        strip.onMove = { [weak self] from, to in
+            guard let self else { return }
+            self.window?.makeFirstResponder(nil)
+            if self.editor.floating != nil { NSSound.beep(); return }
+            self.editor.moveFrame(from: from, to: to)
+        }
         strip.onDuplicate = { [weak self] in self?.perform(.duplicateFrame) }
         strip.onDelete = { [weak self] in self?.perform(.deleteFrame) }
 
@@ -357,6 +378,7 @@ final class AnimationTimelineView: NSView {
         deleteButton.isEnabled = frames.count > 1
         previousButton.isEnabled = current > 0
         nextButton.isEnabled = current < frames.count - 1
+        onionBox.state = controller?.onionSkin == true ? .on : .off
         recordButton.state = editor.recording ? .on : .off
         recordButton.contentTintColor = editor.recording ? .systemRed : nil
         strip.reload()
@@ -417,7 +439,7 @@ final class AnimationTimelineView: NSView {
 
 /// Plays the exported stream through `AnsiTerminal` (the player's own interpreter) at a baud rate,
 /// so the preview is exactly what a caller would see.
-final class AnimationPreviewController: NSWindowController {
+final class AnimationPreviewController: NSWindowController, NSWindowDelegate {
     private static var open: Set<AnimationPreviewController> = []
     private let frames: [AnimationFrame]
     private(set) var order: AnimationOrder
@@ -434,12 +456,18 @@ final class AnimationPreviewController: NSWindowController {
     private var baudPopup = NSPopUpButton()
     private let rows: Int
 
-    static func show(frames: [AnimationFrame], name: String, order: AnimationOrder, baud: Int) {
+    @discardableResult
+    static func show(frames: [AnimationFrame], name: String, order: AnimationOrder, baud: Int) -> AnimationPreviewController {
         let controller = AnimationPreviewController(frames: frames, name: name, order: order, baud: baud)
         open.insert(controller)
         controller.showWindow(nil)
         controller.start()
+        return controller
     }
+
+    /// Previews whose windows are open.
+    static var openCount: Int { open.count }
+    var isPlaying: Bool { timer != nil }
 
     init(frames: [AnimationFrame], name: String, order: AnimationOrder, baud: Int) {
         self.frames = frames
@@ -455,6 +483,7 @@ final class AnimationPreviewController: NSWindowController {
         window.title = "Preview: \(name)"
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        window.delegate = self
 
         screenView.imageScaling = .scaleProportionallyUpOrDown
         screenView.wantsLayer = true
@@ -562,9 +591,9 @@ final class AnimationPreviewController: NSWindowController {
         start()
     }
 
-    override func close() {
+    /// The close button closes the window, not the controller: stop and release here (review I5).
+    func windowWillClose(_ notification: Notification) {
         stop()
-        super.close()
         Self.open.remove(self)
     }
 }
@@ -591,6 +620,8 @@ final class AnimationExportView: NSStackView {
 
     var sizesText: String { sizesLabel.stringValue }
     var compatibilityText: String { compatibilityLabel.stringValue }
+    var warningText: String { warningLabel.stringValue }
+    private let warningLabel = NSTextField(wrappingLabelWithString: "")
     var format: Format { Format(rawValue: formatPopup.indexOfSelectedItem) ?? .ansi }
 
     var options: AnimationExportOptions {
@@ -641,6 +672,11 @@ final class AnimationExportView: NSStackView {
         addArrangedSubview(sizesLabel)
         addArrangedSubview(compatibilityLabel)
         addArrangedSubview(holdsLabel)
+        warningLabel.preferredMaxLayoutWidth = 480
+        warningLabel.font = .systemFont(ofSize: 11)
+        warningLabel.textColor = .systemOrange
+        warningLabel.toolTip = "Where a real 80 x 25 terminal would show the file differently from AnsiView"
+        addArrangedSubview(warningLabel)
         refresh()
     }
 
@@ -670,6 +706,8 @@ final class AnimationExportView: NSStackView {
             parts.append("\(order.label) \(stream.data.count.formatted()) bytes")
         }
         sizesLabel.stringValue = "File size: " + parts.joined(separator: ", ") + " (\(frames.count) frames at \(options.baud) baud)"
+        warningLabel.stringValue = AnimationEncoder.terminalWarnings(frames).joined(separator: "\n")
+        warningLabel.isHidden = warningLabel.stringValue.isEmpty
         guard let current else { return }
         compatibilityLabel.stringValue = AnimationStreamCheck.summary(current.body)
         let c = PaddingDelay.characterTime(baud: options.baud)

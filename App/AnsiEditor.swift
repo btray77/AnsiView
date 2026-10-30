@@ -111,7 +111,9 @@ final class EditorCanvasView: NSView {
         // unchanged cells look the same and changed cells show a ghost.
         if controller?.timelineVisible == true, controller?.onionSkin == true, let image = onionImage() {
             let drawn = NSRect(x: 0, y: 0, width: CGFloat(image.width) * zoom, height: CGFloat(image.height) * zoom)
-            NSImage(cgImage: image, size: drawn.size).draw(in: drawn, from: .zero, operation: .sourceOver, fraction: 0.35)
+            // The canvas is flipped; draw(in:) respects that but the fraction form needs it asked (review C1).
+            NSImage(cgImage: image, size: drawn.size).draw(in: drawn, from: .zero, operation: .sourceOver, fraction: 0.35,
+                                                           respectFlipped: true, hints: nil)
         }
         if showGrid, cellSize.width >= 6 { drawGrid(dirtyRect, canvas: canvas) }
         // A floating block hides the selection, so its colours show as they will be stamped.
@@ -943,7 +945,9 @@ final class EditorViewController: NSViewController {
     /// The animation timeline under the canvas (animation plan, ruling 10).
     private(set) lazy var timeline = AnimationTimelineView(editor: editor, controller: self)
     private(set) var timelineVisible = false
-    private var timelineHeight: NSLayoutConstraint?
+    /// The status bar sits under the canvas, or under the timeline when it shows (review I4).
+    private var statusUnderCanvas: NSLayoutConstraint?
+    private var timelineConstraints: [NSLayoutConstraint] = []
     /// Onion skin: the previous frame drawn faintly over the current one.
     var onionSkin = true {
         didSet {
@@ -956,7 +960,16 @@ final class EditorViewController: NSViewController {
         _ = view
         timelineVisible = on
         timeline.isHidden = !on
-        timelineHeight?.isActive = !on
+        if on {
+            statusUnderCanvas?.isActive = false
+            NSLayoutConstraint.activate(timelineConstraints)
+        } else {
+            NSLayoutConstraint.deactivate(timelineConstraints)
+            statusUnderCanvas?.isActive = true
+        }
+        // The drawing order is kept only while animating (ruling 2), so still art keeps a
+        // version 1 project and no edit log (review I2, I3).
+        editor.tracksEdits = on || editor.frames.count > 1
         if on { timeline.refresh() }
         canvasView.needsDisplay = true
         editorChanged()
@@ -983,8 +996,6 @@ final class EditorViewController: NSViewController {
         canvasView = EditorCanvasView(editor: editor)
         super.init(nibName: nil, bundle: nil)
         canvasView.controller = self
-        // The order cells are drawn in is kept for an As drawn animation export (ruling 2).
-        editor.tracksEdits = true
         editor.onChange = { [weak self] in self?.editorChanged() }
     }
 
@@ -1070,10 +1081,13 @@ final class EditorViewController: NSViewController {
             root.addSubview(sub)
         }
         timeline.isHidden = true
-        let collapsed = timeline.heightAnchor.constraint(equalToConstant: 0)
-        collapsed.priority = .required
-        collapsed.isActive = true
-        timelineHeight = collapsed
+        timelineConstraints = [
+            timeline.topAnchor.constraint(equalTo: scroll.bottomAnchor),
+            timeline.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            timeline.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            status.topAnchor.constraint(equalTo: timeline.bottomAnchor, constant: 4),
+        ]
+        statusUnderCanvas = status.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 4)
         chrome = [bar, palette, layersPanel]
         NSLayoutConstraint.activate([
             bar.topAnchor.constraint(equalTo: root.topAnchor),
@@ -1087,10 +1101,7 @@ final class EditorViewController: NSViewController {
             layersPanel.topAnchor.constraint(equalTo: bar.bottomAnchor),
             layersPanel.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             layersPanel.widthAnchor.constraint(equalToConstant: 190),
-            timeline.topAnchor.constraint(equalTo: scroll.bottomAnchor),
-            timeline.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            timeline.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            status.topAnchor.constraint(equalTo: timeline.bottomAnchor, constant: 4),
+            statusUnderCanvas!,
             status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 10),
             status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -5),
             hintLabel.centerYAnchor.constraint(equalTo: status.centerYAnchor),
