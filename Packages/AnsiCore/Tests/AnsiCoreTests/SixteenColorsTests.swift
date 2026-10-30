@@ -144,4 +144,60 @@ struct SixteenColorsTests {
         #expect(SixteenColors.userAgent(version: "2.0.0", build: "45")
                 == "AnsiView/2.0.0 (build 45; macOS; +https://github.com/btray77/AnsiView)")
     }
+
+    // MARK: Previews (items 35 to 37)
+
+    @Test func imageURLs() {
+        #expect(SixteenColors.thumbnailURL(pack: "0196ciph", file: "0196-MEM.CIP")?.absoluteString
+                == "https://16colo.rs/pack/0196ciph/tn/0196-MEM.CIP.png")
+        #expect(SixteenColors.fullImageURL(pack: "0196ciph", file: "0196-MEM.CIP")?.absoluteString
+                == "https://16colo.rs/pack/0196ciph/x1/0196-MEM.CIP.png")
+        #expect(SixteenColors.thumbnailURL(pack: "p", file: "SUB DIR/A#1.ANS")?.absoluteString
+                == "https://16colo.rs/pack/p/tn/SUB%20DIR/A%231.ANS.png")
+        #expect(SixteenColors.thumbnailURL(pack: "p", file: "../x") == nil)
+        #expect(SixteenColors.fullImageURL(pack: "..", file: "x") == nil)
+    }
+
+    @Test func decodesImagesAndCover() throws {
+        let pack = try SixteenColors.decodePack(fixture("pack-0196ciph"), name: "0196ciph")
+        let member = try #require(pack.files.first { $0.name == "0196-MEM.CIP" })
+        #expect(member.fullImage?.absoluteString == "https://16colo.rs/pack/0196ciph/x1/0196-MEM.CIP.png")
+        #expect(pack.fileID == "FILE_ID.DIZ")
+        #expect(pack.cover?.name == "FILE_ID.DIZ")
+
+        let json = #"{"results":[{"year":1999,"files":{"B.ANS":{"file":{"tn":{"uri":"/pack/q/tn/B.ANS.png"}}},"A.EXE":{"file":{}}}}]}"#
+        let other = try SixteenColors.decodePack(Data(json.utf8), name: "q")
+        #expect(other.fileID == nil)
+        #expect(other.cover?.name == "B.ANS")
+        #expect(other.files.first { $0.name == "A.EXE" }?.fullImage == nil)
+    }
+
+    @Test func imageCacheNameRejectsTraversal() throws {
+        func name(_ text: String) -> String? { SixteenColors.imageCacheName(for: URL(string: text)!) }
+        #expect(name("https://16colo.rs/pack/0196ciph/tn/0196-MEM.CIP.png") == "images/0196ciph/tn/0196-MEM.CIP.png")
+        #expect(name("https://16colo.rs/pack/p/x1/SUB%20DIR/A%231.ANS.png") == "images/p/x1/SUB DIR/A#1.ANS.png")
+        #expect(name("https://16colo.rs/pack/../x1/../../a.png") == nil)
+        #expect(name("https://16colo.rs/pack/p/raw/a.png") == nil)
+        #expect(name("https://example.com/pack/p/tn/a.png") == nil)
+        #expect(name("https://16colo.rs/pack/p/tn/") == nil)
+        for key in [name("https://16colo.rs/pack/p/tn/a/../../../b.png"), name("https://16colo.rs/pack/p/tn/.x.png")] {
+            if let key { #expect(!key.split(separator: "/").contains("..")) }
+        }
+    }
+
+    @Test func apiCacheNames() {
+        #expect(SixteenColors.apiCacheName(for: SixteenColors.packsURL(year: 1996, page: 1))
+                == "api/year/1996_pagesize=500&page=1.json")
+        #expect(SixteenColors.apiCacheName(for: SixteenColors.yearsURL()) == "api/year.json")
+        #expect(SixteenColors.apiCacheName(for: SixteenColors.packURL(name: "a b#c?")) == "api/pack/a b#c?.json")
+        #expect(SixteenColors.apiCacheName(for: SixteenColors.packURL(name: "..")).contains("..") == false)
+        #expect(SixteenColors.fileCacheName(pack: "0196ciph", file: "0196-MEM.CIP") == "files/0196ciph/0196-MEM.CIP.ans")
+        #expect(SixteenColors.fileCacheName(pack: "..", file: "x") == nil)
+    }
+
+    @Test func pngSignature() {
+        #expect(SixteenColors.isPNG(Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0])))
+        #expect(!SixteenColors.isPNG(Data("<!DOCTYPE html>".utf8)))
+        #expect(!SixteenColors.isPNG(Data()))
+    }
 }
