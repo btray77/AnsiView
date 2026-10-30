@@ -66,6 +66,10 @@ struct AnsiViewApp: App {
         // A DOS screen (640x400) at one and a half times size.
         .defaultSize(width: 960, height: 600)
         .commands {
+            CommandGroup(after: .newItem) {
+                Button("Open Folder or Art Pack...") { GalleryWindowController.chooseAndOpen() }
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
+            }
             CommandGroup(after: .importExport) {
                 Button("Export Image...") { send(#selector(AnsiCanvasView.exportImage(_:))) }
                     .keyboardShortcut("e")
