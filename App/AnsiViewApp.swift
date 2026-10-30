@@ -115,6 +115,7 @@ struct AnsiViewApp: App {
                 // The viewer's own New stays disabled (documents are read only); this is the editor's.
                 Button("New ANSI Art") { EditorWindowController.newArt() }
                     .keyboardShortcut("n", modifiers: [.command, .option])
+                Button("New from Template...") { ScreenTemplateGalleryWindowController.show() }
                 Button("Edit Art") { EditorWindowController.editFocusedArt() }
                     .keyboardShortcut("d", modifiers: [.command, .shift])
                 Button("Import Image...") { EditorWindowController.importImage() }
@@ -247,6 +248,7 @@ struct AnsiViewApp: App {
             }
             // SwiftUI takes at most ten entries per builder, so the later menus share a Group.
             Group {
+                ScreenDesignerCommands()
                 CommandGroup(before: .windowList) {
                     Button("ANSI Music Editor") { MusicEditorWindowController.show() }
                         .keyboardShortcut("m", modifiers: [.command, .shift])

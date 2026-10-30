@@ -803,6 +803,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
         return controller
     }
 
+    /// The open terminal window of a dialing directory entry (screen designer upload).
+    static func existing(for entryID: UUID) -> TerminalWindowController? {
+        open.first { $0.terminal.entry.id == entryID }
+    }
+
     func present() {
         showWindow(nil)
         window?.makeFirstResponder(terminal.terminalView)

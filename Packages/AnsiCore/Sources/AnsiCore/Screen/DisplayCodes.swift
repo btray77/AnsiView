@@ -180,6 +180,27 @@ public enum DisplayCodeCatalog {
             }
         case .atHexAt:
             return (1..<16).map { fg in code(String(format: "@0%X@", fg), "\(ColourEffect.names[fg].capitalized) on black", .foreground(fg)) }
+        case .celerity:
+            return BBSDisplay.celerityLetters.enumerated().map { i, l in code("|\(l)", "|\(l): \(ColourEffect.names[i]) text", .foreground(i)) }
+                + [code("|S", "|S: swap text and background", nil), code("|X", "|X: blink on", nil), code("|x", "|x: blink off", nil)]
+        case .ctrlKBracket:
+            let pairs = (1..<16).map { (0, $0) } + (1..<8).map { ($0, 15) } + [(8, 15)]
+            return pairs.map { bg, fg in
+                code(String(format: "\u{0B}[%X%X", bg, fg),
+                     "\(ColourEffect.names[fg].capitalized) on \(ColourEffect.names[bg & 7])\(bg >= 8 ? ", blinking" : "")", .foreground(fg))
+            }
+        case .impulse:
+            return (0..<16).map { code(String(format: "%%%02d", $0), "\(ColourEffect.names[$0].capitalized) text", .foreground($0)) }
+                + (0..<16).map { code(String(format: "%%B%X", $0), "On \(ColourEffect.names[$0 & 7])\($0 >= 8 ? ", bright (iCE) or blinking" : "")",
+                                      $0 < 8 ? .background($0) : .highBackground($0 - 8)) }
+        case .searchlight:
+            return BBSDisplay.searchlightNames.enumerated().map { i, n in code("\\\(n)", "\\\(n): \(ColourEffect.names[i]) text", .foreground(i)) }
+                + [code("\\IV", "\\IV: inverse (text colour becomes the background)", nil), code("\\BI", "\\BI: blink", nil),
+                   code("\\NO", "\\NO: normal", nil)]
+        case .mecca:
+            return BBSDisplay.meccaNames.enumerated().map { i, n in code("[\(n)]", "[\(n)]: \(ColourEffect.names[i]) text", .foreground(i)) }
+                + (1..<8).map { code("[white on \(BBSDisplay.meccaNames[$0])]", "White on \(ColourEffect.names[$0])", .foreground(15)) }
+                + [code("[blink]", "[blink]: blinking text", nil), code("[steady]", "[steady]: stop blinking", nil)]
         case .none: return []
         }
     }

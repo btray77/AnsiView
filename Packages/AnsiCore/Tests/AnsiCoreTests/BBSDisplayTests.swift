@@ -193,3 +193,12 @@ func iceBackgroundsRoundTrip(_ package: BBSPackage) {
         #expect(Set(tokens).count == tokens.count, "\(package) has duplicate tokens")
     }
 }
+
+@Test func sentScreenKeepsTheArtWidth() {
+    let wide = String(repeating: "x", count: 120)
+    let screen = BBSDisplay.screen(b(wide), columns: 132, iceColors: false)
+    #expect(screen.columns == 132)
+    #expect(rowText(screen, 0) == wide)
+    let ice = BBSDisplay.screen(BBSDisplay.render(b("|28A"), package: .mystic, samples: nil), columns: 80, iceColors: true)
+    #expect(ice.rows[0][0].bg == Palette.vga[12])
+}

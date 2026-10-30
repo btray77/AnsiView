@@ -1360,6 +1360,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     /// Where Save Project writes (chosen on the first Save Project, or the project that was opened).
     private(set) var projectURL: URL?
+    /// The BBS screen this art is for (screen designer: set by New from Template and Export to BBS).
+    var screenSlot: ScreenSlot?
 
     @discardableResult
     static func open(canvas: EditCanvas, name: String, suggestedFormat: SaveFormat = .ansi) -> EditorWindowController {

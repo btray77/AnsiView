@@ -82,12 +82,15 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 
 | Requirement | Status | Item / plan |
 |---|---|---|
-| Templates: main menu, login/welcome, goodbye, bulletins, message and file headers, door menus, ads, loading screens | planned | screen designer |
-| Reusable components (headers, frames, hotkey legends) | planned | screen designer |
-| BBS display codes (Synchronet Ctrl-A and @-codes, Mystic pipe and MCI, PCBoard @X, Wildcat) insert, preview with sample values | planned | screen designer |
-| Export to BBS packages' text/menu folders with the right file names | planned | screen designer |
-| Caller preview at chosen baud with the terminal renderer | planned | screen designer |
-| "Use immediately in the BBS" | not possible as stated: AnsiView is not a BBS host. Closest: export directly into a configured BBS install folder (local or mounted), and upload via the terminal's file transfers | screen designer |
+| Templates: main menu, login/welcome, goodbye, bulletins, message and file headers, door menus, ads, loading screens | done (harness PNG of the gallery; a test exports every template for every package at 80 and 132 columns with no layout warning; live check needs owner) | screen designer (`2026-10-30-ansiview-2.0-screen-designer.md`) |
+| Reusable components (headers, frames, hotkey legends) | done (19 built in plus Save Selection as Component, inserted as a floating paste; harness) | screen designer |
+| BBS display codes insert, preview with sample values | done for 20 packages from cited sources (`docs/BBS-COMPAT.md`); code picker, Sample Values, Sample Values Preview (harness) | screen designer |
+| Colour codes both ways (package codes vs ANSI) | done: native colour export and Open with BBS Codes, round trip tested for every package with colour codes | screen designer |
+| All BBS packages (owner request) | 20 supported as registry data; packages without real sources listed as not yet supported in `docs/BBS-COMPAT.md`; retro platforms (PETSCII, ATASCII, Viewdata) left to the terminal emulation plan with a seam | screen designer |
+| Export to BBS packages' text/menu folders with the right file names | done: profiles with folder bookmark, documented names per package (others marked suggested), .bak, never overwrites unasked; end to end export into scratch Synchronet and Mystic layouts (harness); sandboxed write after choosing the folder needs an owner check in the real app | screen designer |
+| Screen set with status | done (harness: exported, changed in the BBS folder) | screen designer |
+| Caller preview at chosen baud with the terminal renderer | done (harness PNG, substituted values; layout warnings) | screen designer |
+| "Use immediately in the BBS" | not possible as stated: AnsiView is not a BBS host. Done instead: export into a configured BBS install folder, and Upload via Terminal with the dialing directory entry's protocol (upload not run against a real BBS; needs owner) | screen designer |
 
 ## 5. Animation
 

@@ -639,6 +639,46 @@ ansirender --animate mp4 2400 2 art.ans art.mp4 --with-music   # MP4 with the mu
 The timing rules and the reasons behind them are in
 `docs/superpowers/plans/2026-10-30-ansiview-2.0-music-playback.md`.
 
+### BBS screens (Screen menu)
+
+For SysOps designing a board's menus and screens. AnsiView is the caller side, not a BBS host:
+screens are exported into your BBS install folder, or uploaded through the terminal.
+
+- **File > New from Template...** (or Screen > New from Template...): ten original templates
+  (matrix / login, welcome, main menu, goodbye, bulletin list, message area header, file area
+  header and list, door games menu, ANSI ad, and an animated loading screen), drawn for your BBS
+  name, your package's display codes and 80 or 132 columns. Everything is editable art.
+- **Screen > Insert Display Code...**: a searchable list of your package's codes (user name, time
+  left, node, clear screen, colours...) with what each shows. Insert types the exact characters
+  the BBS reads at the cursor. **Sample Values...** sets what the previews show for each code;
+  **Sample Values Preview** shows the frontmost screen with the codes replaced, live.
+- **Screen > Component Library...**: headers, frames in the box tool's styles, hotkey legends,
+  status lines with your package's codes, separators and logos in any installed font. Insert floats
+  it in the editor like a paste. **Save Selection as Component...** keeps your own.
+- **Screen > Preview as Caller...**: the screen as the BBS sends it, through AnsiView's terminal
+  emulator at 300 to 115200 baud, 80 x 24, 80 x 25 or 132 x 37, CP437 or UTF-8, iCE on or off.
+  Warnings: lines wider than the terminal, lines that fill column 80 (an extra blank line on
+  terminals that wrap at once), the bottom right cell (the screen scrolls), screens taller than the
+  terminal, codes of another package, colours the package cannot send; with file size and time.
+- **Screen > Export Profiles...**: one per BBS install: package, install folder (AnsiView keeps
+  permission to write there), theme folder, CP437 or UTF-8, ANSI colours or the package's own codes,
+  line ends, SAUCE. It lists the file each screen becomes; names a package does not document are
+  marked "suggested".
+- **Screen > Export to BBS...** writes the file into the folder with the right name. An existing
+  file is replaced only after you confirm, and the old one is kept as `<name>.bak`.
+  **Screen > Screen Set...** lists what was exported per profile with its status (exported,
+  modified since, changed in the BBS folder, missing) and Export Again, Upload via Terminal and
+  Reveal in Finder. **Upload via Terminal...** connects with a dialing directory entry and, once you
+  have started the upload on the BBS, sends the file with that entry's protocol.
+- **Screen > Open with BBS Codes...** opens a file written with a package's colour codes (pipe
+  codes, Ctrl-A, @X...) as editable art.
+
+20 packages are supported, each from its own documentation: Synchronet, Mystic, WWIV, ENiGMA1/2,
+PCBoard, Wildcat!, Renegade, Telegard, Iniquity, Oblivion/2, Impulse, Celerity, RemoteAccess,
+ProBoard, QuickBBS, Spitfire, Searchlight, DayDream, Talisman and Maximus (MECCA). What each one
+covers, its sources, and what is still missing for others are in `docs/BBS-COMPAT.md`; the design
+and rulings are in `docs/superpowers/plans/2026-10-30-ansiview-2.0-screen-designer.md`.
+
 ## Build from source
 
 Needs Xcode 16 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen).

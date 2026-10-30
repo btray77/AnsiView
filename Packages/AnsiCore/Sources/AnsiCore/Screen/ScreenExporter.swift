@@ -28,7 +28,8 @@ public struct ExportProfile: Codable, Equatable, Identifiable {
         self.name = name ?? package.displayName
         themeName = ""
         encoding = .cp437
-        colourCodes = .ansi
+        // MECCA source cannot hold escape sequences ("[" starts a token), so Maximus writes its own tokens.
+        colourCodes = package.definition.colours == .mecca ? .native : .ansi
         // Line ends are not documented by any package; CR LF is what DOS era files use (ruling 8).
         lineEnding = .crlf
         sauce = package.definition.files.readsSauce

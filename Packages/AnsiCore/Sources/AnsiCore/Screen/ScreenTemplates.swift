@@ -124,9 +124,9 @@ public enum ScreenTemplates {
     private static func statusLine(_ b: inout ScreenBuilder, y: Int, options: TemplateOptions) {
         var x = b.text(" User: ", x: 0, y: y, fg: 11, bg: 1)
         x = b.field(.userHandle, x: x, y: y, fg: 15, bg: 1, options: options)
-        x = b.text("  Time left: ", x: x + 1, y: y, fg: 11, bg: 1)
+        x = b.text("  Time left: ", x: x, y: y, fg: 11, bg: 1)
         x = b.field(.timeLeft, x: x, y: y, fg: 15, bg: 1, options: options)
-        x = b.text("  Node: ", x: x + 1, y: y, fg: 11, bg: 1)
+        x = b.text("  Node: ", x: x, y: y, fg: 11, bg: 1)
         x = b.field(.node, x: x, y: y, fg: 15, bg: 1, options: options)
         b.text(" ", x: x, y: y, fg: 15, bg: 1)
     }
@@ -238,7 +238,7 @@ public enum ScreenTemplates {
         b.box(rect, style: .line(.single), fg: 4, title: "Read a bulletin", titleColour: 12)
         for (index, title) in titles.enumerated() {
             let x = b.hotkey("\(index + 1)", "", x: rect.x + 3, y: rect.y + 2 + index, keyColour: 15, bracketColour: 4, fg: 7)
-            b.text(title, x: x - 1, y: rect.y + 2 + index, fg: 7)
+            b.text(title, x: x, y: rect.y + 2 + index, fg: 7)
             b.hline(x: rect.x + 34, y: rect.y + 2 + index, length: rect.width - 40, code: 0xFA, fg: 8)
         }
         prompt(&b, y: o.rows - 1, "Bulletin number, [Enter] to quit")

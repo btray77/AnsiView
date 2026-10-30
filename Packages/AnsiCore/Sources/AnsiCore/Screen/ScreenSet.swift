@@ -49,7 +49,10 @@ public struct ScreenSetEntry: Codable, Equatable, Identifiable {
     public var sourcePath: String?
     /// App scoped security bookmark of the source file.
     public var sourceBookmark: Data?
+    /// SHA-256 of the whole file written to the BBS folder.
     public var exportedSHA256: String?
+    /// SHA-256 of the screen without SAUCE (whose date changes daily), for "modified since".
+    public var bodySHA256: String?
     public var exportedAt: Date?
 
     public init(id: UUID = UUID(), slot: ScreenSlot, fileName: String) {
@@ -58,8 +61,9 @@ public struct ScreenSetEntry: Codable, Equatable, Identifiable {
         self.fileName = fileName
     }
 
-    public mutating func recordExport(_ data: Data, at date: Date) {
-        exportedSHA256 = ScreenSet.sha256(data)
+    public mutating func recordExport(file: Data, body: Data, at date: Date) {
+        exportedSHA256 = ScreenSet.sha256(file)
+        bodySHA256 = ScreenSet.sha256(body)
         exportedAt = date
     }
 }
@@ -98,13 +102,13 @@ public struct ScreenSet: Codable, Equatable {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// `current` is what exporting the source now would write (nil when the source is gone);
+    /// `current` is the body exporting the source now would write (nil when the source is gone);
     /// `inFolder` is the file in the BBS folder now (nil when there is none).
     public static func status(_ entry: ScreenSetEntry, current: Data?, inFolder: Data?) -> ScreenSetStatus {
         guard let hash = entry.exportedSHA256, let date = entry.exportedAt else { return .notExported }
         guard let inFolder else { return .missingInFolder(date) }
         if sha256(inFolder) != hash { return .changedInFolder(date) }
         guard let current else { return .sourceMissing(date) }
-        return sha256(current) == hash ? .exported(date) : .modifiedSince(date)
+        return sha256(current) == (entry.bodySHA256 ?? hash) ? .exported(date) : .modifiedSince(date)
     }
 }

@@ -114,7 +114,7 @@ private func oneLine(_ text: String, fg: Int = 14) -> ArtProject {
                 let sent = BBSDisplay.render(Array(out.data), package: package, samples: SampleValues())
                 let layout = CallerPreviewAnalysis.layoutWarnings(sent, size: size)
                 #expect(layout.isEmpty, "\(template.id) \(width) \(package): \(layout.map(\.message))")
-                #expect(!out.warnings.contains { $0.kind == .unsupportedCode }, "\(template.id) \(package)")
+                #expect(!out.warnings.contains { $0.kind == .unsupportedCode }, "\(template.id) \(package): \(out.warnings.map(\.message))")
             }
         }
     }
