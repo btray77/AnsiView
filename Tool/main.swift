@@ -13,6 +13,7 @@ import UniformTypeIdentifiers
 // ansirender --export <format> [options] <input> <output>
 //   formats: png jpeg webp gif awebp mp4 html ansi ansi256 text utf8
 //   options: --scale N --baud N --fps N --palette auto|vga|system --max-bytes N --max-size WxH
+//            --with-music --with-modem   (MP4: ANSI music; the synthesized modem dial, handshake and line noise)
 // ansirender --batch <format> [options] [--overwrite] <output-folder> <input>...
 //   inputs are art files, folders or .zip art packs; exits 1 if any piece failed
 // ansirender --roundtrip <input>...   (checks that ANSI conversion reads back as the same cells)
@@ -209,6 +210,10 @@ func parseOptions(_ arguments: ArraySlice<String>, kind: ExportKind) -> CommandO
             options.settings.limit = .maxPixels(width: parts[0], height: parts[1])
         case "--overwrite":
             options.overwrite = true
+        case "--with-modem":
+            options.settings.includeModemSound = true
+        case "--with-music":
+            options.settings.includeMusic = true
         default:
             fail("unknown option \(argument)", 2)
         }
