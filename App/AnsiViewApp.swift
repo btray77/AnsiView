@@ -79,6 +79,8 @@ struct AnsiViewApp: App {
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                 Button("Export Text...") { send(#selector(AnsiCanvasView.exportText(_:))) }
                     .keyboardShortcut("e", modifiers: [.command, .option, .shift])
+                Button("Batch Export...") { BatchExportController.start() }
+                    .keyboardShortcut("e", modifiers: [.command, .option])
                 Divider()
                 Button("Get Info") { send(#selector(AnsiPlayerViewController.showArtInfo(_:))) }
                     .keyboardShortcut("i")

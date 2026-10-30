@@ -225,7 +225,16 @@ enum ExportController {
             stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 16, right: 20)
             bar.widthAnchor.constraint(equalToConstant: 320).isActive = true
             label.widthAnchor.constraint(equalToConstant: 320).isActive = true
-            panel.contentView = stack
+            let container = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 120))
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                stack.topAnchor.constraint(equalTo: container.topAnchor),
+                stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+            panel.contentView = container
         }
 
         func cancel() {

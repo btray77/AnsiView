@@ -12,6 +12,8 @@ import UniformTypeIdentifiers
 // ansirender --export <format> [options] <input> <output>
 //   formats: png jpeg webp gif awebp mp4 html ansi ansi256 text utf8
 //   options: --scale N --baud N --fps N --palette auto|vga|system --max-bytes N --max-size WxH
+// ansirender --batch <format> [options] [--overwrite] <output-folder> <input>...
+//   inputs are art files, folders or .zip art packs; exits 1 if any piece failed
 // ansirender --roundtrip <input>...   (checks that ANSI conversion reads back as the same cells)
 let args = CommandLine.arguments
 func fail(_ message: String, _ code: Int32) -> Never {
@@ -138,6 +140,47 @@ if args[1] == "--export", args.count >= 3 {
         fail("\(options.positional[0]): \(error.localizedDescription)", 1)
     }
     exit(0)
+}
+
+if args[1] == "--batch", args.count >= 3 {
+    let options = parseOptions(args.dropFirst(3), kind: exportKind(args[2]))
+    guard options.positional.count >= 2 else {
+        fail("usage: ansirender --batch <format> [options] [--overwrite] <output-folder> <input>...", 2)
+    }
+    let folder = URL(fileURLWithPath: options.positional[0])
+    var items: [BatchItem] = []
+    var collections: [ArtCollection] = []
+    for path in options.positional.dropFirst() {
+        let url = URL(fileURLWithPath: path)
+        let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+        if isFolder || url.pathExtension.lowercased() == "zip" {
+            do {
+                let collection = try ArtCollection.open(url, scoped: false)
+                collections.append(collection)
+                items += collection.batchItems()
+                if collection.skipped > 0 {
+                    FileHandle.standardError.write("\(path): \(collection.skipped) entries skipped (unsupported ZIP compression)\n".data(using: .utf8)!)
+                }
+            } catch {
+                fail("\(path): \(error.localizedDescription)", 1)
+            }
+        } else {
+            items.append(BatchItem(name: url.lastPathComponent, load: { try Data(contentsOf: url) }))
+        }
+    }
+    let start = Date()
+    let results = BatchExporter.run(items, settings: options.settings, to: folder, overwrite: options.overwrite,
+                                    progress: { _, _, _ in }, isCancelled: { false })
+    for result in results {
+        if let output = result.output {
+            print("\(result.name) -> \(output.lastPathComponent) (\(result.bytes) bytes\(result.overLimit ? ", over the limit" : ""))")
+        } else {
+            FileHandle.standardError.write("\(result.name): \(result.error ?? "failed")\n".data(using: .utf8)!)
+        }
+    }
+    let summary = BatchExporter.summary(results, total: items.count)
+    print(summary.title + String(format: " in %.1f s", Date().timeIntervalSince(start)))
+    exit(results.contains { $0.error != nil } ? 1 : 0)
 }
 
 if args[1] == "--roundtrip" {

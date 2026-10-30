@@ -42,6 +42,7 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource 
         grid.collectionViewLayout = layout
         grid.dataSource = self
         grid.isSelectable = true
+        grid.allowsMultipleSelection = true
         grid.backgroundColors = [NSColor(white: 0.08, alpha: 1)]
         grid.register(GalleryItem.self, forItemWithIdentifier: GalleryItem.identifier)
         grid.onOpen = { [weak self] index in self?.open(index) }
@@ -81,7 +82,15 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource 
         }
     }
 
-    var selectedIndex: Int? { grid.selectionIndexPaths.first?.item }
+    var selectedIndex: Int? { grid.selectionIndexPaths.map(\.item).min() }
+
+    /// The selected pieces in gallery order (for File > Batch Export).
+    var selectedIndexes: [Int] { grid.selectionIndexPaths.map(\.item).sorted() }
+
+    /// Selects pieces (for checks).
+    func select(_ indexes: [Int]) {
+        grid.selectionIndexPaths = Set(indexes.map { IndexPath(item: $0, section: 0) })
+    }
 
     /// Opens a piece: files as documents, art pack entries in a slideshow at that piece.
     func open(_ index: Int) {
@@ -130,8 +139,8 @@ final class GalleryCollectionView: NSCollectionView {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 36 || event.keyCode == 76, let path = selectionIndexPaths.first {
-            onOpen?(path.item)
+        if event.keyCode == 36 || event.keyCode == 76, let item = selectionIndexPaths.map(\.item).min() {
+            onOpen?(item)
         } else {
             super.keyDown(with: event)
         }
