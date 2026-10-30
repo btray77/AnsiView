@@ -157,7 +157,12 @@ public struct ArtFile {
         self.ninePixel = sauce?.letterSpacing == .nine
         self.title = sauce.flatMap { $0.title.isEmpty ? nil : $0.title }
         if format.isStream {
-            self.content = .stream(body)
+            switch format {
+            case .pcboard: self.content = .stream(BBSCodes.pcboardToANSI(body))
+            case .wildcat: self.content = .stream(BBSCodes.wildcatToANSI(body))
+            case .avatar: self.content = .stream(BBSCodes.avatarToANSI(body))
+            default: self.content = .stream(body)
+            }
         } else {
             var screen = loaded?.0 ?? AnsiScreen(columns: columns, rows: [])
             if let embedded = loaded?.1 { font = embedded }
