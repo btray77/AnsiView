@@ -74,6 +74,10 @@ public struct AnsiTerminal {
     public static let maxRows = 1500
 
     public let source: ArtFile
+    /// Which escape sequences start ANSI music, whose bytes are skipped (not printed). Files use
+    /// `.all` by default; `ESC[=Ps M` in the stream changes it unless it is `.off`.
+    public private(set) var musicMode: MusicMode
+    private let initialMusicMode: MusicMode
     public private(set) var position = 0
     public private(set) var highestRow = -1
     public private(set) var writes = 0
@@ -97,9 +101,11 @@ public struct AnsiTerminal {
 
     private let bytes: [UInt8]
 
-    public init(_ source: ArtFile) {
+    public init(_ source: ArtFile, musicMode: MusicMode = .all) {
         self.source = source
         self.bytes = source.stream
+        self.musicMode = musicMode
+        self.initialMusicMode = musicMode
     }
 
     public mutating func runToEnd() {
@@ -110,7 +116,7 @@ public struct AnsiTerminal {
     /// Like `advance`, it finishes any escape sequence the position falls inside.
     public mutating func seek(to position: Int) {
         let target = min(bytes.count, max(0, position))
-        if target < self.position { self = AnsiTerminal(source) }
+        if target < self.position { self = AnsiTerminal(source, musicMode: initialMusicMode) }
         advance(byteCount: target - self.position)
     }
 
@@ -145,6 +151,15 @@ public struct AnsiTerminal {
                     j += 1
                 }
                 if current != nil || !params.isEmpty { params.append(current) }
+                if j < n, j == i + 2, musicMode.introduces(bytes[j]) {
+                    // ANSI music: the PLAY string up to 0x0E is sound, not text (AnsiMusic.swift).
+                    i = AnsiMusic.skipBody(bytes, from: j + 1)
+                    continue
+                }
+                if j < n, isPrivate, bytes[i + 2] == UInt8(ascii: "="), bytes[j] == UInt8(ascii: "M"), musicMode != .off,
+                   let selected = MusicMode.ctsam(params.first.flatMap { $0 } ?? 0) {
+                    musicMode = selected
+                }
                 if j < n, !isPrivate { csi(bytes[j], params) }
                 i = j + 1
                 continue
