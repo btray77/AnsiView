@@ -677,6 +677,9 @@ final class CenteringClipView: NSClipView {
 final class AnsiCanvasView: NSView {
     var onClick: (() -> Void)?
     weak var player: AnsiPlayerViewController?
+    /// Called with an image file dropped on art. Set by the app (opens the image import
+    /// window); the Quick Look preview leaves it nil and accepts no drops.
+    static var imageDropHandler: ((URL) -> Void)?
 
     var image: CGImage? {
         didSet { layer?.contents = image }
@@ -689,6 +692,7 @@ final class AnsiCanvasView: NSView {
         layer?.magnificationFilter = .nearest
         layer?.minificationFilter = .nearest
         layer?.contentsGravity = .resize
+        if Self.imageDropHandler != nil { registerForDraggedTypes([.fileURL]) }
     }
 
     @available(*, unavailable)
@@ -697,6 +701,22 @@ final class AnsiCanvasView: NSView {
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override var wantsUpdateLayer: Bool { true }
+
+    private func droppedImage(_ info: NSDraggingInfo) -> URL? {
+        guard Self.imageDropHandler != nil else { return nil }
+        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        return urls?.first(where: ImageBatch.isImage)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        droppedImage(sender) == nil ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let url = droppedImage(sender) else { return false }
+        Self.imageDropHandler?(url)
+        return true
+    }
 
     override func mouseDown(with event: NSEvent) {
         onClick?()

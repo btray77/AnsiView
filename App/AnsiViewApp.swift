@@ -12,18 +12,28 @@ extension UTType {
 /// Read only document holding the file's bytes.
 struct AnsiDocument: FileDocument {
     /// .bin and .adf belong to other system types; AnsiView opens them as an alternate viewer.
+    /// Images are readable too: opening one (File > Open, the Dock, Finder's Open With) shows
+    /// the image import window instead of a viewer (image import ruling 11).
     static var readableContentTypes: [UTType] {
-        [.ansiArt, .asciiArt, UTType("com.apple.macbinary-archive"), UTType("com.amiga.adf-archive")].compactMap { $0 }
+        [.ansiArt, .asciiArt, UTType("com.apple.macbinary-archive"), UTType("com.amiga.adf-archive"), .image].compactMap { $0 }
     }
 
     let source: ArtFile
+    /// The file's bytes when it is a picture to import rather than art.
+    let imageData: Data?
 
     init(configuration: ReadConfiguration) throws {
         guard let data = configuration.file.regularFileContents else {
             throw CocoaError(.fileReadCorruptFile)
         }
         let fileExtension = configuration.file.filename.map { ($0 as NSString).pathExtension }
-        source = ArtFile(data: data, fileExtension: fileExtension)
+        if configuration.contentType.conforms(to: .image) {
+            imageData = data
+            source = ArtFile(data: Data(), fileExtension: "ans")
+        } else {
+            imageData = nil
+            source = ArtFile(data: data, fileExtension: fileExtension)
+        }
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
@@ -38,6 +48,10 @@ private func send(_ action: Selector) {
 
 /// Asks about unsaved editor windows on Quit (they are not documents, so AppKit would not).
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        AnsiCanvasView.imageDropHandler = { ImageImportWindowController.open(url: $0) }
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         EditorWindowController.canTerminate() ? .terminateNow : .terminateCancel
     }
@@ -75,7 +89,11 @@ struct AnsiViewApp: App {
 
     var body: some Scene {
         DocumentGroup(viewing: AnsiDocument.self) { file in
-            AnsiPlayerScene(source: file.document.source, fileURL: file.fileURL)
+            if let imageData = file.document.imageData {
+                ImageDocumentRedirect(data: imageData, fileURL: file.fileURL)
+            } else {
+                AnsiPlayerScene(source: file.document.source, fileURL: file.fileURL)
+            }
         }
         // A DOS screen (640x400) at one and a half times size.
         .defaultSize(width: 960, height: 600)
@@ -93,6 +111,7 @@ struct AnsiViewApp: App {
                     .keyboardShortcut("d", modifiers: [.command, .shift])
                 Button("Import Image...") { EditorWindowController.importImage() }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
+                Button("Convert Images to ANSI...") { ImageBatchConverter.start() }
                 Divider()
                 Button("Open Folder or Art Pack...") { GalleryWindowController.chooseAndOpen() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
@@ -277,4 +296,40 @@ struct AnsiPlayerView: NSViewControllerRepresentable {
         return CGSize(width: proposal.width ?? ideal.width,
                       height: proposal.height ?? min(ideal.height, 900))
     }
+}
+
+/// An image opened as a document: hands it to the import window and closes its own window.
+struct ImageDocumentRedirect: NSViewControllerRepresentable {
+    let data: Data
+    let fileURL: URL?
+
+    final class Controller: NSViewController {
+        var data = Data()
+        var name = "Image"
+        private var handed = false
+
+        override func loadView() { view = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1)) }
+
+        override func viewWillAppear() {
+            super.viewWillAppear()
+            view.window?.alphaValue = 0
+        }
+
+        override func viewDidAppear() {
+            super.viewDidAppear()
+            guard !handed else { return }
+            handed = true
+            ImageImportWindowController.open(data: data, name: name)
+            view.window?.close()
+        }
+    }
+
+    func makeNSViewController(context: Context) -> Controller {
+        let controller = Controller()
+        controller.data = data
+        controller.name = fileURL?.deletingPathExtension().lastPathComponent ?? "Image"
+        return controller
+    }
+
+    func updateNSViewController(_ controller: Controller, context: Context) {}
 }
