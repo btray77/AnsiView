@@ -21,6 +21,9 @@ USE
 - File > Export Image or Export Animation saves PNG, JPEG, WebP, GIF or MP4.
 - In the app, the Playback menu sets the modem speed (300 baud to Instant).
   The spacebar preview uses the same speed.
+- File > Open Sample has original sample art; File > Browse 16colo.rs opens
+  art packs from the 16colo.rs archive.
+- AnsiView > Check for Updates looks for a newer version.
 
 UNINSTALL
 

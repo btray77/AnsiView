@@ -46,6 +46,19 @@ solid block and shade characters, and box drawing that lines up without gaps.
   through a folder or pack with the Left and Right arrow keys, with optional Auto Advance.
 - **Finder thumbnails.** Art files show the art itself as their Finder icon (except `.asc`, which
   macOS does not let thumbnail extensions claim).
+- **Sample art.** File > Open Sample opens four original pieces bundled with the app: a static
+  ANSI with a SAUCE record, an animation, a 24 bit colour picture and an XBin with its own font.
+- **16colo.rs.** File > Browse 16colo.rs... lists the archive at [16colo.rs](https://16colo.rs) by
+  year, pack and file. Open Pack downloads the pack's ZIP and shows it in a gallery; Open File
+  (or a double click) downloads one file and opens it. Downloads are kept in AnsiView's cache.
+  AnsiView waits at least a second between requests and identifies itself as AnsiView. The art
+  belongs to its artists.
+- **Open in an editor.** File > Open in Moebius and Open in PabloDraw hand the current file to
+  [Moebius](https://github.com/blocktronics/moebius) or [PabloDraw](https://github.com/cwensley/pablodraw)
+  when it is installed (AnsiView offers the download page when it is not).
+- **VoiceOver** reads the art's text (block and line drawing characters are skipped) and announces
+  its SAUCE title, author and group.
+- **Updates.** AnsiView > Check for Updates... (the downloaded build; uses Sparkle).
 - **Spotlight.** SAUCE fields and the words in the art are indexed, so Spotlight finds art by
   title, artist, group or text. (Install AnsiView in Applications; Spotlight looks for app
   importers there.)
@@ -110,6 +123,51 @@ ansirender --convert html art.ans art.html # --inline for style attributes, --no
 ANSI conversions carry no width record, so art wider than 80 columns reopens in AnsiView at 80.
 `ansirender --version` prints the version and build number.
 
+### Sample art
+
+`swift Packaging/samples/generate.swift Samples` regenerates the bundled samples (the same bytes
+every time; a test checks the committed files match).
+
+### Updates (Sparkle)
+
+The direct download build checks `docs/appcast.xml` on `main`
+(`https://raw.githubusercontent.com/btray77/AnsiView/main/docs/appcast.xml`) with
+[Sparkle](https://sparkle-project.org) 2. Until a real public key is set, updates are off: the app
+logs "Updates disabled: SUPublicEDKey is a placeholder" and Check for Updates... says so.
+
+One time setup (owner; keeps the private key in the login keychain):
+
+```sh
+./install.sh                                         # fetches Sparkle's tools via Swift Package Manager
+build/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys      # prints the public key
+build/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys -x ~/sparkle-private-key.txt  # back it up somewhere safe
+```
+
+Put the printed public key in `SUPublicEDKey` in `project.yml` (replacing
+`REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY`). For each release:
+
+```sh
+./release.sh                                         # notarized dist/AnsiView-x.y.z.dmg
+Packaging/sparkle/update-appcast.sh dist/AnsiView-x.y.z.dmg
+# attach the DMG to the GitHub release vx.y.z, then commit and push docs/appcast.xml
+```
+
+`update-appcast.sh` runs Sparkle's `generate_appcast` (signature, length, minimum macOS) and points
+the download at `https://github.com/btray77/AnsiView/releases/download/vx.y.z/AnsiView-x.y.z.dmg`.
+Sparkle compares `CFBundleVersion` (the build number), so every release needs a higher one.
+
+### Mac App Store variant
+
+The Sparkle code is compiled only with the `SPARKLE_UPDATES` Swift condition. A build without
+Sparkle (no framework, no updater menu item, no Sparkle entitlements):
+
+```sh
+xcodegen generate --spec Packaging/appstore/project-appstore.yml
+xcodebuild -project Packaging/appstore/AnsiViewAppStore.xcodeproj -scheme AnsiView -configuration Release build
+```
+
+Store signing (Apple Distribution certificate and provisioning profile) is not set up.
+
 ### Homebrew
 
 `Packaging/homebrew/ansirender.rb` builds `ansirender` from a tagged source release (it needs Xcode,
@@ -152,6 +210,8 @@ Formats: `png jpeg webp gif awebp mp4 html ansi ansi256 text utf8`. Options: `--
   HTML exports embed the matching Px437 font with a credit comment, under the same license.
 - WebP encoding uses [libwebp](https://chromium.googlesource.com/webm/libwebp) (BSD license)
   via [libwebp-Xcode](https://github.com/SDWebImage/libwebp-Xcode).
+- Updates use [Sparkle](https://sparkle-project.org) (MIT license), in the downloaded build only.
+- The bundled samples are original, made by `Packaging/samples/generate.swift`.
 
 See [Credits.md](Credits.md).
 

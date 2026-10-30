@@ -16,7 +16,7 @@ packages:
 settings:
   base:
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "48"
+    CURRENT_PROJECT_VERSION: "49"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -100,7 +100,7 @@ targets:
       - name: Sign Sparkle helpers
         path: Packaging/sparkle/sign-sparkle.sh
         basedOnDependencyAnalysis: false
-        showEnvVarsInLog: false
+        showEnvVars: false
     dependencies:
       - target: AnsiPreview
       - target: AnsiThumbnail
