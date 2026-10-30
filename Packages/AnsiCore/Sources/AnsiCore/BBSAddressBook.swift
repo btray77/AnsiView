@@ -59,6 +59,19 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     public var loginScript: [LoginStep]
     /// Text that means the BBS is full (`|` between alternatives); seeing it soon after connecting hangs up.
     public var busyText: String
+    /// Sent first when the BBS asks for the terminal type (telnet TERMINAL-TYPE).
+    public var terminalType: String
+    /// Shows the blink attribute as a bright background (iCE colours) instead of blinking text.
+    public var iceColors: Bool
+
+    public static let standardTerminalTypes = ["ANSI", "ANSI-BBS", "VT100"]
+
+    /// The names offered in the TERMINAL-TYPE cycle: the entry's choice first, then the standard ones.
+    public var terminalTypes: [String] {
+        let first = terminalType.trimmingCharacters(in: .whitespaces)
+        let rest = Self.standardTerminalTypes.filter { $0.caseInsensitiveCompare(first) != .orderedSame }
+        return first.isEmpty ? Self.standardTerminalTypes : [first] + rest
+    }
 
     public init(name: String, host: String, port: Int = 23) {
         id = UUID()
@@ -84,6 +97,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         autoLogin = true
         loginScript = LoginScript.defaultSteps
         busyText = Self.defaultBusyText
+        terminalType = "ANSI"
+        iceColors = false
     }
 
     public var address: String {
@@ -99,7 +114,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case id, name, host, port, username, fontName, columns, rows, encoding, mode, baud, backspaceSendsDelete
         case notes, tags, lastCalled, totalCalls, captureOnConnect, captureFolderBookmark, captureFolderName
-        case modemSound, macros, autoLogin, loginScript, busyText
+        case modemSound, macros, autoLogin, loginScript, busyText, terminalType, iceColors
     }
 
     /// Missing or out of range fields fall back to the defaults, so older (plan 7) or hand edited books load.
@@ -130,6 +145,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         if let value = try? c.decode(Bool.self, forKey: .autoLogin) { autoLogin = value }
         if let value = try? c.decode([LoginStep].self, forKey: .loginScript) { loginScript = value }
         if let value = try? c.decode(String.self, forKey: .busyText) { busyText = value }
+        if let value = try? c.decode(String.self, forKey: .terminalType), !value.isEmpty { terminalType = value }
+        if let value = try? c.decode(Bool.self, forKey: .iceColors) { iceColors = value }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -158,6 +175,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         try c.encode(autoLogin, forKey: .autoLogin)
         try c.encode(loginScript, forKey: .loginScript)
         try c.encode(busyText, forKey: .busyText)
+        try c.encode(terminalType, forKey: .terminalType)
+        try c.encode(iceColors, forKey: .iceColors)
     }
 
     private static func clampSize(_ value: Int) -> Int {

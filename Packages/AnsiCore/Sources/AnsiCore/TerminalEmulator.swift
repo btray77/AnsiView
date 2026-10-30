@@ -36,6 +36,8 @@ public struct TerminalEmulator {
     private var pendingWrap = false
     private var autowrap = true
     private var attributes = TextAttributes()
+    /// iCE colours: the blink attribute gives a bright background instead of blinking text.
+    public var iceColors = false
     private var top = 0
     private var bottom: Int
     private var saved: (row: Int, column: Int, attributes: TextAttributes) = (0, 0, TextAttributes())
@@ -364,7 +366,7 @@ public struct TerminalEmulator {
     // MARK: Screen operations
 
     private var blankCell: AnsiCell {
-        AnsiCell(code: 0x20, fg: Palette.vga[7], bg: attributes.colors(iceColors: false).bg)
+        AnsiCell(code: 0x20, fg: Palette.vga[7], bg: attributes.colors(iceColors: iceColors).bg)
     }
 
     private var blankRow: [AnsiCell] { Array(repeating: blankCell, count: columns) }
@@ -375,8 +377,9 @@ public struct TerminalEmulator {
             column = 0
             lineFeed()
         }
-        let colors = attributes.colors(iceColors: false)
-        grid[row][column] = AnsiCell(code: code, fg: colors.fg, bg: colors.bg, blink: attributes.blink, scalar: scalar)
+        let colors = attributes.colors(iceColors: iceColors)
+        grid[row][column] = AnsiCell(code: code, fg: colors.fg, bg: colors.bg, blink: attributes.blink && !iceColors,
+                                     scalar: scalar)
         if column == columns - 1 {
             if autowrap { pendingWrap = true }
         } else {
