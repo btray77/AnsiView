@@ -10,11 +10,11 @@ public enum AnimationHelp {
     ]
 
     public static let tooltips: [String: String] = [
-        "newFrame": "New Frame: copies this frame after it, so you only draw what changes (Option-Command-N)",
+        "newFrame": "New Frame: copies this frame after it, so you only draw what changes (Control-Command-N)",
         "duplicateFrame": "Duplicate Frame: an exact copy after this one, including the order it was drawn in",
         "deleteFrame": "Delete this frame (the last frame stays)",
-        "previousFrame": "Edit the previous frame (Command-[)",
-        "nextFrame": "Edit the next frame (Command-])",
+        "previousFrame": "Edit the previous frame (Control-Command-[)",
+        "nextFrame": "Edit the next frame (Control-Command-])",
         "delay": "Seconds this frame stays on screen once drawn, before the next frame starts (0 to 60)",
         "onionSkin": "Onion skin: shows the previous frame faintly over this one, so you can line up changes",
         "record": "Record: keeps the timing of your drawing, so an As drawn export replays your pauses",

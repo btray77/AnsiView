@@ -107,6 +107,12 @@ final class EditorCanvasView: NSView {
                 NSImage(cgImage: image, size: drawn.size).draw(in: drawn)
             }
         }
+        // Onion skin (animation plan, ruling 10): the previous frame at 35% over this one, so
+        // unchanged cells look the same and changed cells show a ghost.
+        if controller?.timelineVisible == true, controller?.onionSkin == true, let image = onionImage() {
+            let drawn = NSRect(x: 0, y: 0, width: CGFloat(image.width) * zoom, height: CGFloat(image.height) * zoom)
+            NSImage(cgImage: image, size: drawn.size).draw(in: drawn, from: .zero, operation: .sourceOver, fraction: 0.35)
+        }
         if showGrid, cellSize.width >= 6 { drawGrid(dirtyRect, canvas: canvas) }
         // A floating block hides the selection, so its colours show as they will be stamped.
         if editor.floating == nil, let selection = editor.selection {
@@ -180,6 +186,19 @@ final class EditorCanvasView: NSView {
         let image = AnsiRenderer.render(screen, options: RenderOptions(font: canvas.font, scale: 1))?.image
         bandImages[band] = image
         bandSources[band] = rows
+        return image
+    }
+
+    private var onionCache: (rows: [[AnsiCell]], image: CGImage)?
+
+    /// The previous frame rendered whole, re-rendered only when its cells change.
+    private func onionImage() -> CGImage? {
+        guard let previous = editor.previousFrameComposite else { return nil }
+        if let onionCache, onionCache.rows == previous.rows { return onionCache.image }
+        var screen = AnsiScreen(columns: previous.columns, rows: previous.rows)
+        screen.font = previous.font
+        guard let image = AnsiRenderer.render(screen, options: RenderOptions(font: previous.font, scale: 1))?.image else { return nil }
+        onionCache = (previous.rows, image)
         return image
     }
 
@@ -778,6 +797,16 @@ final class EditorCanvasView: NSView {
     @objc func flattenLayers(_ sender: Any?) { editor.flatten() }
     @objc func toggleGrid(_ sender: Any?) { controller?.run(.toggleGrid) }
     @objc func toggleRetroTheme(_ sender: Any?) { controller?.toggleTheme() }
+    // Animation (animation plan, ruling 10).
+    @objc func toggleAnimationTimeline(_ sender: Any?) { controller.map { $0.setTimelineVisible(!$0.timelineVisible) } }
+    @objc func newAnimationFrame(_ sender: Any?) { controller?.runFrameCommand(.newFrame) }
+    @objc func duplicateAnimationFrame(_ sender: Any?) { controller?.runFrameCommand(.duplicateFrame) }
+    @objc func deleteAnimationFrame(_ sender: Any?) { controller?.runFrameCommand(.deleteFrame) }
+    @objc func previousAnimationFrame(_ sender: Any?) { controller?.runFrameCommand(.previousFrame) }
+    @objc func nextAnimationFrame(_ sender: Any?) { controller?.runFrameCommand(.nextFrame) }
+    @objc func toggleOnionSkin(_ sender: Any?) { controller.map { $0.onionSkin.toggle() } }
+    @objc func playAnimation(_ sender: Any?) { controller?.timeline.play(sender) }
+    @objc func exportAnimation(_ sender: Any?) { controller?.windowController?.exportAnimation() }
 
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
         let floating = editor.floating != nil
@@ -797,6 +826,12 @@ final class EditorCanvasView: NSView {
         case #selector(toggleInsertMode(_:)): item.state = editor.insertMode ? .on : .off; return true
         case #selector(toggleGrid(_:)): item.state = showGrid ? .on : .off; return true
         case #selector(toggleRetroTheme(_:)): item.state = EditorTheme.current == .retro ? .on : .off; return true
+        case #selector(toggleAnimationTimeline(_:)): item.state = controller?.timelineVisible == true ? .on : .off; return true
+        case #selector(toggleOnionSkin(_:)): item.state = controller?.onionSkin == true ? .on : .off; return true
+        case #selector(newAnimationFrame(_:)), #selector(duplicateAnimationFrame(_:)), #selector(exportAnimation(_:)): return !floating
+        case #selector(deleteAnimationFrame(_:)): return !floating && editor.frames.count > 1
+        case #selector(previousAnimationFrame(_:)): return !floating && editor.currentFrame > 0
+        case #selector(nextAnimationFrame(_:)): return !floating && editor.currentFrame < editor.frames.count - 1
         case #selector(chooseDrawTool(_:)), #selector(chooseSelectTool(_:)), #selector(chooseLineTool(_:)),
              #selector(chooseBoxTool(_:)), #selector(chooseFillTool(_:)), #selector(chooseTextTool(_:)),
              #selector(chooseBrushTool(_:)), #selector(chooseEyedropperTool(_:)):
@@ -905,6 +940,36 @@ final class EditorViewController: NSViewController {
         return panel
     }
 
+    /// The animation timeline under the canvas (animation plan, ruling 10).
+    private(set) lazy var timeline = AnimationTimelineView(editor: editor, controller: self)
+    private(set) var timelineVisible = false
+    private var timelineHeight: NSLayoutConstraint?
+    /// Onion skin: the previous frame drawn faintly over the current one.
+    var onionSkin = true {
+        didSet {
+            canvasView.needsDisplay = true
+            if isViewLoaded { timeline.refresh() }
+        }
+    }
+
+    func setTimelineVisible(_ on: Bool) {
+        _ = view
+        timelineVisible = on
+        timeline.isHidden = !on
+        timelineHeight?.isActive = !on
+        if on { timeline.refresh() }
+        canvasView.needsDisplay = true
+        editorChanged()
+        hints.track(root)
+    }
+
+    func runFrameCommand(_ command: AnimationTimelineView.Command) {
+        if !timelineVisible { setTimelineVisible(true) }
+        timeline.perform(command)
+    }
+
+    func focusCanvas() { view.window?.makeFirstResponder(canvasView) }
+
     /// The editor window is closing: its floating panel goes too (review M8).
     func closePanels() { loadedCharacterPanel?.orderOut(nil) }
 
@@ -918,6 +983,8 @@ final class EditorViewController: NSViewController {
         canvasView = EditorCanvasView(editor: editor)
         super.init(nibName: nil, bundle: nil)
         canvasView.controller = self
+        // The order cells are drawn in is kept for an As drawn animation export (ruling 2).
+        editor.tracksEdits = true
         editor.onChange = { [weak self] in self?.editorChanged() }
     }
 
@@ -998,10 +1065,15 @@ final class EditorViewController: NSViewController {
 
         let root = NSView()
         self.root = root
-        for sub in [bar, palette, scroll, layersPanel, status, hintLabel] as [NSView] {
+        for sub in [bar, palette, scroll, layersPanel, timeline, status, hintLabel] as [NSView] {
             sub.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(sub)
         }
+        timeline.isHidden = true
+        let collapsed = timeline.heightAnchor.constraint(equalToConstant: 0)
+        collapsed.priority = .required
+        collapsed.isActive = true
+        timelineHeight = collapsed
         chrome = [bar, palette, layersPanel]
         NSLayoutConstraint.activate([
             bar.topAnchor.constraint(equalTo: root.topAnchor),
@@ -1015,7 +1087,10 @@ final class EditorViewController: NSViewController {
             layersPanel.topAnchor.constraint(equalTo: bar.bottomAnchor),
             layersPanel.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             layersPanel.widthAnchor.constraint(equalToConstant: 190),
-            status.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 4),
+            timeline.topAnchor.constraint(equalTo: scroll.bottomAnchor),
+            timeline.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            timeline.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            status.topAnchor.constraint(equalTo: timeline.bottomAnchor, constant: 4),
             status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 10),
             status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -5),
             hintLabel.centerYAnchor.constraint(equalTo: status.centerYAnchor),
@@ -1032,6 +1107,7 @@ final class EditorViewController: NSViewController {
         }
         setTool(.draw)
         applyTheme()
+        if editor.frames.count > 1 { setTimelineVisible(true) }
         editorChanged()
         hints.track(root)
     }
@@ -1156,6 +1232,9 @@ final class EditorViewController: NSViewController {
         if let s = editor.selection { text += "  |  selection \(s.width) x \(s.height)" }
         text += "  |  \(editor.insertMode ? "INS" : "OVR")"
         text += "  |  layer \(editor.activeLayer + 1)/\(layers.count) \(layers[editor.activeLayer].name)"
+        if timelineVisible || editor.frames.count > 1 {
+            text += "  |  frame \(editor.currentFrame + 1)/\(editor.frames.count)" + (editor.recording ? " REC" : "")
+        }
         text += "  |  set \(editor.blockSet + 1)  |  zoom \(Int(canvasView.zoom))x  |  \(editor.canvas.fontName)"
         if let floating = editor.floating {
             let verb = floating.liftedFrom == nil ? "Pasting" : (floating.leavesCopy ? "Moving a copy" : "Moving")
@@ -1163,6 +1242,7 @@ final class EditorViewController: NSViewController {
                 + (editor.transparentPaste ? " (transparent)" : "")
         }
         status.stringValue = text
+        if timelineVisible { timeline.refresh() }
         layersPanel.refresh()
         hints.track(layersPanel)
         updateHint()
@@ -1429,7 +1509,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    private var editor: CanvasEditor { editorController.editor }
+    var editor: CanvasEditor { editorController.editor }
 
     private func updateEdited() {
         window?.isDocumentEdited = editor.isModified
@@ -1515,6 +1595,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         var notes = SaucePreservation.saveReport(flat, format: format)
         if editor.layers.count > 1 {
             notes.append("The \(editor.layers.count) layers are saved flattened (hidden layers left out); Tools > Save Project keeps them.")
+        }
+        if editor.frames.count > 1 {
+            notes.append("Only frame \(editor.currentFrame + 1) of \(editor.frames.count) is saved; Tools > Export Animation writes the animation and Save Project keeps every frame.")
         }
         if !notes.isEmpty {
             let alert = NSAlert()
