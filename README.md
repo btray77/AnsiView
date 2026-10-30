@@ -53,6 +53,12 @@ solid block and shade characters, and box drawing that lines up without gaps.
   (or a double click) downloads one file and opens it. Downloads are kept in AnsiView's cache.
   AnsiView waits at least a second between requests and identifies itself as AnsiView. The art
   belongs to its artists.
+- **Draw your own.** A TheDraw style editor (File > New ANSI Art, or File > Edit Art for a copy
+  of the art in front): typing, F1 to F10 block character sets, half block drawing with the
+  mouse, the 16 VGA colours with iCE, rectangle copy and paste, fill, undo, and saving as `.ans`,
+  `.bin` or `.xb` with SAUCE. See [Drawing ANSI art](#drawing-ansi-art).
+- **Images to ANSI.** File > Import Image... (and `ansirender --from-image`) turns a picture into
+  half block, full block or shade character art in 16 colours or 24 bit colour, with dithering.
 - **Open in an editor.** File > Open in Moebius and Open in PabloDraw hand the current file to
   [Moebius](https://github.com/blocktronics/moebius) or [PabloDraw](https://github.com/cwensley/pablodraw)
   when it is installed (AnsiView offers the download page when it is not).
@@ -94,6 +100,60 @@ Requires macOS 14 or later, on Apple silicon or Intel.
 
 The playback speeds you choose in the app (per file and default) are also used by the Quick Look preview.
 
+### Drawing ANSI art
+
+AnsiView has a simple TheDraw style editor (in the app only; Quick Look stays a viewer).
+
+- **File > New ANSI Art** (Option Command N) starts an 80 x 25 canvas. **File > Edit Art**
+  (Shift Command D) opens a copy of the art in the front window (the final frame of an
+  animation); the original file is never changed. **File > Import Image...** (Shift Command I)
+  converts a picture to block characters and opens it in the editor (see below).
+- **Typing.** Type at the cursor in the current colours; arrows move, Return goes to the next
+  row, Backspace erases left, Delete erases the cell or the selection, Home / End go to the row's
+  ends. Moving below the last row adds rows (up to 1,500). Characters outside code page 437 are
+  skipped.
+- **Block characters.** F1 to F10 type the ten characters of the current set (shown on the
+  buttons above the canvas; click a button to type it). Option F1 to Option F10, or the Set popup,
+  choose one of ten TheDraw style sets; set 6 (shades and half blocks) is the default. On keyboards
+  where F keys control the Mac, hold fn.
+- **Colours.** Click a swatch for the foreground; Option-click or right-click for the background.
+  Without iCE colours the background is one of the eight dark colours (bright ones blink in
+  classic ANSI); tick **iCE colours** for all sixteen. Turning iCE on or off converts the art
+  the way its bytes would read (blinking cells become bright backgrounds and back).
+- **Drawing.** In Draw mode the left button paints half block pixels in the foreground colour
+  and the right button in the background colour; each stroke is one undo step. In Select mode
+  (or with Shift and the arrows) drag a rectangle.
+- **Selection.** Copy, Cut, Paste (rectangles keep characters and colours; plain text from other
+  apps pastes line by line in the current colours), Art > Fill Selection with Character (the
+  last block character used) and Art > Fill Selection with Colour (recolours, keeps the
+  characters). With no selection the fills cover the whole canvas.
+- **Art menu.** Canvas Size... (1 to 1,000 columns, 1 to 1,500 rows), Edit SAUCE... (title,
+  author, group), Toggle iCE Colours, Zoom In / Out (Command = / Command -).
+- **Undo / Redo** in the Edit menu cover every change.
+- **Saving.** File > Save asks for a name and a format the first time: ANSI (`.ans`),
+  BinaryText (`.bin`, at most 510 columns; odd widths gain a blank column) or XBin (`.xb`).
+  Every file gets a SAUCE record with the title, author, group, date, width (TInfo1), height
+  and the iCE flag, and opens in AnsiView exactly as the editor shows it. ANSI files leave out
+  trailing blank rows (as every ANSI viewer does), write colours outside the VGA palette as 24
+  bit codes and replace the eight codes a terminal would obey (such as ESC) with look alike
+  characters. BinaryText and XBin store the nearest VGA colour for colours outside the palette.
+
+### Importing images
+
+File > Import Image... reads anything macOS can (PNG, JPEG, HEIC, TIFF, GIF uses its first
+frame) and asks for: the width in columns; the characters (half blocks, two pixels per cell;
+full blocks; or shades, which mix two colours with ░ ▒ ▓ for extra tones); the colours (the 16
+VGA colours, or 24 bit truecolor); dithering (none, Floyd-Steinberg or ordered); iCE colours;
+and whether to correct for the tall 8x16 character cell (on keeps the picture's proportions).
+The result opens in the editor for touching up. Transparent areas become black. The same
+conversion is on the command line:
+
+```sh
+ansirender --from-image photo.jpg --width 80 -o photo.ans
+ansirender --from-image logo.png --width 40 --mode shade --dither ordered --no-ice > logo.ans
+# --mode half|full|shade  --palette vga|truecolor  --dither none|fs|ordered  --ice|--no-ice  --no-aspect
+```
+
 ## Build from source
 
 Needs Xcode 16 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
@@ -118,6 +178,8 @@ ansirender --batch png --scale 2 out/ ~/art/ pack.zip
 ansirender --convert ansi art.ans          # 24 bit colour for modern terminals (ansi256 for 256 colours)
 ansirender --convert text art.ans art.txt  # CP437 text, no escapes (utf8 for UTF-8 text)
 ansirender --convert html art.ans art.html # --inline for style attributes, --no-font for no embedded font
+# Images to block character ANSI (see Importing images)
+ansirender --from-image photo.png --width 80 -o photo.ans
 ```
 
 ANSI conversions carry no width record, so art wider than 80 columns reopens in AnsiView at 80.

@@ -15,6 +15,8 @@ import UniformTypeIdentifiers
 // ansirender --batch <format> [options] [--overwrite] <output-folder> <input>...
 //   inputs are art files, folders or .zip art packs; exits 1 if any piece failed
 // ansirender --roundtrip <input>...   (checks that ANSI conversion reads back as the same cells)
+// ansirender --from-image <image> [--width N] [--mode half|full|shade] [--palette vga|truecolor]
+//   [--dither none|fs|ordered] [--ice|--no-ice] [--no-aspect] [-o out.ans]   (stdout without -o, or -o -)
 // ansirender --version
 let args = CommandLine.arguments
 func fail(_ message: String, _ code: Int32) -> Never {
@@ -66,6 +68,61 @@ if args[1] == "--convert", args.count >= 4, let format = TextFormat(rawValue: ar
     } else {
         do { try data.write(to: URL(fileURLWithPath: rest[1])) } catch { fail("could not write \(rest[1])", 1) }
         print("wrote \(rest[1]): \(data.count) bytes")
+    }
+    exit(0)
+}
+
+if args[1] == "--from-image" {
+    let usage = "usage: ansirender --from-image <image> [--width N] [--mode half|full|shade] [--palette vga|truecolor] "
+        + "[--dither none|fs|ordered] [--ice|--no-ice] [--no-aspect] [-o out.ans]"
+    var options = ImageToAnsi.Options()
+    var input: String?
+    var output: String?
+    var rest = Array(args.dropFirst(2))
+    func value(_ name: String) -> String {
+        guard !rest.isEmpty else { fail("\(name) needs a value", 2) }
+        return rest.removeFirst()
+    }
+    while !rest.isEmpty {
+        let argument = rest.removeFirst()
+        switch argument {
+        case "--width":
+            guard let n = Int(value(argument)), (1...EditCanvas.maxColumns).contains(n) else { fail("--width takes 1 to \(EditCanvas.maxColumns)", 2) }
+            options.columns = n
+        case "--mode":
+            guard let mode = ImageToAnsi.Mode(rawValue: value(argument)) else { fail("--mode takes half, full or shade", 2) }
+            options.mode = mode
+        case "--palette":
+            guard let palette = ImageToAnsi.PaletteChoice(rawValue: value(argument)) else { fail("--palette takes vga or truecolor", 2) }
+            options.palette = palette
+        case "--dither":
+            guard let dither = ImageToAnsi.Dither(rawValue: value(argument)) else { fail("--dither takes none, fs or ordered", 2) }
+            options.dither = dither
+        case "--ice": options.iceColors = true
+        case "--no-ice": options.iceColors = false
+        case "--no-aspect": options.aspectCorrection = false
+        case "-o", "--output": output = value(argument)
+        default:
+            if argument.hasPrefix("-") || input != nil { fail(usage, 2) }
+            input = argument
+        }
+    }
+    guard let input else { fail(usage, 2) }
+    let url = URL(fileURLWithPath: input)
+    guard let imageData = try? Data(contentsOf: url) else { fail("could not read \(input)", 1) }
+    let canvas: EditCanvas
+    do {
+        canvas = try ImageToAnsi.convert(data: imageData, options: options, title: url.deletingPathExtension().lastPathComponent)
+    } catch {
+        fail("\(input): \(error.localizedDescription)", 1)
+    }
+    let data: Data
+    do { data = try ArtWriter.data(canvas, format: .ansi) } catch { fail(error.localizedDescription, 1) }
+    if output == nil || output == "-" {
+        FileHandle.standardOutput.write(data)
+    } else {
+        do { try data.write(to: URL(fileURLWithPath: output!)) } catch { fail("could not write \(output!)", 1) }
+        print("wrote \(output!): \(canvas.columns)x\(canvas.screen(trimmed: true).rows.count) cells, \(data.count) bytes")
     }
     exit(0)
 }
