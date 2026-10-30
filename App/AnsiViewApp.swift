@@ -44,6 +44,10 @@ struct AnsiViewApp: App {
     private var holdFinalFrame = false
     @AppStorage(PlaybackSpeed.modemSoundsKey, store: PlaybackSpeed.defaults)
     private var modemSounds = false
+    @AppStorage(SlideshowSettings.autoAdvanceKey, store: PlaybackSpeed.defaults)
+    private var autoAdvance = false
+    @AppStorage(SlideshowSettings.dwellKey, store: PlaybackSpeed.defaults)
+    private var dwell = SlideshowSettings.defaultDwell
     /// The focused art window's speed; speed commands change that file's remembered speed.
     @FocusedObject private var focusedSpeed: PlayerSpeed?
 
@@ -109,6 +113,21 @@ struct AnsiViewApp: App {
                 Divider()
                 Toggle("Hold Final Frame", isOn: $holdFinalFrame)
                 Toggle("Modem Sounds", isOn: $modemSounds)
+            }
+            CommandMenu("Slideshow") {
+                Button("Start Slideshow") { send(#selector(AnsiPlayerViewController.startSlideshow(_:))) }
+                    .keyboardShortcut("s", modifiers: [.command, .option])
+                Button("Next Art") { send(#selector(SlideshowViewController.nextSlide(_:))) }
+                    .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                Button("Previous Art") { send(#selector(SlideshowViewController.previousSlide(_:))) }
+                    .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                Divider()
+                Toggle("Auto Advance", isOn: $autoAdvance)
+                Picker("Dwell Time", selection: $dwell) {
+                    ForEach(SlideshowSettings.dwellChoices, id: \.self) { seconds in
+                        Text("\(seconds) seconds").tag(seconds)
+                    }
+                }
             }
         }
     }

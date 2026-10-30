@@ -107,6 +107,8 @@ final class AnsiPlayerViewController: NSViewController {
     private(set) var screen: AnsiScreen
     private let renderOptions: RenderOptions
     private let canvas = AnsiCanvasView()
+    /// The art view, which takes the keyboard.
+    var canvasView: NSView { canvas }
     private let hud = NSTextField(labelWithString: "")
     private var terminal: AnsiTerminal
     private var blinkVisible = true
@@ -121,8 +123,12 @@ final class AnsiPlayerViewController: NSViewController {
     private var shownCRT = PlaybackSpeed.crtEffect
     private var defaultsObserver: NSObjectProtocol?
 
-    init(source: ArtFile, speed: PlayerSpeed? = nil) {
+    /// False in presentation mode: animations get no scrub bar.
+    let showsTimeline: Bool
+
+    init(source: ArtFile, speed: PlayerSpeed? = nil, showsTimeline: Bool = true) {
         self.source = source
+        self.showsTimeline = showsTimeline
         self.speed = speed ?? PlayerSpeed(fileKey: source.identity)
         self.analysis = AnsiAnalysis(source)
         self.timeline = analysis.isAnimated ? PlaybackTimeline(source) : nil
@@ -179,7 +185,8 @@ final class AnsiPlayerViewController: NSViewController {
 
     /// The art plus the scrub bar, for hosts that size a window to fit.
     var idealViewSize: CGSize {
-        CGSize(width: contentSize.width, height: contentSize.height + (timeline == nil ? 0 : Self.timelineBarHeight))
+        CGSize(width: contentSize.width,
+               height: contentSize.height + (timeline != nil && showsTimeline ? Self.timelineBarHeight : 0))
     }
 
     var isPlaying: Bool { frameTimer != nil || connectTimer != nil }
@@ -232,7 +239,7 @@ final class AnsiPlayerViewController: NSViewController {
             hud.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
             hud.bottomAnchor.constraint(equalTo: scroll.bottomAnchor, constant: -10),
         ])
-        if timeline != nil {
+        if timeline != nil, showsTimeline {
             installTimelineBar(in: container)
         } else {
             scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor).isActive = true
@@ -409,12 +416,15 @@ final class AnsiPlayerViewController: NSViewController {
     }
 
     /// Pauses and shows the screen as it was after `position` bytes.
+    /// Reaching the end of a playback in progress this way finishes it (`onFinished` fires).
     func seek(to position: Int) {
+        let wasInProgress = isPlaying || isHolding || isPaused
         stopPlayback()
         isHolding = false
         terminal.seek(to: position)
         if terminal.isFinished {
             showFinal()
+            if wasInProgress { onFinished?() }
             return
         }
         viewportTop = nil
@@ -439,9 +449,12 @@ final class AnsiPlayerViewController: NSViewController {
         updateBlinkTimer()
     }
 
-    /// Pauses a running animation, resumes a paused one, or replays a finished one.
+    /// Pauses a running animation, resumes a paused one, releases a held final frame, or replays a
+    /// finished one.
     func togglePause() {
-        if isPlaying {
+        if isHolding {
+            finishHold()
+        } else if isPlaying {
             stopPlayback()
             showHUD("Paused")
         } else if isPaused {
