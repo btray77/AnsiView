@@ -26,7 +26,13 @@ public enum Thumbnail {
     /// The thumbnail image, `size(...)` pixels in size; nil when `maximum` is empty.
     public static func render(_ file: ArtFile, maximum: CGSize) -> CGImage? {
         guard maximum.width >= 1, maximum.height >= 1 else { return nil }
-        var screen = AnsiAnalysis(file).finalScreen
+        return render(file, screen: AnsiAnalysis(file).finalScreen, maximum: maximum)
+    }
+
+    /// The same, from the file's finished screen when the caller already played it (the library indexer).
+    public static func render(_ file: ArtFile, screen finalScreen: AnsiScreen, maximum: CGSize) -> CGImage? {
+        guard maximum.width >= 1, maximum.height >= 1 else { return nil }
+        var screen = finalScreen
         let rowCount = rows(for: file, screen: screen)
         screen.rows = Array(screen.rows.prefix(rowCount))
         var options = RenderOptions(for: screen, scale: 1)
