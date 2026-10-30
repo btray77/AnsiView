@@ -86,7 +86,8 @@ public enum AnsiRenderer {
                 for (colIndex, cell) in row.enumerated() where colIndex < screen.columns {
                     let hidden = cell.blink && !options.blinkVisible
                     let mask = hidden ? masks.mask(for: 0x20)
-                        : cell.scalar.map { masks.mask(for: $0) } ?? masks.mask(for: cell.code)
+                        : cell.glyph.map { masks.mask(glyph: Int($0)) }
+                        ?? cell.scalar.map { masks.mask(for: $0) } ?? masks.mask(for: cell.code)
                     let fgPacked = packed(cell.fg)
                     let bgPacked = packed(cell.bg)
                     let originX = colIndex * cw
@@ -140,9 +141,9 @@ final class GlyphMasks {
         cellWidth = w
         cellHeight = h
         self.scale = scale
-        masks = (0..<256).map { code in
-            let glyph = font.pixels(for: UInt8(code))
-            let ninth = ninePixel ? font.ninthColumn(for: UInt8(code)) : []
+        masks = (0..<max(256, font.glyphCount)).map { code in
+            let glyph = font.pixels(glyph: code)
+            let ninth = ninePixel ? font.ninthColumn(for: UInt8(truncatingIfNeeded: code)) : []
             var out = [Bool](repeating: false, count: w * scale * h * scale)
             for y in 0..<(h * scale) {
                 for x in 0..<(w * scale) {
@@ -155,6 +156,8 @@ final class GlyphMasks {
     }
 
     func mask(for code: UInt8) -> [Bool] { masks[Int(code)] }
+
+    func mask(glyph index: Int) -> [Bool] { masks.indices.contains(index) ? masks[index] : masks[0x20] }
 
     /// A character the bitmap font does not have (from UTF-8 art), drawn from the system
     /// monospaced font with antialiasing off so it matches the pixel look.
