@@ -15,10 +15,20 @@ import UniformTypeIdentifiers
 // ansirender --batch <format> [options] [--overwrite] <output-folder> <input>...
 //   inputs are art files, folders or .zip art packs; exits 1 if any piece failed
 // ansirender --roundtrip <input>...   (checks that ANSI conversion reads back as the same cells)
+// ansirender --version
 let args = CommandLine.arguments
 func fail(_ message: String, _ code: Int32) -> Never {
     FileHandle.standardError.write((message + "\n").data(using: .utf8)!)
     exit(code)
+}
+
+if args.count == 2, args[1] == "--version" || args[1] == "-V" {
+    // The tool's Info.plist is embedded in the binary (CREATE_INFOPLIST_SECTION_IN_BINARY).
+    let info = Bundle.main.infoDictionary ?? [:]
+    let version = info["CFBundleShortVersionString"] as? String ?? "unknown"
+    let build = info["CFBundleVersion"] as? String ?? "unknown"
+    print("ansirender \(version) (\(build))")
+    exit(0)
 }
 guard args.count >= 3 else { fail("usage: ansirender <input> <output.png> [scale] | --stats <input>...", 2) }
 precondition(CP437.unicode.count == 256, "CP437 table has \(CP437.unicode.count) entries")

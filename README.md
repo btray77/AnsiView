@@ -108,6 +108,39 @@ ansirender --convert html art.ans art.html # --inline for style attributes, --no
 ```
 
 ANSI conversions carry no width record, so art wider than 80 columns reopens in AnsiView at 80.
+`ansirender --version` prints the version and build number.
+
+### Homebrew
+
+`Packaging/homebrew/ansirender.rb` builds `ansirender` from a tagged source release (it needs Xcode,
+not just the Command Line Tools). Once the tap exists:
+
+```sh
+brew install btray77/ansiview/ansirender
+```
+
+To try the formula from a checkout before a release, use a throwaway local tap and a tarball of the
+working tree (`HOMEBREW_NO_AUTOREMOVE=1` stops `brew uninstall` from also removing unrelated unused
+formulae):
+
+```sh
+export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_AUTOREMOVE=1
+git archive --prefix=AnsiView-2.0.0/ -o /tmp/AnsiView-2.0.0.tar.gz HEAD
+brew tap-new ansiview/localtest --no-git
+TAP=$(brew --repository)/Library/Taps/ansiview/homebrew-localtest
+sed -e "s#https://github.com/btray77/AnsiView/archive/refs/tags/v2.0.0.tar.gz#file:///tmp/AnsiView-2.0.0.tar.gz#" \
+    -e "s#0\{64\}#$(shasum -a 256 /tmp/AnsiView-2.0.0.tar.gz | cut -d' ' -f1)#" \
+    Packaging/homebrew/ansirender.rb > "$TAP/Formula/ansirender.rb"
+brew install --build-from-source ansiview/localtest/ansirender
+brew test ansiview/localtest/ansirender
+brew audit --strict ansiview/localtest/ansirender
+brew uninstall ansirender && brew untap ansiview/localtest
+```
+
+Publishing it (owner): create the public repository `btray77/homebrew-ansiview`, tag the release
+`v2.0.0` and push the tag, set the formula's `sha256` to
+`curl -sL https://github.com/btray77/AnsiView/archive/refs/tags/v2.0.0.tar.gz | shasum -a 256`,
+and commit the formula as `Formula/ansirender.rb` in the tap. Bump `url` and `sha256` for each release.
 
 Formats: `png jpeg webp gif awebp mp4 html ansi ansi256 text utf8`. Options: `--scale N`,
 `--baud N`, `--fps N`, `--palette auto|vga|system`, `--max-bytes N`, `--max-size WxH`.

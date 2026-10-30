@@ -12,7 +12,7 @@ packages:
 settings:
   base:
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "41"
+    CURRENT_PROJECT_VERSION: "42"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -194,6 +194,17 @@ targets:
     type: tool
     platform: macOS
     sources: [Tool, Shared, App/AnsiExport.swift, App/BatchExport.swift, App/ArtCollection.swift]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.ansirender
+        # `ansirender --version` reads this plist from the binary itself.
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+    info:
+      path: Tool/Info.plist
+      properties:
+        CFBundleName: ansirender
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
     dependencies:
       - package: AnsiCore
       - package: libwebp
