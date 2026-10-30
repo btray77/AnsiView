@@ -205,6 +205,30 @@ public final class BBSClient {
         }
     }
 
+    /// Sends file transfer data (telnet escaped when telnet runs) and calls `completion` on
+    /// `queue` once the transport has taken it, so the caller can pull the next chunk (pull mode
+    /// with backpressure). Also completes when not connected, so a caller never waits forever.
+    public func sendTransfer(_ bytes: [UInt8], completion: @escaping () -> Void) {
+        queue.async {
+            guard self.state == .connected, !bytes.isEmpty, let transport = self.transport else {
+                completion()
+                return
+            }
+            let out = self.settings.usesTelnet ? TelnetTransferChannel.encode(bytes, session: self.telnet) : bytes
+            self.onSent?(out)
+            transport.write(out, completion: completion)
+        }
+    }
+
+    /// Asks the BBS for telnet BINARY both ways (before a file transfer); no-op off telnet.
+    /// `isByteClean` turns true once the BBS agrees.
+    public func requestBinary() {
+        queue.async {
+            guard self.state == .connected, self.settings.usesTelnet else { return }
+            self.write(TelnetTransferChannel.requestBinary(&self.telnet))
+        }
+    }
+
     /// A new terminal size: reported by telnet NAWS (when accepted) and to the transport (SSH).
     public func resize(columns: Int, rows: Int) {
         queue.async {

@@ -22,9 +22,20 @@ public protocol BBSTransport: AnyObject {
     var events: ((TransportEvent) -> Void)? { get set }
     func open()
     func write(_ bytes: [UInt8])
+    /// Writes and calls `completion` (on the client's queue) once the bytes have left for the
+    /// network or the write failed, so a file transfer sends only as fast as the line drains.
+    func write(_ bytes: [UInt8], completion: @escaping () -> Void)
     /// The terminal size changed (SSH sends window-change; the others ignore it).
     func resize(columns: Int, rows: Int)
     func close()
+}
+
+public extension BBSTransport {
+    /// Transports without a write confirmation complete at once.
+    func write(_ bytes: [UInt8], completion: @escaping () -> Void) {
+        write(bytes)
+        completion()
+    }
 }
 
 /// The per entry choices a transport needs (from `BBSEntry`, or made by hand in tests).
@@ -116,6 +127,17 @@ public final class TCPTransport: BBSTransport {
         connection.send(content: Data(bytes), completion: .contentProcessed { [weak self] error in
             guard let self, let error else { return }
             self.finish(.from(error, host: self.host, port: self.port, connected: true))
+        })
+    }
+
+    public func write(_ bytes: [UInt8], completion: @escaping () -> Void) {
+        guard let connection, ready, !bytes.isEmpty else {
+            completion()
+            return
+        }
+        connection.send(content: Data(bytes), completion: .contentProcessed { [weak self] error in
+            if let self, let error { self.finish(.from(error, host: self.host, port: self.port, connected: true)) }
+            completion()
         })
     }
 

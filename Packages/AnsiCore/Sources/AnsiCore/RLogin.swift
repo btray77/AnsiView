@@ -99,6 +99,14 @@ public final class RLoginTransport: BBSTransport {
         tcp.write(bytes)
     }
 
+    public func write(_ bytes: [UInt8], completion: @escaping () -> Void) {
+        guard accepted else {
+            completion()
+            return
+        }
+        tcp.write(bytes, completion: completion)
+    }
+
     public func resize(columns: Int, rows: Int) {}
 
     public func close() {

@@ -66,6 +66,20 @@ public final class WebSocketTransport: NSObject, BBSTransport, URLSessionWebSock
         }
     }
 
+    public func write(_ bytes: [UInt8], completion: @escaping () -> Void) {
+        guard let task, opened, !done, !bytes.isEmpty else {
+            completion()
+            return
+        }
+        task.send(.data(Data(bytes))) { [weak self] error in
+            let queue = self?.queue ?? .main
+            queue.async {
+                if let self, let error { self.fail(error, task: task) }
+                completion()
+            }
+        }
+    }
+
     public func resize(columns: Int, rows: Int) {}
 
     public func close() {
