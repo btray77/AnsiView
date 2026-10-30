@@ -172,7 +172,7 @@ public struct CellClipboard {
         return min(EditCanvas.maxColumns, max(1, columns))
     }
 
-    static func encode(_ image: CGImage, type: String, properties: [CFString: Any]) -> Data? {
+    public static func encode(_ image: CGImage, type: String, properties: [CFString: Any]) -> Data? {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data as CFMutableData, type as CFString, 1, nil) else { return nil }
         CGImageDestinationAddImage(destination, image, properties as CFDictionary)

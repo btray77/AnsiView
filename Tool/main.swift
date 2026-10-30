@@ -27,6 +27,7 @@ import UniformTypeIdentifiers
 // ansirender --list-fonts <file>...
 // ansirender --figlet-gallery "TEXT" [--font-dir <folder>]   (every bundled font, headed by its name)
 // ansirender --export-original-fonts <folder>   (writes AnsiView's original fonts as .tdf and .flf)
+// ansirender --sixel|--kitty [--scale N] <input>   (the finished art as sixel or kitty graphics on stdout)
 // ansirender --version
 let args = CommandLine.arguments
 func fail(_ message: String, _ code: Int32) -> Never {
@@ -379,6 +380,32 @@ if args[1] == "--music" || args[1] == "--music-wav" || args[1] == "--music-midi"
     do { try data.write(to: URL(fileURLWithPath: output)) } catch { fail("could not write \(output)", 1) }
     summary = "wrote \(output): \(data.count) bytes, " + summary
     print(summary)
+    exit(0)
+}
+
+if args[1] == "--sixel" || args[1] == "--kitty" {
+    var rest = Array(args.dropFirst(2))
+    var scale = 1
+    if let index = rest.firstIndex(of: "--scale") {
+        guard index + 1 < rest.count, let n = Int(rest[index + 1]), (1...8).contains(n) else { fail("--scale takes 1 to 8", 2) }
+        scale = n
+        rest.removeSubrange(index...(index + 1))
+    }
+    guard rest.count == 1 else { fail("usage: ansirender \(args[1]) [--scale N] <input>", 2) }
+    var screen = AnsiAnalysis(loadArt(rest[0])).finalScreen
+    screen.rows = TextConvert.trimmedRows(screen)
+    if screen.rows.isEmpty { screen.rows = [Array(repeating: AnsiCell(), count: screen.columns)] }
+    let text: String
+    if args[1] == "--sixel" {
+        guard let made = TerminalGraphics.sixelImage(screen, scale: scale) else { fail("render failed", 1) }
+        text = TerminalGraphics.sixel(made.image, palette: made.palette)
+    } else {
+        guard let image = AnsiRenderer.render(screen, options: RenderOptions(for: screen, scale: scale))?.image,
+              let png = CellClipboard.encode(image, type: CellClipboard.pngType, properties: [:])
+        else { fail("render failed", 1) }
+        text = TerminalGraphics.kitty(png: png)
+    }
+    FileHandle.standardOutput.write(Data((text + "\n").utf8))
     exit(0)
 }
 
