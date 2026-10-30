@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// RIPscrip 1.54 command lines: `!|` at the start of a line, commands separated by `|`, numbers
 /// in two digit base 36 ("MegaNums"), a trailing `\` continuing the line.
@@ -67,25 +68,70 @@ public enum RIPParser {
     }
 }
 
+/// A RIPscrip block transfer request (`!|9 ESC`): the BBS wants to send or receive files.
+public struct RIPBlockTransfer: Equatable {
+    public var upload: Bool
+    /// 0 Xmodem checksum, 1 Xmodem CRC, 2 Xmodem-1K, 3 Xmodem-1K G, 4 Kermit, 5 Ymodem, 6 Ymodem-G, 7 Zmodem.
+    public var protocolCode: Int
+    /// 0 RIP to show, 1 RIP to store, 2 icons, 3 help, 4 and 5 dynamic batches.
+    public var fileType: Int
+    public var fileName: String?
+
+    public var protocolName: String {
+        ["Xmodem", "Xmodem-CRC", "Xmodem-1K", "Xmodem-1K-G", "Kermit", "Ymodem", "Ymodem-G", "Zmodem"][max(0, min(7, protocolCode))]
+    }
+}
+
 /// A RIPscrip terminal (RIPterm 1.54 style): vector graphics on a 640x350 EGA screen under an
-/// ANSI-BBS text layer, mouse fields and buttons that send their host commands when clicked.
-/// Not covered: icon files (1I/1W), scene and file queries (1R/1F), block transfers (9), stroked
-/// BGI fonts (drawn with AnsiView's 8x8 font scaled instead), button group and radio flags.
+/// ANSI-BBS text layer drawn with the EGA 8x14 font, mouse fields and buttons (with radio and
+/// check box groups, hotkeys and the button style effects), icons and scenes from the user's icon
+/// folder (`files`), icons the BBS writes kept for the session, file and text variable queries,
+/// and block transfer requests. Drawing is limited per `feed` (`drawingBudget`); the rest waits.
 public struct RIPTerminal: TerminalEngine {
     public private(set) var ansi: TerminalEmulator
     public private(set) var canvas = RIPCanvas()
+    /// The user's icon folder (icons, scenes, file queries); nil when none was chosen.
+    public var files: RIPFileProvider?
+    /// Pixels drawn per `feed` before the rest of the input waits for the next call.
+    public var drawingBudget = 6_000_000
 
     struct MouseField {
         var x0: Int, y0: Int, x1: Int, y1: Int
         var command: [UInt8]
+        var button: Int?
+    }
+
+    struct Button {
+        var x0: Int, y0: Int, x1: Int, y1: Int
+        var command: [UInt8]
+        var hotkey: Int
+        var group: Int
+        var radio: Bool
+        var checkbox: Bool
+        var selected: Bool
+        var resetAfter: Bool
+        var isDefault: Bool
+    }
+
+    struct ButtonStyle {
+        var width = 0, height = 0, orientation = 2, flags = 0, bevel = 2
+        var fore: UInt8 = 15, back: UInt8 = 0, bright: UInt8 = 15, dark: UInt8 = 8, surface: UInt8 = 7
+        var group = 0, flags2 = 0
+        var underline: UInt8 = 14, corner: UInt8 = 7
+        func has(_ flag: Int) -> Bool { flags & flag != 0 }
     }
 
     private var fields: [MouseField] = []
-    private var buttonStyle = (width: 0, height: 0, bevel: 2, fore: UInt8(15), back: UInt8(0), bright: UInt8(15),
-                               dark: UInt8(8), surface: UInt8(7))
+    private var buttons: [Button] = []
+    private var style = ButtonStyle()
     private var textBlock: (x0: Int, y0: Int, x1: Int, y1: Int, y: Int)?
     private var clipboard: (width: Int, height: Int, pixels: [UInt8])?
     var clipboardSize: (width: Int, height: Int)? { clipboard.map { ($0.width, $0.height) } }
+    /// Icons the BBS wrote with 1W: kept for this session only (a BBS never writes to the disk).
+    private var sessionIcons: [String: RIPIcon] = [:]
+    private var deferredQuery: (mode: Int, text: [UInt8])?
+    private var blockTransfer: RIPBlockTransfer?
+    private var lastClick = (x: 0, y: 0)
 
     // Line splitting state.
     private var atLineStart = true
@@ -98,13 +144,18 @@ public struct RIPTerminal: TerminalEngine {
     private var queryMatch: [UInt8] = []
     public var enabled = true
     private var graphicsChanges = 0
+    /// Input not yet processed because the drawing budget ran out.
+    private var pendingInput: [UInt8] = []
+    private var sceneDepth = 0
+    /// Past this much waiting input the budget is ignored (the BBS is far ahead of the screen).
+    static let maxPendingInput = 8 * 1024 * 1024
 
     public init(columns: Int = 80, rows: Int = 25, encoding: TextEncoding = .cp437) {
         ansi = TerminalEmulator(columns: columns, rows: rows, encoding: encoding)
     }
 
-    /// The text layer uses the entry's font (the bundled EGA 8x14 rasterizes with a gap, so VGA is the default).
-    public var font: BitmapFont? { nil }
+    /// RIPterm's text window: 80x25 EGA 8x14 characters cover the 640x350 graphics screen.
+    public var font: BitmapFont? { BitmapFont.named("IBM EGA") }
     /// 640x350 pixels filled a 4:3 monitor: each pixel is shown narrower than tall.
     public var horizontalStretch: Double { (4.0 / 3.0) / (640.0 / 350.0) }
     public var columns: Int { ansi.columns }
@@ -114,10 +165,14 @@ public struct RIPTerminal: TerminalEngine {
     public var changeCount: Int { ansi.changeCount &+ canvas.changeCount &+ graphicsChanges }
     public var bells: Int { ansi.bells }
     public var scrollbackCount: Int { ansi.scrollback.count }
+    public var hasPendingWork: Bool { !pendingInput.isEmpty }
     public mutating func resize(columns: Int, rows: Int) { ansi.resize(columns: columns, rows: rows) }
     public mutating func clearScrollback() { ansi.clearScrollback() }
     public func screen(scrollOffset: Int) -> AnsiScreen { ansi.screen(scrollOffset: scrollOffset) }
     public func overlay() -> CGImage? { canvas.image() }
+
+    /// Indexes (in creation order) of the buttons drawn selected.
+    var selectedButtons: [Int] { buttons.indices.filter { buttons[$0].selected } }
 
     public mutating func takeReplies() -> [UInt8] {
         let out = replies + ansi.takeReplies()
@@ -125,23 +180,110 @@ public struct RIPTerminal: TerminalEngine {
         return out
     }
 
+    /// The block transfer the BBS asked for, once.
+    public mutating func takeBlockTransfer() -> RIPBlockTransfer? {
+        defer { blockTransfer = nil }
+        return blockTransfer
+    }
+
     public mutating func click(x: Int, y: Int) -> [UInt8] {
+        lastClick = (x, y)
         // Newest fields first.
         for field in fields.reversed() where x >= field.x0 && x <= field.x1 && y >= field.y0 && y <= field.y1 {
-            return field.command
+            if let index = field.button { return press(index) }
+            return expand(field.command)
         }
+        if let query = deferredQuery, query.mode == 1 { return expand(query.text) }
         return []
+    }
+
+    /// A typed key that is a button's hotkey (or Return for the default button): the button's
+    /// host command; nil when no button takes the key.
+    public mutating func hotkey(_ byte: UInt8) -> [UInt8]? {
+        let upper = (0x61...0x7A).contains(byte) ? byte - 0x20 : byte
+        for index in buttons.indices.reversed() {
+            let key = buttons[index].hotkey
+            let keyUpper = (0x61...0x7A).contains(key) ? key - 0x20 : key
+            if key != 0, key == 255 || keyUpper == Int(upper) { return press(index) }
+            if byte == 0x0D, buttons[index].isDefault { return press(index) }
+        }
+        return nil
+    }
+
+    private mutating func press(_ index: Int) -> [UInt8] {
+        let button = buttons[index]
+        if button.radio {
+            for other in buttons.indices where other != index && buttons[other].radio
+                && buttons[other].group == button.group && buttons[other].selected {
+                setSelected(other, false)
+            }
+            setSelected(index, true)
+        } else if button.checkbox {
+            setSelected(index, !button.selected)
+        }
+        if button.resetAfter { resetWindows() }
+        graphicsChanges &+= 1
+        return expand(button.command)
+    }
+
+    private mutating func setSelected(_ index: Int, _ on: Bool) {
+        guard buttons[index].selected != on else { return }
+        buttons[index].selected = on
+        let b = buttons[index]
+        canvas.invert(x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1)
+    }
+
+    /// A host command with its control characters and text variables.
+    private func expand(_ text: [UInt8]) -> [UInt8] {
+        var out: [UInt8] = []
+        var i = 0
+        while i < text.count {
+            if text[i] == UInt8(ascii: "$"), let end = text[(i + 1)...].firstIndex(of: UInt8(ascii: "$")), end - i <= 24 {
+                let name = String(decoding: text[(i + 1)..<end], as: UTF8.self).uppercased()
+                out += Array(variable(name).utf8)
+                i = end + 1
+                continue
+            }
+            out.append(text[i])
+            i += 1
+        }
+        return RIPParser.hostCommand(out)
+    }
+
+    /// Text variables a terminal can answer without personal data; others are blank.
+    private func variable(_ name: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        switch name {
+        case "DATE": formatter.dateFormat = "MM/dd/yy"; return formatter.string(from: Date())
+        case "TIME": formatter.dateFormat = "HH:mm:ss"; return formatter.string(from: Date())
+        case "X": return String(format: "%04d", lastClick.x)
+        case "Y": return String(format: "%04d", lastClick.y)
+        case "RIPVER": return "RIPSCRIP015400"
+        default: return ""
+        }
     }
 
     // MARK: Stream
 
     public mutating func feed(_ bytes: [UInt8]) {
-        guard !bytes.isEmpty else { return }
+        guard !bytes.isEmpty || !pendingInput.isEmpty else { return }
+        var input = pendingInput
+        input += bytes
+        pendingInput.removeAll()
+        canvas.resetWork()
+        process(input, budgeted: true)
+    }
+
+    private mutating func process(_ input: [UInt8], budgeted: Bool) {
         var text: [UInt8] = []
         func flush(_ t: inout [UInt8], _ ansi: inout TerminalEmulator) {
             if !t.isEmpty { ansi.feed(t); t.removeAll() }
         }
-        for b in bytes {
+        var index = 0
+        while index < input.count {
+            let b = input[index]
+            index += 1
             if swallowLF {
                 swallowLF = false
                 if b == 0x0A { continue }
@@ -157,8 +299,14 @@ public struct RIPTerminal: TerminalEngine {
                     atLineStart = true
                     swallowLF = b == 0x0D
                     flush(&text, &ansi)
-                    execute(line)
+                    let command = line
                     line.removeAll()
+                    execute(command)
+                    if budgeted, canvas.work > drawingBudget, index < input.count,
+                       input.count - index < Self.maxPendingInput {
+                        pendingInput = Array(input[index...])
+                        return
+                    }
                 } else if line.count < 16384 {
                     line.append(b)
                 }
@@ -200,9 +348,34 @@ public struct RIPTerminal: TerminalEngine {
     // MARK: Commands
 
     private mutating func execute(_ line: [UInt8]) {
+        // Block mode (9 ESC) must end its line; its file name may hold bars.
+        if line.starts(with: [UInt8(ascii: "9"), 0x1B]) {
+            blockMode(Array(line.dropFirst(2)))
+            return
+        }
         for command in RIPParser.commands(line) {
             run(command)
         }
+    }
+
+    private mutating func blockMode(_ args: [UInt8]) {
+        guard args.count >= 8 else { return }
+        let digits = args.prefix(8).map { (0x30...0x39).contains($0) ? Int($0 - 0x30) : 0 }
+        var name = Array(args.dropFirst(8))
+        if let end = name.indices.first(where: { name[$0] == UInt8(ascii: "<") && $0 + 1 < name.count && name[$0 + 1] == UInt8(ascii: ">") }) {
+            name = Array(name[..<end])
+        }
+        blockTransfer = RIPBlockTransfer(upload: digits[0] == 1, protocolCode: digits[1], fileType: digits[2] * 10 + digits[3],
+                                         fileName: RIPFileName.sanitize(name))
+    }
+
+    private mutating func resetWindows() {
+        canvas.reset()
+        fields.removeAll()
+        buttons.removeAll()
+        clipboard = nil
+        deferredQuery = nil
+        ansi.feed(Array("\u{1B}[r\u{1B}[0m\u{1B}[2J".utf8))
     }
 
     private mutating func run(_ command: [UInt8]) {
@@ -229,10 +402,7 @@ public struct RIPTerminal: TerminalEngine {
                 let (_, y0) = point(), (_, y1) = point()
                 if y1 > y0 { ansi.feed(Array("\u{1B}[\(y0 + 1);\(min(rows, y1 + 1))r".utf8)) }
             case "v": canvas.viewport = (min(639, n()), min(349, n()), min(639, n()), min(349, n()))
-            case "*":
-                canvas.reset()
-                fields.removeAll()
-                ansi.feed(Array("\u{1B}[r\u{1B}[0m\u{1B}[2J".utf8))
+            case "*": resetWindows()
             case "e": ansi.feed(Array("\u{1B}[2J".utf8))
             case "E": canvas.erase(x0: canvas.viewport.x0, y0: canvas.viewport.y0, x1: canvas.viewport.x1, y1: canvas.viewport.y1)
             case "g": let (x, y) = point(); ansi.feed(Array("\u{1B}[\(y + 1);\(x + 1)H".utf8))
@@ -246,7 +416,7 @@ public struct RIPTerminal: TerminalEngine {
             case "T": canvas.text(rest(), x: canvas.position.x, y: canvas.position.y)
             case "@": let (x, y) = point(); canvas.text(rest(), x: x, y: y)
             // Sizes past 10 are not in RIPscrip; capping keeps a hostile size from drawing for minutes.
-            case "Y": canvas.font = n(); canvas.direction = n(); canvas.size = max(1, min(10, n()))
+            case "Y": canvas.font = min(10, n()); canvas.direction = n(); canvas.size = max(1, min(10, n()))
             case "X": let (x, y) = point(); canvas.plot(x, y, canvas.color); graphicsChanges &+= 1
             case "L": let (a, b) = point(), (c, d) = point(); canvas.line(a, b, c, d)
             case "R": let (a, b) = point(), (c, d) = point(); canvas.rectangle(a, b, c, d)
@@ -301,54 +471,139 @@ public struct RIPTerminal: TerminalEngine {
             _ = n()
             let (x0, y0) = point(), (x1, y1) = point()
             _ = n(1); _ = n(1); _ = n(5)
-            if fields.count < 128 { fields.append(MouseField(x0: x0, y0: y0, x1: x1, y1: y1, command: RIPParser.hostCommand(rest()))) }
-        case "K": fields.removeAll()
+            if fields.count < 256 { fields.append(MouseField(x0: x0, y0: y0, x1: x1, y1: y1, command: rest(), button: nil)) }
+        case "K":
+            fields.removeAll()
+            buttons.removeAll()
         case "B":
-            let width = n(), height = n()
-            _ = n(); _ = n(4)
-            let bevel = n(), fore = n(), back = n(), bright = n(), dark = n(), surface = n()
-            buttonStyle = (width, height, bevel, UInt8(fore & 15), UInt8(back & 15), UInt8(bright & 15), UInt8(dark & 15), UInt8(surface & 15))
+            var s = ButtonStyle()
+            s.width = n(); s.height = n(); s.orientation = n(); s.flags = n(4); s.bevel = n()
+            s.fore = UInt8(n() & 15); s.back = UInt8(n() & 15); s.bright = UInt8(n() & 15); s.dark = UInt8(n() & 15)
+            s.surface = UInt8(n() & 15); s.group = n(); s.flags2 = n(); s.underline = UInt8(n() & 15); s.corner = UInt8(n() & 15)
+            style = s
         case "U":
-            var (x0, y0) = point(), (x1, y1) = point()
-            _ = n(); _ = n(1); _ = n(1)
-            if x1 <= x0 { x1 = x0 + max(8, buttonStyle.width) }
-            if y1 <= y0 { y1 = y0 + max(8, buttonStyle.height) }
-            let parts = split(rest())
-            drawButton(x0: x0, y0: y0, x1: x1, y1: y1, label: parts.count > 1 ? parts[1] : [])
-            if parts.count > 2, fields.count < 128 {
-                fields.append(MouseField(x0: x0, y0: y0, x1: x1, y1: y1, command: RIPParser.hostCommand(parts[2])))
-            }
+            let (x0, y0) = point(), (x1, y1) = point()
+            let hotkey = n(), flags = n(1)
+            _ = n(1)
+            button(x0: x0, y0: y0, x1: x1, y1: y1, hotkey: hotkey, flags: flags, text: rest())
         case "T":
             let (x0, y0) = point(), (x1, y1) = point()
             textBlock = (x0, y0, x1, y1, y0)
         case "t":
             _ = n(1)
             if var block = textBlock {
-                canvas.text(Array(rest().prefix(max(0, (block.x1 - block.x0) / 8))), x: block.x0, y: block.y)
-                block.y += 8 * max(1, canvas.size)
+                var words = rest()
+                while !words.isEmpty, canvas.textWidth(words) > block.x1 - block.x0 + 1 { words.removeLast() }
+                canvas.text(words, x: block.x0, y: block.y)
+                block.y += canvas.textHeight
                 textBlock = block
             }
         case "E": textBlock = nil
         case "C":
             // Clamped to the screen: MegaNums reach 1295, which would copy (and paste) far more than exists.
             let (a, b) = point(), (c, d) = point()
-            let x0 = max(0, a), y0 = max(0, b), x1 = min(canvas.width - 1, c), y1 = min(canvas.height - 1, d)
-            guard x1 >= x0, y1 >= y0 else { return }
-            var copied: [UInt8] = []
-            for y in y0...y1 { for x in x0...x1 { copied.append(canvas.pixel(x, y)) } }
-            clipboard = (x1 - x0 + 1, y1 - y0 + 1, copied)
+            if let region = canvas.region(x0: a, y0: b, x1: c, y1: d) { clipboard = region }
         case "P":
             let (x, y) = point(), mode = n()
             guard let clip = clipboard else { return }
-            let saved = canvas.xorMode
-            canvas.xorMode = mode == 1
-            for cy in 0..<clip.height { for cx in 0..<clip.width { canvas.plot(x + cx, y + cy, clip.pixels[cy * clip.width + cx]) } }
-            canvas.xorMode = saved
+            canvas.put(clip.pixels, width: clip.width, height: clip.height, x: x, y: y, mode: mode)
             graphicsChanges &+= 1
+        case "I":
+            let (x, y) = point(), mode = n(), toClipboard = n(1)
+            _ = n(2)
+            loadIcon(rest(), x: x, y: y, mode: mode, toClipboard: toClipboard == 1)
+        case "W":
+            _ = n(1)
+            guard let clip = clipboard, let name = RIPFileName.icon(rest()) else { return }
+            if sessionIcons.count < 64 || sessionIcons[name.lowercased()] != nil {
+                sessionIcons[name.lowercased()] = RIPIcon(width: clip.width, height: clip.height, pixels: clip.pixels)
+            }
+        case "G":
+            let (x0, y0) = point(), (x1, y1) = point()
+            _ = n()
+            canvas.copyLines(x0: x0, y0: y0, x1: x1, y1: y1, destination: n())
+        case "R":
+            _ = n(8)
+            readScene(rest())
+        case "F":
+            let mode = n()
+            _ = n(4)
+            fileQuery(rest(), mode: mode)
+        case "\u{1B}":
+            let mode = n(1)
+            _ = n(3)
+            let text = rest()
+            if mode == 0 {
+                replies += expand(text)
+            } else {
+                deferredQuery = String(decoding: text, as: UTF8.self) == "$OFF$" ? nil : (mode, text)
+            }
         default:
             break
         }
     }
+
+    // MARK: Files
+
+    private func icon(named raw: [UInt8], extension ext: String = "ICN") -> RIPIcon? {
+        guard let name = RIPFileName.icon(raw, defaultExtension: ext) else { return nil }
+        if let kept = sessionIcons[name.lowercased()] { return kept }
+        return files?.data(named: name).flatMap(RIPIcon.decode)
+    }
+
+    private mutating func loadIcon(_ raw: [UInt8], x: Int, y: Int, mode: Int, toClipboard: Bool) {
+        guard let icon = icon(named: raw) else {
+            // RIPscrip asks for a visible sign that an icon is missing: a crossed box.
+            let saved = (canvas.color, canvas.lineStyle)
+            canvas.color = 15
+            canvas.lineStyle = 0xFFFF
+            canvas.rectangle(x, y, x + 31, y + 19)
+            canvas.line(x, y, x + 31, y + 19)
+            canvas.line(x + 31, y, x, y + 19)
+            (canvas.color, canvas.lineStyle) = saved
+            return
+        }
+        guard x >= 0, x + icon.width <= canvas.width, y + icon.height <= canvas.height else { return }
+        canvas.put(icon.pixels, width: icon.width, height: icon.height, x: x, y: y, mode: mode)
+        if toClipboard { clipboard = (icon.width, icon.height, icon.pixels) }
+        graphicsChanges &+= 1
+    }
+
+    private mutating func readScene(_ raw: [UInt8]) {
+        // One level: a scene that loads a scene (or itself) does not recurse.
+        guard sceneDepth == 0, let name = RIPFileName.sanitize(raw), let data = files?.data(named: name) else { return }
+        let saved = (atLineStart, bangPending, collecting, line, swallowLF)
+        atLineStart = true; bangPending = false; collecting = false; line = []; swallowLF = false
+        sceneDepth += 1
+        process(data + [0x0D], budgeted: false)
+        sceneDepth -= 1
+        (atLineStart, bangPending, collecting, line, swallowLF) = saved
+    }
+
+    private mutating func fileQuery(_ raw: [UInt8], mode: Int) {
+        let name = RIPFileName.sanitize(raw)
+        let info: (size: Int, date: Date)? = name.flatMap { n in
+            if let kept = sessionIcons[n.lowercased()] { return (kept.encode().count, Date()) }
+            return files?.info(named: n)
+        }
+        guard let info, let name else {
+            replies += Array((mode == 0 ? "0" : "0\r").utf8)
+            return
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MM/dd/yy.HH:mm:ss"
+        let stamp = formatter.string(from: info.date)
+        switch mode {
+        case 0: replies += Array("1".utf8)
+        case 1: replies += Array("1\r".utf8)
+        case 2: replies += Array("1.\(info.size)\r".utf8)
+        case 3: replies += Array("1.\(info.size).\(stamp)\r".utf8)
+        default: replies += Array("1.\(name.uppercased()).\(info.size).\(stamp)\r".utf8)
+        }
+    }
+
+    // MARK: Buttons
 
     /// Splits button text at `<>`: icon, label, host command.
     private func split(_ text: [UInt8]) -> [[UInt8]] {
@@ -366,37 +621,120 @@ public struct RIPTerminal: TerminalEngine {
         return parts
     }
 
-    private mutating func drawButton(x0: Int, y0: Int, x1: Int, y1: Int, label: [UInt8]) {
-        let savedPattern = canvas.fillPattern, savedFill = canvas.fillColor, savedColor = canvas.color
-        let savedStyle = canvas.lineStyle, savedThick = canvas.thick
-        canvas.lineStyle = 0xFFFF
-        canvas.thick = false
-        canvas.fillPattern = RIPCanvas.patterns[1]
-        canvas.fillColor = buttonStyle.surface
-        canvas.bar(x0, y0, x1, y1)
-        for b in 0..<max(0, min(buttonStyle.bevel, 8)) {
-            canvas.color = buttonStyle.bright
-            canvas.line(x0 + b, y0 + b, x1 - b, y0 + b)
-            canvas.line(x0 + b, y0 + b, x0 + b, y1 - b)
-            canvas.color = buttonStyle.dark
-            canvas.line(x0 + b, y1 - b, x1 - b, y1 - b)
-            canvas.line(x1 - b, y0 + b, x1 - b, y1 - b)
+    private mutating func button(x0: Int, y0: Int, x1 inX1: Int, y1 inY1: Int, hotkey: Int, flags: Int, text: [UInt8]) {
+        let parts = split(text)
+        let iconName = parts[0], label = parts.count > 1 ? parts[1] : [], command = parts.count > 2 ? parts[2] : []
+        var s = style
+        var x1 = inX1, y1 = inY1
+        // The base image: icon, clipboard or a plain surface (a style with no type is drawn plain).
+        if s.has(128) {
+            guard let icon = icon(named: iconName) else { loadIcon(iconName, x: x0, y: y0, mode: 0, toClipboard: false); return }
+            canvas.put(icon.pixels, width: icon.width, height: icon.height, x: x0, y: y0, mode: 0)
+            x1 = x0 + icon.width - 1; y1 = y0 + icon.height - 1
+        } else if s.has(1) {
+            guard let clip = clipboard else { return }
+            canvas.put(clip.pixels, width: clip.width, height: clip.height, x: x0, y: y0, mode: 0)
+            x1 = x0 + clip.width - 1; y1 = y0 + clip.height - 1
+        } else {
+            if s.width > 0, s.height > 0 { x1 = x0 + s.width - 1; y1 = y0 + s.height - 1 }
+            if x1 <= x0 { x1 = x0 + 8 }
+            if y1 <= y0 { y1 = y0 + 8 }
+            let saved = (canvas.fillPattern, canvas.fillColor)
+            canvas.fillPattern = RIPCanvas.patterns[1]
+            canvas.fillColor = s.surface
+            canvas.bar(x0, y0, x1, y1)
+            (canvas.fillPattern, canvas.fillColor) = saved
         }
-        if !label.isEmpty {
-            let savedFont = (canvas.font, canvas.size, canvas.direction)
-            canvas.font = 0; canvas.size = 1; canvas.direction = 0
-            let width = canvas.textWidth(label.count)
-            let tx = x0 + max(0, (x1 - x0 + 1 - width) / 2), ty = y0 + max(0, (y1 - y0 + 1 - 8) / 2)
-            canvas.color = buttonStyle.back
+        let savedColor = canvas.color, savedStyle = canvas.lineStyle, savedThick = canvas.thick, savedXor = canvas.xorMode
+        canvas.lineStyle = 0xFFFF; canvas.thick = false; canvas.xorMode = false
+        func frame(_ inset: Int, topLeft: UInt8, bottomRight: UInt8) {
+            let a = x0 + inset, b = y0 + inset, c = x1 - inset, d = y1 - inset
+            guard c > a, d > b else { return }
+            canvas.color = topLeft
+            canvas.line(a, b, c, b); canvas.line(a, b, a, d)
+            canvas.color = bottomRight
+            canvas.line(a, d, c, d); canvas.line(c, b, c, d)
+        }
+        if s.has(8) {
+            // Chisel: an indented gutter, deeper on bigger buttons.
+            let h = y1 - y0 + 1
+            let inset = h < 12 ? 1 : h < 25 ? 3 : h < 40 ? 4 : h < 75 ? 5 : h < 150 ? 6 : 7
+            frame(inset, topLeft: s.dark, bottomRight: s.bright)
+            frame(inset + 1, topLeft: s.bright, bottomRight: s.dark)
+        }
+        if s.has(32768) { frame(1, topLeft: s.dark, bottomRight: s.bright) }
+        var ox0 = x0, oy0 = y0, ox1 = x1, oy1 = y1
+        if s.has(512) {
+            let bevel = max(0, min(s.bevel, 16))
+            for k in 1...max(1, bevel) where bevel > 0 {
+                canvas.color = s.bright
+                canvas.line(x0 - k, y0 - k, x1 + k, y0 - k); canvas.line(x0 - k, y0 - k, x0 - k, y1 + k)
+                canvas.color = s.dark
+                canvas.line(x0 - k, y1 + k, x1 + k, y1 + k); canvas.line(x1 + k, y0 - k, x1 + k, y1 + k)
+            }
+            if bevel > 0 {
+                canvas.color = s.corner
+                for k in 1...bevel {
+                    canvas.plot(x1 + k, y0 - k, s.corner); canvas.plot(x0 - k, y1 + k, s.corner)
+                }
+            }
+            ox0 -= bevel; oy0 -= bevel; ox1 += bevel; oy1 += bevel
+        }
+        if s.has(64) {
+            // Auto-clip: the finished image becomes the clipboard and later buttons reuse it.
+            if let region = canvas.region(x0: ox0, y0: oy0, x1: ox1, y1: oy1) { clipboard = region }
+            style.flags = (style.flags & ~(128 | 256 | 8 | 512 | 64 | 32768)) | 1
+            s = style
+        }
+        if s.has(16) {
+            canvas.color = 0
+            canvas.rectangle(ox0 - 1, oy0 - 1, ox1 + 1, oy1 + 1)
+            canvas.color = s.dark
+            canvas.line(ox0 - 2, oy0 - 2, ox1 + 2, oy0 - 2); canvas.line(ox0 - 2, oy0 - 2, ox0 - 2, oy1 + 2)
+            canvas.color = s.bright
+            canvas.line(ox0 - 2, oy1 + 2, ox1 + 2, oy1 + 2); canvas.line(ox1 + 2, oy0 - 2, ox1 + 2, oy1 + 2)
+        }
+        if !label.isEmpty { drawLabel(label, x0: ox0, y0: oy0, x1: ox1, y1: oy1, style: s, hotkey: hotkey) }
+        canvas.color = savedColor; canvas.lineStyle = savedStyle; canvas.thick = savedThick; canvas.xorMode = savedXor
+        graphicsChanges &+= 1
+
+        let mouse = s.has(1024) || (!command.isEmpty && s.flags & (1024 | 128 | 1 | 256) == 0)
+        let index = buttons.count
+        buttons.append(Button(x0: ox0, y0: oy0, x1: ox1, y1: oy1, command: command, hotkey: mouse ? hotkey : 0,
+                              group: s.group, radio: s.has(16384), checkbox: s.flags2 & 1 != 0, selected: false,
+                              resetAfter: s.has(4), isDefault: flags & 2 != 0))
+        if flags & 1 != 0, buttons[index].radio || buttons[index].checkbox { setSelected(index, true) }
+        if mouse, fields.count < 256, fields.filter({ $0.button != nil }).count < 128 {
+            fields.append(MouseField(x0: ox0, y0: oy0, x1: ox1, y1: oy1, command: command, button: index))
+        }
+        if buttons.count > 1024 { buttons.removeFirst(buttons.count - 1024); fields.removeAll { $0.button != nil } }
+    }
+
+    private mutating func drawLabel(_ label: [UInt8], x0: Int, y0: Int, x1: Int, y1: Int, style s: ButtonStyle, hotkey: Int) {
+        let width = canvas.textWidth(label), height = canvas.font == 0 ? 8 * max(1, canvas.size)
+            : RIPStrokeFont.metrics(font: canvas.font, size: canvas.size).base
+        let indent = s.has(8) ? 20 : 10
+        var tx: Int
+        if s.flags2 & 8 != 0 { tx = x0 + indent } else if s.flags2 & 16 != 0 { tx = x1 - indent - width } else { tx = x0 + (x1 - x0 + 1 - width) / 2 }
+        var ty = y0 + (y1 - y0 + 1 - height) / 2
+        switch s.orientation {
+        case 0: ty = y0 - height - 2
+        case 1: tx = x0 - width - 4
+        case 3: tx = x1 + 4
+        case 4: ty = y1 + 3
+        default: break
+        }
+        if s.has(32) {
+            canvas.color = s.back
             canvas.text(label, x: tx + 1, y: ty + 1)
-            canvas.color = buttonStyle.fore
-            canvas.text(label, x: tx, y: ty)
-            (canvas.font, canvas.size, canvas.direction) = savedFont
         }
-        canvas.fillPattern = savedPattern
-        canvas.fillColor = savedFill
-        canvas.color = savedColor
-        canvas.lineStyle = savedStyle
-        canvas.thick = savedThick
+        canvas.color = s.fore
+        canvas.text(label, x: tx, y: ty)
+        if s.has(2048) || s.flags2 & 2 != 0, hotkey > 0, hotkey < 255,
+           let at = label.firstIndex(where: { Int($0) == hotkey || Int($0) ^ 0x20 == hotkey }) {
+            let ux = tx + canvas.textWidth(Array(label[..<at])), uw = canvas.textWidth([label[at]])
+            canvas.color = s.underline
+            canvas.line(ux, ty + height + 1, ux + uw - 2, ty + height + 1)
+        }
     }
 }
