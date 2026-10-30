@@ -39,7 +39,7 @@ import Testing
 @Test func resizeWhileConnectingReachesTheTransport() async {
     let fake = FakeTransport()
     let client = BBSClient(host: "h", port: 1, settings: TransportSettings(mode: .ssh), columns: 80, rows: 25,
-                           queue: DispatchQueue(label: "test.resize"), transport: fake)
+                           connectTimeout: testConnectTimeout, queue: DispatchQueue(label: "test.resize"), transport: fake)
     client.connect()
     #expect(await eventually { fake.opened.value })
     client.resize(columns: 132, rows: 50)

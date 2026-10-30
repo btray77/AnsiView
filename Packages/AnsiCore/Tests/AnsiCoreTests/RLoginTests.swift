@@ -63,7 +63,7 @@ import Testing
     settings.username = "guest"
     settings.terminalType = "ANSI"
     let queue = DispatchQueue(label: "test.rlogin")
-    let client = BBSClient(host: "127.0.0.1", port: port, settings: settings, columns: 80, rows: 25, queue: queue)
+    let client = BBSClient(host: "127.0.0.1", port: port, settings: settings, columns: 80, rows: 25, connectTimeout: testConnectTimeout, queue: queue)
     let data = Box<[UInt8]>([])
     client.onData = { b in data.update { $0 += b } }
     client.connect()
@@ -85,7 +85,7 @@ import Testing
     defer { server.stop() }
     let port = await server.port()
     let client = BBSClient(host: "127.0.0.1", port: port, settings: TransportSettings(mode: .rlogin), columns: 80,
-                           rows: 25, queue: DispatchQueue(label: "test.rlogin2"))
+                           rows: 25, connectTimeout: testConnectTimeout, queue: DispatchQueue(label: "test.rlogin2"))
     let states = Box<[BBSClientState]>([])
     client.onState = { s in states.update { $0.append(s) } }
     client.connect()

@@ -132,7 +132,7 @@ private func connect(port: Int, verifier: RecordingCertificateVerifier) async ->
         var settings = TransportSettings(mode: .telnet)
         settings.telnetSecure = true
         let client = BBSClient(host: "127.0.0.1", port: port, settings: settings, columns: 80, rows: 25,
-                               connectTimeout: 8, queue: queue)
+                               connectTimeout: testConnectTimeout, queue: queue)
         client.certificateVerifier = verifier
         var received: [UInt8] = []
         var finished = false
@@ -148,7 +148,7 @@ private func connect(port: Int, verifier: RecordingCertificateVerifier) async ->
         }
         client.onState = { state in if case .closed = state { end(state) } }
         client.connect()
-        queue.asyncAfter(deadline: .now() + 10) { end(.closed(.timedOut("test"))) }
+        queue.asyncAfter(deadline: .now() + 120) { end(.closed(.timedOut("test"))) }
         _ = client
     }
 }

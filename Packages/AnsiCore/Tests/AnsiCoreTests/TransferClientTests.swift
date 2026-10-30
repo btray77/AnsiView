@@ -21,7 +21,7 @@ final class SlowTransport: BBSTransport, @unchecked Sendable {
 
 private func connectedClient(_ settings: TransportSettings, _ transport: BBSTransport & AnyObject, queue: DispatchQueue,
                              opened: Box<Bool>) async -> BBSClient {
-    let client = BBSClient(host: "h", port: 1, settings: settings, columns: 80, rows: 25, queue: queue, transport: transport)
+    let client = BBSClient(host: "h", port: 1, settings: settings, columns: 80, rows: 25, connectTimeout: testConnectTimeout, queue: queue, transport: transport)
     let up = Box(false)
     client.onState = { s in if s == .connected { up.value = true } }
     client.connect()
@@ -84,7 +84,7 @@ private func connectedClient(_ settings: TransportSettings, _ transport: BBSTran
 @Test func sendTransferWhenClosedStillCompletes() async {
     let slow = SlowTransport()
     let queue = DispatchQueue(label: "test.closedxfer")
-    let client = BBSClient(host: "h", port: 1, settings: TransportSettings(mode: .raw), columns: 80, rows: 25, queue: queue,
+    let client = BBSClient(host: "h", port: 1, settings: TransportSettings(mode: .raw), columns: 80, rows: 25, connectTimeout: testConnectTimeout, queue: queue,
                            transport: slow)
     let done = Box(false)
     client.sendTransfer([1]) { done.value = true }

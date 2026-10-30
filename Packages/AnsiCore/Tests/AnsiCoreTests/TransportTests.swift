@@ -101,7 +101,7 @@ private func decode(_ json: String) throws -> BBSEntry {
 @Test func clientWithoutSSHTransportFails() async {
     let settings = TransportSettings(mode: .ssh)
     let client = BBSClient(host: "127.0.0.1", port: 22, settings: settings, columns: 80, rows: 25,
-                           queue: DispatchQueue(label: "test.ssh"))
+                           connectTimeout: testConnectTimeout, queue: DispatchQueue(label: "test.ssh"))
     let states = Box<[BBSClientState]>([])
     client.onState = { s in states.update { $0.append(s) } }
     client.connect()
@@ -114,7 +114,7 @@ private func decode(_ json: String) throws -> BBSEntry {
     settings.webSocketTelnet = true
     let fake = FakeTransport()
     let queue = DispatchQueue(label: "test.fake")
-    let client = BBSClient(host: "h", port: 1, settings: settings, columns: 80, rows: 25, queue: queue, transport: fake)
+    let client = BBSClient(host: "h", port: 1, settings: settings, columns: 80, rows: 25, connectTimeout: testConnectTimeout, queue: queue, transport: fake)
     let data = Box<[UInt8]>([])
     let states = Box<[BBSClientState]>([])
     client.onData = { b in data.update { $0 += b } }
@@ -144,7 +144,7 @@ private func decode(_ json: String) throws -> BBSEntry {
     let fake = FakeTransport()
     let queue = DispatchQueue(label: "test.clean")
     let client = BBSClient(host: "h", port: 1, settings: TransportSettings(mode: .ssh), columns: 80, rows: 25,
-                           queue: queue, transport: fake)
+                           connectTimeout: testConnectTimeout, queue: queue, transport: fake)
     let data = Box<[UInt8]>([])
     client.onData = { b in data.update { $0 += b } }
     client.connect()
@@ -165,7 +165,7 @@ private func decode(_ json: String) throws -> BBSEntry {
     let fake = FakeTransport()
     let queue = DispatchQueue(label: "test.flag")
     let client = BBSClient(host: "h", port: 1, settings: TransportSettings(mode: .telnet), columns: 80, rows: 25,
-                           queue: queue, transport: fake)
+                           connectTimeout: testConnectTimeout, queue: queue, transport: fake)
     client.connect()
     #expect(await eventually { fake.opened.value })
     queue.sync { fake.events?(.opened) }

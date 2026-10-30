@@ -15,12 +15,22 @@ final class Box<Value>: @unchecked Sendable {
     func update(_ change: (inout Value) -> Void) { lock.lock(); change(&stored); lock.unlock() }
 }
 
-/// Polls until `condition` holds or `timeout` seconds pass.
+/// The connect timeout for tests that do not test the timeout itself. Swift Testing runs tests in
+/// parallel on the shared cooperative pool; under load a test's `await` was measured resuming up
+/// to 9.5 s late, while the client's timeout runs on its own dispatch queue and is never late. A
+/// 15 s timeout then fired before the test (starved) could deliver `.opened`.
+let testConnectTimeout: TimeInterval = 3600
+
+/// Polls until `condition` holds or `timeout` seconds of polling pass. Time the test task spent
+/// waiting for a thread (a sleep that resumed late) is not counted, so a starved test still gets
+/// its full polling time.
 func eventually(_ timeout: Double = 5, _ condition: () -> Bool) async -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
+    var remaining = timeout
+    while remaining > 0 {
         if condition() { return true }
+        let start = Date()
         try? await Task.sleep(nanoseconds: 10_000_000)
+        remaining -= min(Date().timeIntervalSince(start), 0.05)
     }
     return condition()
 }
@@ -65,7 +75,7 @@ final class LoopbackServer: @unchecked Sendable {
 }
 
 private func makeClient(port: Int, mode: ConnectionMode = .telnet, host: String = "127.0.0.1",
-                        timeout: TimeInterval = 15) -> (BBSClient, Box<[BBSClientState]>, Box<[UInt8]>) {
+                        timeout: TimeInterval = testConnectTimeout) -> (BBSClient, Box<[BBSClientState]>, Box<[UInt8]>) {
     let client = BBSClient(host: host, port: port, mode: mode, columns: 80, rows: 25,
                            connectTimeout: timeout, queue: DispatchQueue(label: "test.client"))
     let states = Box<[BBSClientState]>([])
