@@ -150,6 +150,75 @@ AnsiView has a simple TheDraw style editor (in the app only; Quick Look stays a 
   bit codes and replace the eight codes a terminal would obey (such as ESC) with look alike
   characters. BinaryText and XBin store the nearest VGA colour for colours outside the palette.
 
+### Drawing tools (editor v2)
+
+The editor has a tool palette on the left. Every tool and control has a tooltip, and the
+status bar shows a hint for whatever is under the mouse (or the current tool). Every key below
+can be changed in **Tools > Editor Shortcuts...**, which lists all actions, shows two actions
+sharing a key in red, and resets to the defaults. Control keys work in every tool; plain letter
+keys (such as X) work outside the Text tool.
+
+- **Tools.** Draw (half block pixels, Control D), Select (Control S), Line (Control L), Box
+  (Control B), Fill (Control F), Text (Control T), Brush (Control R), Eyedropper (Control E).
+  The bar under the colours shows the current tool's options.
+- **Line.** Draw box lines that join by themselves: drag with the mouse, or use the arrows to
+  draw behind the cursor (TheDraw line mode). Styles: single, double, single across with double
+  down, double across with single down (Control K cycles them). Lines merge into boxes and
+  lines already drawn, making the right corner, tee and cross characters, including the mixed
+  single and double ones. Option-arrows (or the right button) erase segments and fix the
+  characters next to them.
+- **Box.** Drag a rectangle, a straight line or an ellipse. Styles: the four line styles
+  (overlapping boxes join), solid, half blocks, light / medium / dark shade or the brush
+  character. Rectangles can be filled (with spaces in the background colour, or the brush
+  character), get a TheDraw style drop shadow, and a title in the top edge. Ellipses are drawn
+  in half block pixels. A preview follows the mouse; nothing changes until you let go.
+- **Brush.** Paints the brush character in the current colours, or (Colour only) recolours
+  cells and keeps their characters; the right button uses the colours swapped. The Draw tool is
+  the half block brush.
+- **Character picker** (Control P, or the brush character button): all 256 CP437 characters.
+  Hovering shows the code, its hex value, the Unicode character and its name; click to choose,
+  Option-click or right-click to add or remove a favourite. Favourites and the 16 most recently
+  used characters are kept.
+- **Fill.** Click to flood fill the connected area (4-connected) that matches the clicked cell
+  by character and colour, character only, or colour only, changing the character, the colours
+  or both. **Tools > Replace...** changes a character and/or colours everywhere in the selection
+  (or the whole canvas).
+- **Colours.** Click a swatch for the foreground, Option-click or right-click for the
+  background; the Aa box shows the current pair. X swaps them. The Eyedropper takes a cell's
+  colours (Option-click also takes its character). Tools > Swap Colours in Selection swaps each
+  cell's colours.
+- **Insert and overwrite.** The Insert key (or Help on older Mac keyboards, or Tools > Insert
+  Mode) switches; the status bar shows INS or OVR and the cursor becomes a bar. Insert mode
+  shifts the rest of the row right as you type; Backspace and Delete close the gap. Control N /
+  Control Y insert or delete a line, Control Shift N / Control Shift Y a column.
+- **Moving a selection.** In the Select tool, drag from inside a selection to move it (the
+  pointer is a hand there); Option-drag moves a copy and leaves the original. Option-arrows
+  move a selection without the mouse (Shift-Option: 8 cells). While it floats, the arrows nudge
+  it, Return or a click outside places it, Escape puts it back where it was, and T makes its
+  spaces transparent. The place it came from is cleared to the background colour (transparent
+  on an upper layer) unless **Leave a copy when moving** is ticked. The whole move is one undo
+  step, and the block stays selected so it can be moved again. A pasted block is just cells once
+  placed and moves the same way.
+- **Mirror and rotate.** Control H mirrors the selection left to right, Control V top to
+  bottom, Control U turns it 180 degrees and Control O a quarter clockwise (when the turned block
+  fits the width). Box characters, half blocks, slashes, brackets and arrows are remapped so
+  the picture turns too (┌ becomes ┐, ▀ becomes ▄). **Crop to Selection** keeps only the selection.
+- **Layers.** The panel on the right adds, deletes, duplicates, reorders, hides, renames,
+  merges down and flattens layers. On an upper layer an unset cell (a plain space in grey on
+  black) is transparent. ANSI, BinaryText and XBin files always hold the visible layers
+  flattened; **Tools > Save Project...** writes an `.ansiproj` file (JSON, documented in
+  `docs/superpowers/plans/2026-10-30-ansiview-2.0-editor-tools.md`, ruling 11) that keeps them,
+  and **Tools > Open Project...** opens one.
+- **View.** Control ' shows a grid; Command = / Command - zoom (or pinch, or Control-scroll);
+  scroll, hold Space and drag (outside the Text tool), or drag with the middle button to pan.
+  Tools > Full Screen Editing; Tools > Retro Theme switches to DOS style blue chrome.
+- **What is kept.** Editing an opened file keeps its SAUCE title, author, group, comments
+  (with their indentation), font name, flags, date and TInfo3/4. Anything that cannot be kept
+  (an animation's earlier frames, an ANSiMation or other SAUCE file type, an XBin's embedded
+  font or palette, data hidden after the end of file marker) is listed when the file opens, and
+  saving tells you first about characters with no CP437 equivalent or colours a format cannot
+  hold.
+
 ### BBS terminal
 
 File > Connect to BBS... (Command Option B) opens the address book. Type an address in the
