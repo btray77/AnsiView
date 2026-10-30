@@ -120,4 +120,10 @@ struct ArtCollectionTests {
         let entry = try #require(archive.entries.first { $0.name == "one.ans" })
         #expect(throws: ZipError.self) { try archive.data(for: entry) }
     }
+
+    @Test func zipErrorsReadWell() {
+        #expect(ZipError.notAZip.localizedDescription == "This file is not a ZIP archive.")
+        #expect(ZipError.corrupt.localizedDescription == "This ZIP archive is damaged or uses a format AnsiView cannot read.")
+        #expect(ZipError.unsupportedMethod(6).localizedDescription == "This ZIP entry uses compression method 6, which AnsiView cannot read.")
+    }
 }

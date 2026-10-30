@@ -324,10 +324,15 @@ final class AnsiPlayerViewController: NSViewController {
         }
     }
 
+    /// Told when the zoom changes (a slideshow keeps it for the next piece).
+    var onZoomChange: ((ZoomMode) -> Void)?
+
     /// How this window sizes its art. Not saved: each window starts at Fit.
     var zoom: ZoomMode = .fit {
         didSet {
-            guard zoom != oldValue, isViewLoaded else { return }
+            guard zoom != oldValue else { return }
+            onZoomChange?(zoom)
+            guard isViewLoaded else { return }
             fitToWindow()
             showHUD("Zoom: \(zoom.label)")
         }

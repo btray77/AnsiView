@@ -1,10 +1,19 @@
 import Compression
 import Foundation
 
-public enum ZipError: Error, Equatable {
+public enum ZipError: LocalizedError, Equatable {
     case notAZip
     case corrupt
     case unsupportedMethod(UInt16)
+
+    public var errorDescription: String? {
+        switch self {
+        case .notAZip: return "This file is not a ZIP archive."
+        case .corrupt: return "This ZIP archive is damaged or uses a format AnsiView cannot read."
+        case .unsupportedMethod(let method):
+            return "This ZIP entry uses compression method \(method), which AnsiView cannot read."
+        }
+    }
 }
 
 /// Reads art packs: ZIP files whose entries are stored or DEFLATE compressed. Older PKZIP methods

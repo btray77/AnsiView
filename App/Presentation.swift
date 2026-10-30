@@ -64,9 +64,9 @@ final class PresentationController: NSObject {
         let controller = PresentationController(screen: origin.view.window?.screen, origin: origin.view.window)
         controller.slideshow = presented
         controller.originSlideshow = origin
-        origin.suspend()
         controller.install(presented)
-        if let from = origin.player { presented.player?.takeOver(from: from) }
+        presented.resume(from: origin.player)
+        origin.suspend()
         controller.start()
     }
 
@@ -122,10 +122,9 @@ final class PresentationController: NSObject {
         if let presented = single, let origin = originPlayer {
             origin.takeOver(from: presented)
         } else if let presented = slideshow, let origin = originSlideshow {
-            let from = presented.player
-            presented.suspend()
             origin.show(presented.index)
-            if let from { origin.player?.takeOver(from: from) }
+            origin.resume(from: presented.player)
+            presented.suspend()
         }
         player?.halt()
         slideshow?.suspend()

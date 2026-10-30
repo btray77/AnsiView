@@ -40,7 +40,8 @@ extension AnsiPlayerViewController {
         let name = fileURL?.lastPathComponent ?? source.title ?? "Untitled"
         var sheet: NSViewController?
         let host = NSHostingController(rootView: ArtInfoView(name: name, info: ArtInfo(source)) { [weak self] in
-            if let sheet { self?.dismiss(sheet) }
+            if let shown = sheet { self?.dismiss(shown) }
+            sheet = nil
         })
         sheet = host
         presentAsSheet(host)

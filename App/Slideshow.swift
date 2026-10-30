@@ -31,6 +31,12 @@ final class ArtCollection {
     /// Art entries in a pack that use a compression method AnsiView cannot read.
     let skipped: Int
     private let scopedURL: URL?
+    /// The folder or pack this collection reads (standardized).
+    private var rootURL: URL?
+    /// A collection whose security scope covers this one's folder, kept alive while this one is.
+    private var borrowed: ArtCollection?
+    /// Collections opened through an open panel, for borrowing their scope.
+    private static let scopedCollections = NSHashTable<ArtCollection>.weakObjects()
 
     private init(title: String, items: [Item], skipped: Int, scopedURL: URL?) {
         self.title = title
@@ -47,10 +53,21 @@ final class ArtCollection {
         let started = scoped && url.startAccessingSecurityScopedResource()
         let scope = started ? url : nil
         do {
-            if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-                return try folder(url, scope: scope)
+            let collection = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+                ? try folder(url, scope: scope) : try pack(url, scope: scope)
+            let root = url.standardizedFileURL
+            collection.rootURL = root
+            if scoped {
+                scopedCollections.add(collection)
+            } else {
+                // Readable only because another window holds the folder's scope (a gallery, say):
+                // keep that scope alive for as long as this collection needs it.
+                collection.borrowed = scopedCollections.allObjects.first { other in
+                    guard let otherRoot = other.rootURL else { return false }
+                    return root.path == otherRoot.path || root.path.hasPrefix(otherRoot.path + "/")
+                }
             }
-            return try pack(url, scope: scope)
+            return collection
         } catch {
             if started { url.stopAccessingSecurityScopedResource() }
             throw error
@@ -60,7 +77,8 @@ final class ArtCollection {
     /// The art files directly inside `url` (subfolders are not searched).
     private static func folder(_ url: URL, scope: URL?) throws -> ArtCollection {
         let contents = try FileManager.default.contentsOfDirectory(
-            at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+            at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
+            .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true }
         let byName = Dictionary(contents.map { ($0.lastPathComponent, $0) }, uniquingKeysWith: { a, _ in a })
         let items = ArtFiles.ordered(Array(byName.keys)).compactMap { name -> Item? in
             guard let file = byName[name] else { return nil }
@@ -80,8 +98,13 @@ final class ArtCollection {
     func artFile(at index: Int) -> ArtFile {
         guard items.indices.contains(index) else { return ArtFile(data: Data()) }
         let item = items[index]
-        let data = (try? item.load()) ?? Data()
-        return ArtFile(data: data, fileExtension: (item.name as NSString).pathExtension)
+        do {
+            return ArtFile(data: try item.load(), fileExtension: (item.name as NSString).pathExtension)
+        } catch {
+            // Say so on screen rather than showing an empty black piece.
+            let message = "Could not read \(item.name): \(error.localizedDescription)"
+            return ArtFile(data: Data(message.utf8), fileExtension: "ans")
+        }
     }
 }
 
@@ -95,12 +118,14 @@ final class SlideshowViewController: NSViewController {
     private(set) var player: AnsiPlayerViewController?
     /// Kept across pieces, so a zoom chosen on one applies to the next.
     var zoom: ZoomMode = .fit {
-        didSet { player?.zoom = zoom }
+        didSet { if player?.zoom != zoom { player?.zoom = zoom } }
     }
     /// Called after each move, with the new index (the window title follows it).
     var onMove: ((Int) -> Void)?
     private var dwellTimer: Timer?
     private var defaultsObserver: NSObjectProtocol?
+    /// True while presentation mode has taken over: no dwell, no auto advance.
+    private var isSuspended = false
 
     init(collection: ArtCollection, index: Int, presenting: Bool = false) {
         self.collection = collection
@@ -138,6 +163,7 @@ final class SlideshowViewController: NSViewController {
     }
 
     func show(_ newIndex: Int) {
+        isSuspended = false
         dwellTimer?.invalidate()
         dwellTimer = nil
         if let old = player {
@@ -152,6 +178,7 @@ final class SlideshowViewController: NSViewController {
         next.sound = makeSound?()
         next.handlesArrowKeys = false
         next.zoom = zoom
+        next.onZoomChange = { [weak self] zoom in self?.zoom = zoom }
         next.onFinished = { [weak self] in self?.scheduleAdvance() }
         addChild(next)
         next.view.frame = view.bounds
@@ -170,7 +197,7 @@ final class SlideshowViewController: NSViewController {
     private func scheduleAdvance() {
         dwellTimer?.invalidate()
         dwellTimer = nil
-        guard SlideshowSettings.autoAdvance, collection.items.count > 1 else { return }
+        guard !isSuspended, SlideshowSettings.autoAdvance, collection.items.count > 1 else { return }
         let timer = Timer(timeInterval: SlideshowSettings.dwellSeconds, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.dwellEnded() }
         }
@@ -188,13 +215,27 @@ final class SlideshowViewController: NSViewController {
 
     /// Turning Auto Advance on while a piece is resting starts its dwell; turning it off stops it.
     private func settingsChanged() {
-        guard let player else { return }
+        guard !isSuspended, let player else { return }
         if !SlideshowSettings.autoAdvance {
             dwellTimer?.invalidate()
             dwellTimer = nil
-        } else if dwellTimer == nil, !player.isPlaying, !player.isPaused, !player.isHolding {
+        } else if dwellTimer == nil, isResting {
             scheduleAdvance()
         }
+    }
+
+    /// The piece is on screen and nothing is playing, paused, held or dialing.
+    private var isResting: Bool {
+        guard let player else { return false }
+        return !player.isPlaying && !player.isPaused && !player.isHolding && !player.isConnecting
+    }
+
+    /// Continues `other`'s playback in this slideshow's player (presentation hand-off), then starts
+    /// the dwell if the piece is resting, as `onFinished` would have.
+    func resume(from other: AnsiPlayerViewController?) {
+        isSuspended = false
+        if let other { player?.takeOver(from: other) }
+        if isResting { scheduleAdvance() }
     }
 
     override func keyDown(with event: NSEvent) {
@@ -207,6 +248,7 @@ final class SlideshowViewController: NSViewController {
 
     /// Stops the dwell and the current playback (presentation mode took over).
     func suspend() {
+        isSuspended = true
         dwellTimer?.invalidate()
         dwellTimer = nil
         player?.halt()
@@ -247,7 +289,10 @@ final class SlideshowWindowController: NSWindowController, NSWindowDelegate {
         slideshow.onMove = { [weak self] _ in self?.updateTitle() }
         updateTitle()
         window.center()
-        window.setFrameAutosaveName("Slideshow")
+        // Each slideshow window steps down from the frontmost window instead of covering it.
+        if let key = NSApp.keyWindow {
+            window.setFrameTopLeftPoint(window.cascadeTopLeft(from: NSPoint(x: key.frame.minX, y: key.frame.maxY)))
+        }
     }
 
     @available(*, unavailable)
@@ -275,8 +320,8 @@ extension AnsiPlayerViewController {
     /// Slideshow > Start Slideshow from a document window: the file's folder, starting at this file.
     /// The sandbox normally hides the folder, so AnsiView asks for it with an open panel.
     @objc func startSlideshow(_ sender: Any?) {
-        if let slideshow = parent as? SlideshowViewController {
-            slideshow.move(by: 0)
+        if parent is SlideshowViewController {
+            NSSound.beep()
             return
         }
         guard let fileURL else { NSSound.beep(); return }
