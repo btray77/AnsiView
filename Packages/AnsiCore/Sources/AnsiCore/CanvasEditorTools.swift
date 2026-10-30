@@ -7,6 +7,7 @@ extension CanvasEditor {
     private func strokeOrPerform(_ name: String, _ change: (CanvasEditor) -> Void) {
         guard floating == nil else { return }
         if strokeStart != nil {
+            strokeName = name
             change(self)
             clampToCanvas()
             revision = -1

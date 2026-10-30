@@ -34,6 +34,7 @@ import Testing
         editor.strokeLine(from: (3, 0), to: (3, 2), style: .double)
         editor.endStroke()
         #expect(editor.canvas[3, 0].code == code("╗"))
+        #expect(editor.undoManager.undoActionName == "Line")
         editor.undoManager.undo()
         #expect(editor.canvas == EditCanvas(columns: 10, height: 6))
     }
@@ -64,6 +65,8 @@ import Testing
         editor.brush(x: 1, y: 1, colourOnly: false, useBackground: false)
         editor.brush(x: 2, y: 1, colourOnly: false, useBackground: true)
         editor.endStroke()
+        // A stroke's undo step is named after what it did.
+        #expect(editor.undoManager.undoActionName == "Brush")
         #expect(editor.canvas[1, 1] == AnsiCell(code: 0xB2, fg: Palette.vga[12], bg: Palette.vga[1]))
         // The right button swaps the colours (a bright colour becomes a dark background without iCE).
         #expect(editor.canvas[2, 1].fg == Palette.vga[1] && editor.canvas[2, 1].bg == Palette.vga[4])

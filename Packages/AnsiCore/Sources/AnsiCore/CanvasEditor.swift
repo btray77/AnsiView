@@ -43,6 +43,8 @@ public final class CanvasEditor {
     private var savedRevision = 0
     var selectionAnchor: (x: Int, y: Int)?
     var strokeStart: Snapshot?
+    /// The undo name of the stroke in progress (Draw, Brush, Line...).
+    var strokeName = "Draw"
 
     public init(canvas: EditCanvas = EditCanvas()) {
         self.canvas = canvas
@@ -444,6 +446,7 @@ public final class CanvasEditor {
     /// Starts a mouse stroke: everything painted until `endStroke` is one undo step.
     public func beginStroke() {
         strokeStart = snapshot
+        strokeName = "Draw"
     }
 
     public func endStroke() {
@@ -454,7 +457,7 @@ public final class CanvasEditor {
             return
         }
         revision = newRevision()
-        registerUndo(restoring: start, name: "Draw")
+        registerUndo(restoring: start, name: strokeName)
         changed()
     }
 

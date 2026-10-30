@@ -180,6 +180,7 @@ struct AnsiViewApp: App {
                 Button("Zoom Out") { send(#selector(EditorCanvasView.zoomOut(_:))) }
                     .keyboardShortcut("-")
             }
+            EditorToolCommands()
             CommandMenu("Playback") {
                 Button("Play / Pause") { send(#selector(AnsiCanvasView.togglePausePlayback(_:))) }
                     .keyboardShortcut(.space, modifiers: [])
