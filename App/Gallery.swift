@@ -33,18 +33,61 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource 
 
     deinit { queue.cancelAllOperations() }
 
+    /// Where the grid / list choice is remembered for gallery windows.
+    static let layoutKey = "galleryLayout"
+    private(set) var layout = BrowseLayout.stored(key: GalleryViewController.layoutKey)
+
+    /// The view of the pieces (for checks).
+    var collectionView: NSCollectionView { grid }
+
+    private static func makeLayout(_ layout: BrowseLayout) -> NSCollectionViewLayout {
+        switch layout {
+        case .grid:
+            let flow = NSCollectionViewFlowLayout()
+            flow.itemSize = itemSize
+            flow.minimumInteritemSpacing = 12
+            flow.minimumLineSpacing = 12
+            flow.sectionInset = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+            return flow
+        case .list:
+            // One column of rows as wide as the window.
+            let rows = NSCollectionViewGridLayout()
+            rows.maximumNumberOfColumns = 1
+            rows.minimumItemSize = NSSize(width: 200, height: GalleryListItem.height)
+            rows.maximumItemSize = NSSize(width: 0, height: GalleryListItem.height)
+            rows.minimumLineSpacing = 2
+            rows.margins = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+            return rows
+        }
+    }
+
+    /// Shows the pieces as a grid or a list, and remembers the choice for gallery windows.
+    func setLayout(_ new: BrowseLayout) {
+        let selected = grid.selectionIndexPaths
+        layout = new
+        new.store(key: Self.layoutKey)
+        grid.collectionViewLayout = Self.makeLayout(new)
+        grid.reloadData()
+        grid.selectionIndexPaths = selected
+        onLayoutChange?(new)
+    }
+
+    /// Told when the layout changes (the window's toggle follows).
+    var onLayoutChange: ((BrowseLayout) -> Void)?
+
+    @objc func layoutToggled(_ sender: NSSegmentedControl) {
+        setLayout(BrowseLayout(segment: sender.selectedSegment))
+    }
+
     override func loadView() {
-        let layout = NSCollectionViewFlowLayout()
-        layout.itemSize = Self.itemSize
-        layout.minimumInteritemSpacing = 12
-        layout.minimumLineSpacing = 12
-        layout.sectionInset = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
-        grid.collectionViewLayout = layout
+        grid.collectionViewLayout = Self.makeLayout(layout)
         grid.dataSource = self
         grid.isSelectable = true
         grid.allowsMultipleSelection = true
         grid.backgroundColors = [NSColor(white: 0.08, alpha: 1)]
         grid.register(GalleryItem.self, forItemWithIdentifier: GalleryItem.identifier)
+        grid.register(GalleryListItem.self, forItemWithIdentifier: GalleryListItem.identifier)
+        grid.toolTip = "Double click a piece (or press Return) to open it."
         grid.onOpen = { [weak self] index in self?.open(index) }
         let scroll = NSScrollView()
         scroll.documentView = grid
@@ -75,6 +118,7 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource 
                     self.onRendered?(index, onMain)
                     let path = IndexPath(item: index, section: 0)
                     if let item = self.grid.item(at: path) as? GalleryItem { item.thumbnail = self.thumbnails[index] }
+                    if let item = self.grid.item(at: path) as? GalleryListItem { item.thumbnail = self.thumbnails[index] }
                     remaining -= 1
                     if remaining == 0 { self.onAllRendered?() }
                 }
@@ -118,12 +162,80 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource 
 
     func collectionView(_ collectionView: NSCollectionView,
                         itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
-        let item = collectionView.makeItem(withIdentifier: GalleryItem.identifier, for: indexPath)
+        let id = layout == .grid ? GalleryItem.identifier : GalleryListItem.identifier
+        let item = collectionView.makeItem(withIdentifier: id, for: indexPath)
+        let name = collection.items[indexPath.item].name
         if let item = item as? GalleryItem {
-            item.name = collection.items[indexPath.item].name
+            item.name = name
+            item.thumbnail = thumbnails[indexPath.item]
+        }
+        if let item = item as? GalleryListItem {
+            item.name = name
+            item.detail = Self.kind(of: name)
             item.thumbnail = thumbnails[indexPath.item]
         }
         return item
+    }
+}
+
+extension GalleryViewController {
+    /// What a list row says under the name: the kind of file, from its extension.
+    static func kind(of name: String) -> String {
+        let ext = (name as NSString).pathExtension
+        return ext.isEmpty ? "Art" : ext.uppercased() + " art"
+    }
+}
+
+/// One row of a gallery in list layout: a small thumbnail, the name and the kind of file.
+final class GalleryListItem: NSCollectionViewItem {
+    static let identifier = NSUserInterfaceItemIdentifier("GalleryListItem")
+    static let height: CGFloat = 56
+    private let picture = NSImageView()
+    private let label = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+
+    var name = "" {
+        didSet { label.stringValue = name; view.setAccessibilityLabel(name) }
+    }
+    var detail = "" {
+        didSet { detailLabel.stringValue = detail }
+    }
+    var thumbnail: NSImage? {
+        didSet { picture.image = thumbnail }
+    }
+
+    override var isSelected: Bool {
+        didSet { view.layer?.backgroundColor = isSelected ? NSColor.selectedContentBackgroundColor.cgColor : nil }
+    }
+
+    override func loadView() {
+        let box = NSView()
+        box.wantsLayer = true
+        box.layer?.cornerRadius = 4
+        picture.imageScaling = .scaleProportionallyDown
+        label.textColor = .white
+        label.font = .systemFont(ofSize: 13)
+        label.lineBreakMode = .byTruncatingMiddle
+        detailLabel.textColor = NSColor(white: 0.65, alpha: 1)
+        detailLabel.font = .systemFont(ofSize: 11)
+        let text = NSStackView(views: [label, detailLabel])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 2
+        for view in [picture, text] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            box.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            picture.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 6),
+            picture.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            picture.widthAnchor.constraint(equalToConstant: 64),
+            picture.heightAnchor.constraint(equalToConstant: 48),
+            text.leadingAnchor.constraint(equalTo: picture.trailingAnchor, constant: 12),
+            text.trailingAnchor.constraint(lessThanOrEqualTo: box.trailingAnchor, constant: -8),
+            text.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+        ])
+        view = box
     }
 }
 
@@ -272,6 +384,19 @@ final class GalleryWindowController: NSWindowController, NSWindowDelegate {
         window.contentViewController = gallery
         window.setContentSize(NSSize(width: 900, height: 620))
         window.center()
+        // Grid / list toggle at the right of the title bar.
+        let toggle = BrowseLayout.makeToggle(selected: gallery.layout, target: gallery,
+                                             action: #selector(GalleryViewController.layoutToggled(_:)))
+        toggle.controlSize = .small
+        toggle.sizeToFit()
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: toggle.frame.width + 12, height: toggle.frame.height + 4))
+        toggle.frame.origin = NSPoint(x: 0, y: 2)
+        holder.addSubview(toggle)
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.view = holder
+        accessory.layoutAttribute = .trailing
+        window.addTitlebarAccessoryViewController(accessory)
+        gallery.onLayoutChange = { [weak toggle] layout in toggle?.selectedSegment = layout == .list ? 0 : 1 }
     }
 
     @available(*, unavailable)
