@@ -77,7 +77,7 @@ final class ExportOptionsView {
         settings.baud = Self.speeds[speed.indexOfSelectedItem]
         settings.fps = Self.frameRates[frameRate.indexOfSelectedItem]
         settings.palette = GIFPalette.allCases[palette.indexOfSelectedItem]
-        settings.limit = Self.limits[limit.indexOfSelectedItem].1
+        settings.limit = limit.isEnabled ? Self.limits[limit.indexOfSelectedItem].1 : .none
         return settings
     }
 

@@ -107,6 +107,8 @@ ansirender --convert text art.ans art.txt  # CP437 text, no escapes (utf8 for UT
 ansirender --convert html art.ans art.html # --inline for style attributes, --no-font for no embedded font
 ```
 
+ANSI conversions carry no width record, so art wider than 80 columns reopens in AnsiView at 80.
+
 Formats: `png jpeg webp gif awebp mp4 html ansi ansi256 text utf8`. Options: `--scale N`,
 `--baud N`, `--fps N`, `--palette auto|vga|system`, `--max-bytes N`, `--max-size WxH`.
 

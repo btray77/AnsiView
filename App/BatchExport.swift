@@ -50,10 +50,9 @@ enum BatchExporter {
                 results.append(BatchResult(name: item.name, output: url, error: nil, overLimit: outcome.overLimit,
                                            bytes: outcome.bytes))
             } catch AnsiExportError.cancelled {
-                try? FileManager.default.removeItem(at: url)
+                // Exports write to a temporary file first, so nothing at `url` needs removing.
                 break
             } catch {
-                try? FileManager.default.removeItem(at: url)
                 results.append(BatchResult(name: item.name, output: nil, error: error.localizedDescription,
                                            overLimit: false, bytes: 0))
             }

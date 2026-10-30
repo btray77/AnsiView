@@ -198,40 +198,56 @@ enum AnsiExporter {
         }
         let requested = ExportAttempt(scale: Double(max(1, settings.scale)), fps: animated ? settings.fps : 0)
 
+        // Every attempt is written to a temporary folder; only a finished file replaces `url`, so
+        // a failed or cancelled export leaves whatever was there before.
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AnsiView-export-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var number = 0
+        func attemptFile(_ attempt: ExportAttempt) throws -> (url: URL, bytes: Int) {
+            if isCancelled() { throw AnsiExportError.cancelled }
+            number += 1
+            let candidate = folder.appendingPathComponent("attempt\(number).\(settings.kind.fileExtension)")
+            try write(attempt, to: candidate)
+            return (candidate, fileSize(candidate))
+        }
+
         switch settings.limit {
         case .none:
-            try write(requested, to: url)
-            return ExportOutcome(bytes: fileSize(url), overLimit: false, attempt: requested)
+            let file = try attemptFile(requested)
+            try place(file.url, at: url)
+            return ExportOutcome(bytes: file.bytes, overLimit: false, attempt: requested)
         case .maxPixels(let width, let height):
             let scale = SizeFit.scale(artPixels: onePixelSize(still), requestedScale: settings.scale,
                                       maxPixels: CGSize(width: width, height: height))
             let attempt = ExportAttempt(scale: scale, fps: requested.fps)
-            try write(attempt, to: url)
-            return ExportOutcome(bytes: fileSize(url), overLimit: false, attempt: attempt)
+            let file = try attemptFile(attempt)
+            try place(file.url, at: url)
+            return ExportOutcome(bytes: file.bytes, overLimit: false, attempt: attempt)
         case .maxBytes(let target):
-            let folder = FileManager.default.temporaryDirectory
-                .appendingPathComponent("AnsiView-export-\(UUID().uuidString)", isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            defer { try? FileManager.default.removeItem(at: folder) }
             let ladder = SizeFit.ladder(requestedScale: settings.scale, fps: settings.fps, animated: animated)
             var attempt = ladder[0]
             var best: (url: URL, bytes: Int, attempt: ExportAttempt)?
-            var number = 0
             while true {
-                if isCancelled() { throw AnsiExportError.cancelled }
-                number += 1
-                let candidate = folder.appendingPathComponent("attempt\(number).\(settings.kind.fileExtension)")
-                try write(attempt, to: candidate)
-                let bytes = fileSize(candidate)
-                if best == nil || bytes < best!.bytes { best = (candidate, bytes, attempt) }
-                if bytes <= target { break }
-                guard let next = SizeFit.next(after: attempt, bytes: bytes, target: target, ladder: ladder) else { break }
+                let file = try attemptFile(attempt)
+                if best == nil || file.bytes < best!.bytes { best = (file.url, file.bytes, attempt) }
+                if file.bytes <= target { break }
+                guard let next = SizeFit.next(after: attempt, bytes: file.bytes, target: target, ladder: ladder) else { break }
                 attempt = next
             }
             guard let best else { throw AnsiExportError.encodeFailed("no result") }
-            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
-            try FileManager.default.copyItem(at: best.url, to: url)
+            try place(best.url, at: url)
             return ExportOutcome(bytes: best.bytes, overLimit: best.bytes > target, attempt: best.attempt)
+        }
+    }
+
+    /// Moves a finished file to `url`, replacing what is there only now that the new file exists.
+    private static func place(_ file: URL, at url: URL) throws {
+        if FileManager.default.fileExists(atPath: url.path) {
+            _ = try FileManager.default.replaceItemAt(url, withItemAt: file)
+        } else {
+            try FileManager.default.moveItem(at: file, to: url)
         }
     }
 

@@ -164,3 +164,23 @@ private let sampleRows: [[AnsiCell]] = [
     #expect(controls.count == 2)
     #expect(bytes[controls[1] + 3] & 1 == 1)
 }
+
+@Test func fullByteAlphabetDecodes() throws {
+    // 255 colours: 8 bit LZW codes, noise that fills the 4096 entry table many times.
+    let palette = (0..<255).map { RGB(r: UInt8($0), g: UInt8(255 - $0), b: UInt8($0 / 2)) }
+    var seed: UInt32 = 3
+    var pixels: [UInt8] = []
+    for _ in 0..<(300 * 200) {
+        seed = seed &* 1_103_515_245 &+ 12345
+        pixels.append(UInt8(seed >> 16 % 255))
+    }
+    let frame = IndexedImage(width: 300, height: 200, pixels: pixels.map { $0 % 255 })
+    var next = frame
+    next.pixels[12345] = (next.pixels[12345] + 1) % 255
+    var encoder = GIFEncoder(width: 300, height: 200, palette: palette)
+    encoder.add(frame, delayHundredths: 10)
+    encoder.add(next, delayHundredths: 10)
+    let source = try #require(CGImageSourceCreateWithData(encoder.finish() as CFData, nil))
+    #expect(rgba(try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))) == expand(frame, palette))
+    #expect(rgba(try #require(CGImageSourceCreateImageAtIndex(source, 1, nil))) == expand(next, palette))
+}
