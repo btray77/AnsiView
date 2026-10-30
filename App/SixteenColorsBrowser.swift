@@ -34,6 +34,8 @@ final class SixteenColorsClient {
     private var lane = RequestLane()
     private var waiters: [Int: CheckedContinuation<Void, Error>] = [:]
     private var pump: Task<Void, Never>?
+    /// True from a waiter's turn until its request has finished: one request at a time.
+    private var inFlight = false
     private var memory: [URL: Data] = [:]
     /// Pictures 16colo.rs does not have (HTTP 404), remembered for the session.
     private(set) var missing: Set<URL> = []
@@ -64,26 +66,44 @@ final class SixteenColorsClient {
         return request
     }
 
-    /// Waits in the lane until this request may start (by priority, at least a second after the
-    /// last one), then records it. A cancelled waiter (the user moved on, the row scrolled away)
-    /// leaves the lane, throws CancellationError and never reaches the network.
+    /// Waits in the lane until this request may start (best priority first, after the previous
+    /// request has finished, and at least a second after it started), then records the start.
+    /// The caller must call `finishTurn()` when its request is over (use `defer`). A cancelled
+    /// waiter (the user moved on, the row scrolled away) leaves the lane, throws CancellationError
+    /// and never reaches the network.
     private func waitForTurn(_ priority: RequestLane.Priority) async throws -> TimeInterval {
         try Task.checkCancellation()
-        let ticket = lane.enqueue(priority)
+        let ticket = TicketBox()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 if Task.isCancelled {
-                    lane.cancel(ticket)
                     continuation.resume(throwing: CancellationError())
                     return
                 }
-                waiters[ticket] = continuation
+                // Joins the lane and registers together, so the pump never meets a ticket without a waiter.
+                ticket.value = lane.enqueue(priority)
+                waiters[ticket.value] = continuation
                 startPump()
             }
         } onCancel: {
-            Task { @MainActor [weak self] in self?.leaveLane(ticket) }
+            Task { @MainActor [weak self] in self?.leaveLane(ticket.value) }
         }
-        return requestStarts.last ?? ProcessInfo.processInfo.systemUptime
+        // Cancelled between getting the turn and starting: give the turn back unused.
+        if Task.isCancelled {
+            finishTurn()
+            throw CancellationError()
+        }
+        // The start is stamped here, right before the request, not when the turn was given.
+        let now = ProcessInfo.processInfo.systemUptime
+        spacing.started(at: now)
+        requestStarts.append(now)
+        return now
+    }
+
+    /// The request that had the turn is over (finished, failed or never sent).
+    private func finishTurn() {
+        inFlight = false
+        if lane.count > 0 { startPump() }
     }
 
     private func leaveLane(_ ticket: Int) {
@@ -91,26 +111,23 @@ final class SixteenColorsClient {
         waiters.removeValue(forKey: ticket)?.resume(throwing: CancellationError())
     }
 
-    /// Lets waiters go one at a time, a second apart, best priority first.
+    /// Gives the next waiter its turn: when no request is in flight and a second has passed since
+    /// the last start. One turn per run; `finishTurn` starts the pump again.
     private func startPump() {
-        guard pump == nil else { return }
+        guard pump == nil, !inFlight else { return }
         pump = Task { @MainActor [weak self] in
-            while let self {
+            while let self, !self.inFlight {
                 let delay = self.spacing.delay(now: ProcessInfo.processInfo.systemUptime)
                 if delay > 0 {
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     continue
                 }
-                guard let ticket = self.lane.next() else {
-                    self.pump = nil
-                    return
-                }
+                guard let ticket = self.lane.next() else { break }
                 guard let waiter = self.waiters.removeValue(forKey: ticket) else { continue }
-                let now = ProcessInfo.processInfo.systemUptime
-                self.spacing.started(at: now)
-                self.requestStarts.append(now)
+                self.inFlight = true
                 waiter.resume()
             }
+            self?.pump = nil
         }
     }
 
@@ -130,6 +147,7 @@ final class SixteenColorsClient {
         let key = SixteenColors.apiCacheName(for: url)
         do {
             let start = try await waitForTurn(.user)
+            defer { finishTurn() }
             log.info("GET \(url.absoluteString, privacy: .public)")
             let (data, response) = try await session.data(for: request(url))
             requests.append((url, start, data.count))
@@ -142,7 +160,6 @@ final class SixteenColorsClient {
             // Offline: the copy saved last time, if there is one.
             if Self.describe(error).offline, let saved = cache.data(for: key) {
                 isOffline = true
-                memory[url] = saved
                 return saved
             }
             noteFailure(error)
@@ -157,6 +174,7 @@ final class SixteenColorsClient {
         if let saved = cache.data(for: key), let image = NSImage(data: saved) { return image }
         if missing.contains(url) { throw HTTPError(status: 404) }
         let start = try await waitForTurn(priority)
+        defer { finishTurn() }
         // Another load of the same picture may have finished while this one waited.
         if let saved = cache.data(for: key), let image = NSImage(data: saved) { return image }
         log.info("GET \(url.absoluteString, privacy: .public)")
@@ -214,8 +232,11 @@ final class SixteenColorsClient {
     private func download(_ url: URL, to destination: URL) async throws -> URL {
         if FileManager.default.fileExists(atPath: destination.path) { return destination }
         let start = try await waitForTurn(.user)
+        defer { finishTurn() }
         log.info("Download \(url.absoluteString, privacy: .public)")
         let (temporary, response) = try await session.download(for: request(url))
+        // Gone after a successful move; removed here when the answer was an error.
+        defer { try? FileManager.default.removeItem(at: temporary) }
         requests.append((url, start, (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0))
         try check(response)
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
@@ -249,10 +270,12 @@ final class SixteenColorsClient {
             return cache.url(for: key)
         }
         let start = try await waitForTurn(priority)
+        defer { finishTurn() }
         if cache.contains(key) { return cache.url(for: key) }
         log.info("Download \(url.absoluteString, privacy: .public)")
         do {
             let (temporary, response) = try await session.download(for: request(url))
+            defer { try? FileManager.default.removeItem(at: temporary) }
             requests.append((url, start, (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0))
             try check(response)
             isOffline = false
@@ -286,6 +309,11 @@ final class SixteenColorsClient {
         }
         return (error.localizedDescription, false)
     }
+}
+
+/// A waiter's lane ticket, set once it joins (read by its cancellation handler).
+private final class TicketBox: @unchecked Sendable {
+    var value = 0
 }
 
 /// File > Browse 16colo.rs: years, then a year's packs, then a pack's files, and a preview of the
@@ -341,11 +369,13 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     private var layoutToggle: NSSegmentedControl?
     /// The pack's file thumbnails as they arrive (by file index), and the loads still going.
     private var gridImages: [Int: NSImage] = [:]
-    private var gridLoads: [Int: Task<Void, Never>] = [:]
+    private var gridLoads: [Int: PictureLoad] = [:]
     private var gridFailed: Set<Int> = []
     /// Pack row pictures by pack name, the loads still going, and packs with no picture.
     private var packImages: [String: NSImage] = [:]
-    private var packLoads: [String: Task<Void, Never>] = [:]
+    private var packLoads: [String: PictureLoad] = [:]
+    /// Numbers each picture load, so a finished old load never clears a newer one's entry.
+    private var loadCount = 0
     private var packNoImage: Set<String> = []
 
     /// The grid of the pack's thumbnails (for checks).
@@ -553,6 +583,8 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         let year = years[index].year
         packs = []
         cancelPackLoads()
+        // Row pictures are on disk; memory keeps only the year on screen.
+        packImages = [:]
         showPack(nil)
         packTable.reloadData()
         begin("Loading packs from \(year)...")
@@ -783,7 +815,14 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         layoutToggle?.selectedSegment = new == .list ? 0 : 1
         listScroll?.isHidden = new == .grid
         gridScroll.isHidden = new == .list
-        if new == .grid { fileGrid.reloadData() } else { fileTable.reloadData() }
+        if new == .grid {
+            fileGrid.reloadData()
+        } else {
+            // Thumbnails nobody sees stop waiting.
+            for load in gridLoads.values { load.cancel() }
+            gridLoads = [:]
+            fileTable.reloadData()
+        }
         if let index = selectedFileIndex { select(index, in: fileTable) }
         if let index = selectedFileIndex {
             let path = IndexPath(item: index, section: 0)
@@ -815,34 +854,51 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     }
 
     private func gridPlaceholder(_ index: Int) -> String {
-        if files[index].thumbnail == nil || gridFailed.contains(index) {
-            return client.isOffline ? "Offline" : "No preview"
-        }
-        return "Loading..."
+        if files[index].thumbnail == nil || gridFailed.contains(index) { return "No preview" }
+        return client.isOffline ? "Offline" : "Loading..."
     }
 
     /// Fetches one grid thumbnail when its turn comes; scrolling it away cancels the wait.
     private func loadGridThumbnail(_ index: Int) {
-        guard gridLoads[index] == nil, !gridFailed.contains(index), let url = files[index].thumbnail else { return }
-        let pack = detail?.name
-        gridLoads[index] = Task { [weak self] in
-            guard let self else { return }
+        guard layout == .grid, gridLoads[index] == nil, !gridFailed.contains(index),
+              let url = files[index].thumbnail else { return }
+        loadCount += 1
+        let token = loadCount
+        let client = self.client
+        // The browser is not held while waiting: closing the window ends it (and cancels this).
+        gridLoads[index] = PictureLoad(token: token, task: Task { [weak self] in
+            var image: NSImage?
+            var failed = false
             do {
-                let image = try await self.client.image(url, priority: .grid)
-                guard pack == self.detail?.name else { return }
+                image = try await client.image(url, priority: .grid)
+            } catch {
+                failed = Self.isPermanent(error, url: url, client: client)
+            }
+            guard let self, self.gridLoads[index]?.token == token else { return }
+            self.gridLoads[index] = nil
+            if let image {
                 self.gridImages[index] = image
                 self.coverArrived(image, file: url)
-            } catch {
-                guard pack == self.detail?.name, !Self.isCancellation(error) else { return }
-                self.gridFailed.insert(index)
             }
-            guard pack == self.detail?.name else { return }
-            self.gridLoads[index] = nil
+            if failed { self.gridFailed.insert(index) }
             if let item = self.fileGrid.item(at: IndexPath(item: index, section: 0)) as? GalleryItem {
                 item.thumbnail = self.gridImages[index]
                 item.placeholder = self.gridPlaceholder(index)
             }
-        }
+        })
+    }
+
+    /// A picture that is not there (404) or not a picture: no point asking again this session.
+    /// Offline and other passing failures are not remembered.
+    static func isPermanent(_ error: Error, url: URL, client: SixteenColorsClient) -> Bool {
+        client.missing.contains(url) || error is SixteenColors.DecodeError
+    }
+
+    /// Stops every grid and pack row picture still waiting or loading.
+    private func cancelPictureLoads() {
+        for load in gridLoads.values { load.cancel() }
+        gridLoads = [:]
+        cancelPackLoads()
     }
 
     func collectionView(_ collectionView: NSCollectionView, didEndDisplaying item: NSCollectionViewItem,
@@ -877,7 +933,7 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     /// The grid fetched the open pack's cover: its row uses it too (no second request).
     private func coverArrived(_ image: NSImage, file url: URL) {
         guard let detail, detail.cover?.thumbnail == url, packImages[detail.name] == nil else { return }
-        packImages[detail.name] = image
+        packImages[detail.name] = Self.rowPicture(image)
         packLoads.removeValue(forKey: detail.name)?.cancel()
         if let row = packs.firstIndex(where: { $0.name == detail.name }) {
             packTable.reloadData(forRowIndexes: [row], columnIndexes: [0])
@@ -888,22 +944,47 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         guard packLoads[name] == nil, packImages[name] == nil, !packNoImage.contains(name),
               let url = packPictureURL(name) else { return }
         if let saved = client.cachedImage(url) {
-            packImages[name] = saved
+            packImages[name] = Self.rowPicture(saved)
             return
         }
-        packLoads[name] = Task { [weak self] in
-            guard let self else { return }
+        loadCount += 1
+        let token = loadCount
+        let client = self.client
+        packLoads[name] = PictureLoad(token: token, task: Task { [weak self] in
+            var image: NSImage?
+            var failed = false
             do {
-                self.packImages[name] = try await self.client.image(url, priority: .packRow)
+                image = try await client.image(url, priority: .packRow)
             } catch {
-                if Self.isCancellation(error) { return }
-                self.packNoImage.insert(name)
+                failed = Self.isPermanent(error, url: url, client: client)
             }
+            guard let self, self.packLoads[name]?.token == token else { return }
             self.packLoads[name] = nil
+            if let image { self.packImages[name] = Self.rowPicture(image) }
+            if failed { self.packNoImage.insert(name) }
             if let row = self.packs.firstIndex(where: { $0.name == name }) {
                 self.packTable.reloadData(forRowIndexes: [row], columnIndexes: [0])
             }
-        }
+        })
+    }
+
+    /// Pack row pictures are kept small: at most 80 pixels (twice the 40 point cell).
+    static func rowPicture(_ image: NSImage) -> NSImage {
+        let source = image.representations.first.map { NSSize(width: $0.pixelsWide, height: $0.pixelsHigh) } ?? image.size
+        guard source.width > 0, source.height > 0 else { return image }
+        let scale = min(1, 80 / max(source.width, source.height))
+        let width = max(1, Int((source.width * scale).rounded())), height = max(1, Int((source.height * scale).rounded()))
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8,
+                                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                         bytesPerRow: 0, bitsPerPixel: 0) else { return image }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: NSRect(x: 0, y: 0, width: width, height: height))
+        NSGraphicsContext.restoreGraphicsState()
+        let small = NSImage(size: NSSize(width: CGFloat(width) / 2, height: CGFloat(height) / 2))
+        small.addRepresentation(rep)
+        return small
     }
 
     private func cancelPackLoads() {
@@ -943,6 +1024,7 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     func cancelListing() {
         listing?.cancel()
         previewTask?.cancel()
+        cancelPictureLoads()
         preview.show(.empty(SixteenColorsPreview.emptyHint))
     }
 
@@ -1105,4 +1187,12 @@ final class PackRowCell: NSTableCellView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+}
+
+/// A picture load in flight, numbered so a finished old load never clears a newer entry.
+struct PictureLoad {
+    let token: Int
+    let task: Task<Void, Never>
+
+    func cancel() { task.cancel() }
 }

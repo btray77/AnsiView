@@ -39,9 +39,31 @@ struct DiskCacheTests {
         #expect(cache.totalBytes == 300)
         #expect(cache.data(for: "a") == bytes)  // a is now the most recently used
         try cache.store(bytes, for: "d")
-        #expect(!cache.contains("images/p/tn/b.png"))
-        #expect(cache.contains("a") && cache.contains("c") && cache.contains("d"))
-        #expect(cache.totalBytes == 300)
+        // Over the cap: least recently used go until 90% of the cap (270) is left, so eviction
+        // runs rarely: b, then c.
+        #expect(!cache.contains("images/p/tn/b.png") && !cache.contains("c"))
+        #expect(cache.contains("a") && cache.contains("d"))
+        #expect(cache.totalBytes == 200)
+    }
+
+    /// Review: eviction must not stat every file. Dates live in memory once scanned, so a file's
+    /// date changed behind the cache's back does not change the order.
+    @Test func usesRememberedDates() throws {
+        let folder = try temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cache = DiskCache(folder: folder, capacity: 250)
+        try cache.store(Data(repeating: 1, count: 100), for: "old")
+        Thread.sleep(forTimeInterval: 0.02)
+        try cache.store(Data(repeating: 1, count: 100), for: "new")
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)],
+                                              ofItemAtPath: cache.url(for: "new").path)
+        try cache.store(Data(repeating: 1, count: 100), for: "newest")
+        #expect(!cache.contains("old") && cache.contains("new") && cache.contains("newest"))
+    }
+
+    @Test func lowWaterMark() {
+        #expect(DiskCache.lowWater(capacity: 1000) == 900)
+        #expect(DiskCache.lowWater(capacity: DiskCache.defaultCapacity) == 188_743_680)
     }
 
     @Test func adoptMovesADownloadIn() throws {

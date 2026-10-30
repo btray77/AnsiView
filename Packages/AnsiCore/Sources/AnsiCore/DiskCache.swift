@@ -1,9 +1,11 @@
 import Foundation
 
 /// Files kept in a folder under a byte cap. When a new entry takes the total over the cap, the
-/// least recently used entries go first (a file's modification date is its last use: every hit
-/// sets it to now). The newest entry is never removed, even when it alone is over the cap.
-/// Top level folders named in `excluded` are neither counted nor removed. Use from one thread.
+/// least recently used entries go first until 90% of the cap is left, so eviction runs rarely.
+/// Last use is the file's modification date, read once when the cache is made and kept in
+/// memory after that (every hit sets both to now). The newest entry is never removed, even when
+/// it alone is over the cap. Top level folders named in `excluded` are neither counted nor
+/// removed. Use from one thread.
 public final class DiskCache {
     /// 200 MB.
     public static let defaultCapacity = 200 * 1024 * 1024
@@ -23,8 +25,11 @@ public final class DiskCache {
     public let folder: URL
     public let capacity: Int
     public let excluded: Set<String>
-    /// Bytes per key, scanned from disk when the cache is made.
-    private var sizes: [String: Int] = [:]
+    /// Bytes and last use per key, scanned from disk when the cache is made.
+    private var entries: [String: (bytes: Int, lastUsed: Date)] = [:]
+
+    /// What eviction leaves: 90% of the cap.
+    public static func lowWater(capacity: Int) -> Int { capacity / 10 * 9 }
 
     public private(set) var totalBytes = 0
 
@@ -62,7 +67,10 @@ public final class DiskCache {
 
     /// Marks an entry used now.
     public func touch(_ key: String) {
-        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url(for: key).path)
+        let now = Date()
+        let key = Self.normalized(key)
+        entries[key]?.lastUsed = now
+        try? FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: url(for: key).path)
     }
 
     @discardableResult
@@ -90,23 +98,20 @@ public final class DiskCache {
 
     private func added(_ key: String, bytes: Int) -> URL {
         let key = Self.normalized(key)
-        totalBytes += bytes - (sizes[key] ?? 0)
-        sizes[key] = bytes
+        totalBytes += bytes - (entries[key]?.bytes ?? 0)
+        entries[key] = (bytes, Date())
         touch(key)
         prune(keeping: key)
         return url(for: key)
     }
 
-    /// Removes least recently used entries until the total fits the cap.
+    /// When the total is over the cap, removes least recently used entries until 90% is left.
     public func prune(keeping: String?) {
         guard totalBytes > capacity else { return }
-        let entries = sizes.map { key, bytes in
-            let date = (try? url(for: key).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
-            return Entry(key: key, bytes: bytes, lastUsed: date ?? .distantPast)
-        }
-        for key in Self.evictions(entries, capacity: capacity, keeping: keeping.map(Self.normalized)) {
+        let list = entries.map { Entry(key: $0.key, bytes: $0.value.bytes, lastUsed: $0.value.lastUsed) }
+        for key in Self.evictions(list, capacity: Self.lowWater(capacity: capacity), keeping: keeping.map(Self.normalized)) {
             try? FileManager.default.removeItem(at: url(for: key))
-            totalBytes -= sizes.removeValue(forKey: key) ?? 0
+            totalBytes -= entries.removeValue(forKey: key)?.bytes ?? 0
         }
     }
 
@@ -124,7 +129,8 @@ public final class DiskCache {
 
     private func scan() {
         let base = folder.standardizedFileURL.resolvingSymlinksInPath().path
-        guard let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) else { return }
+        let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        guard let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys) else { return }
         for case let file as URL in walker {
             let path = file.standardizedFileURL.resolvingSymlinksInPath().path
             guard path.hasPrefix(base + "/") else { continue }
@@ -133,10 +139,10 @@ public final class DiskCache {
                 if key.split(separator: "/").count == 1 { walker.skipDescendants() }
                 continue
             }
-            let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            let values = try? file.resourceValues(forKeys: Set(keys))
             guard values?.isRegularFile == true else { continue }
             let bytes = values?.fileSize ?? 0
-            sizes[key] = bytes
+            entries[key] = (bytes, values?.contentModificationDate ?? .distantPast)
             totalBytes += bytes
         }
     }
