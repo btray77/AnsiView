@@ -59,8 +59,11 @@ solid block and shade characters, and box drawing that lines up without gaps.
   of the art in front): typing, F1 to F10 block character sets, half block drawing with the
   mouse, the 16 VGA colours with iCE, rectangle copy and paste, fill, undo, and saving as `.ans`,
   `.bin` or `.xb` with SAUCE. See [Drawing ANSI art](#drawing-ansi-art).
-- **Images to ANSI.** File > Import Image... (and `ansirender --from-image`) turns a picture into
-  half block, full block or shade character art in 16 colours or 24 bit colour, with dithering.
+- **Images to ANSI.** File > Import Image..., File > Open on a picture, or dropping a picture on
+  the Dock icon or an art window opens the import window: a live preview of the result next to
+  the original, presets (Auto, Photo, Logo, Pixel art, Line art), perceptual colour matching,
+  a best character per cell search, five dithering methods and picture adjustments. File >
+  Convert Images to ANSI... and `ansirender --from-image` convert whole folders.
 - **Open in an editor.** File > Open in Moebius and Open in PabloDraw hand the current file to
   [Moebius](https://github.com/blocktronics/moebius) or [PabloDraw](https://github.com/cwensley/pablodraw)
   when it is installed (AnsiView offers the download page when it is not).
@@ -109,7 +112,7 @@ AnsiView has a simple TheDraw style editor (in the app only; Quick Look stays a 
 - **File > New ANSI Art** (Option Command N) starts an 80 x 25 canvas. **File > Edit Art**
   (Shift Command D) opens a copy of the art in the front window (the final frame of an
   animation); the original file is never changed. **File > Import Image...** (Shift Command I)
-  converts a picture to block characters and opens it in the editor (see below).
+  converts a picture to block characters with a live preview and opens it in the editor (see below).
 - **Typing.** Type at the cursor in the current colours; arrows move, Return goes to the next
   row, Backspace erases left, Delete erases the cell or the selection, Home / End go to the row's
   ends. Moving below the last row adds rows (up to 1,500). Characters outside code page 437 are
@@ -190,18 +193,57 @@ thumbnail and Spotlight extensions have no network access.
 
 ### Importing images
 
-File > Import Image... reads anything macOS can (PNG, JPEG, HEIC, TIFF, GIF uses its first
-frame) and asks for: the width in columns; the characters (half blocks, two pixels per cell;
-full blocks; or shades, which mix two colours with ░ ▒ ▓ for extra tones); the colours (the 16
-VGA colours, or 24 bit truecolor); dithering (none, Floyd-Steinberg or ordered); iCE colours;
-and whether to correct for the tall 8x16 character cell (on keeps the picture's proportions).
-The result opens in the editor for touching up. Transparent areas become black. The same
+Open a picture any of these ways: File > Import Image... (Shift Command I), File > Open, drag it
+onto the Dock icon or onto an art window, or Open With > AnsiView in Finder (AnsiView is only an
+alternate app for images, never the default). Anything macOS reads works: PNG, JPEG, HEIC, TIFF,
+WebP, GIF (its first frame). Transparent areas become black.
+
+The import window shows the original and the result in one frame, updated after every change
+(on this Mac about 150 ms for an 80 column result, including a short wait while you drag a
+slider). Split puts a divider you drag between original and result; Side by side, Original and
+Result show them separately. Zoom (buttons, pinch, Command scroll) and pan (drag, scroll) move
+both images together. Crop lets you drag a rectangle on the picture to convert only that part.
+The status line gives the result's size in characters and bytes and how different it looks
+from the picture (lower is better, about 1 is barely visible). Every control has a tooltip, and
+the (?) buttons explain iCE colours, dithering, OKLab, the XBin palette, aspect correction and
+the score. Open in Editor opens the result for touching up; Save As... writes the file directly.
+The settings are remembered.
+
+- **Presets.** **Auto** (the default) converts with seven methods, scores each against the
+  picture and shows the best three as thumbnails to pick from. **Photo**: best character per
+  cell with light serpentine dithering. **Logo / flat art**: best character, no dithering.
+  **Pixel art**: one picture pixel per half block (the width becomes the picture's width), no
+  smoothing, no dithering. **Line art**: best character including line and box characters, auto
+  levels and extra contrast (it picks characters; it does not trace edges into connected box
+  drawing). Changing a method setting by hand switches to Custom.
+- **Characters.** *Best character per cell* tries the space, full block, the four half blocks
+  and the three shades (optionally also `■ ─ │ ┼ / \ _ ═ ║ ∙`) with every colour pair against
+  that part of the picture at the font's 8x16 resolution and keeps the closest. Also: half
+  blocks (two pixels per cell), full blocks, shades.
+- **Colours.** The 16 VGA colours (`.ans`); 16 colours fitted to the picture (median cut and
+  k-means in OKLab), saved as XBin (`.xb`, which carries its own palette); or 24 bit truecolor
+  (`.ans`). Colours are matched by how different they look (OKLab), not by raw RGB numbers, with
+  hue counting double so grey stays grey; light is mixed in linear RGB.
+- **Dithering.** None, Floyd-Steinberg, serpentine Floyd-Steinberg, Atkinson, Sierra Lite or
+  ordered (Bayer 4x4), with a strength from 0 to 100%.
+- **Picture.** Auto levels, brightness, contrast, saturation, gamma, sharpen, and Remove
+  background (flood fills the edge colour from the borders with a tolerance, for logos).
+
+File > Convert Images to ANSI... converts many pictures or folders of pictures with the current
+import settings into a folder you choose (names never overwrite existing files). The same
 conversion is on the command line:
 
 ```sh
 ansirender --from-image photo.jpg --width 80 -o photo.ans
-ansirender --from-image logo.png --width 40 --mode shade --dither ordered --no-ice > logo.ans
-# --mode half|full|shade  --palette vga|truecolor  --dither none|fs|ordered  --ice|--no-ice  --no-aspect
+ansirender --from-image photo.jpg --preset auto -o photo.ans   # prints the method Auto chose
+ansirender --from-image logo.png --palette xbin -o logo.xb     # 16 colours fitted to the picture
+ansirender --from-image sprite.png --preset pixel -o sprite.ans
+ansirender --from-image pictures/ more.png -o converted/       # folders and many files need -o <folder>
+cat photo.png | ansirender --from-image - > photo.ans          # - reads standard input
+# --preset auto|photo|logo|pixel|line  --mode glyph|half|full|shade  --palette vga|truecolor|xbin
+# --dither none|fs|serpentine|atkinson|sierra|ordered  --strength 0-100  --extended-glyphs
+# --ice|--no-ice  --no-aspect  --nearest  --levels  --brightness/--contrast/--saturation -100-100
+# --gamma 0.2-5  --sharpen 0-200  --remove-background [0-50]  --crop x,y,w,h
 ```
 
 ## Build from source
