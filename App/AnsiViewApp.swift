@@ -78,6 +78,12 @@ struct AnsiViewApp: App {
                 }
             }
             CommandGroup(after: .newItem) {
+                // The viewer's own New stays disabled (documents are read only); this is the editor's.
+                Button("New ANSI Art") { EditorWindowController.newArt() }
+                    .keyboardShortcut("n", modifiers: [.command, .option])
+                Button("Edit Art") { EditorWindowController.editFocusedArt() }
+                    .keyboardShortcut("d", modifiers: [.command, .shift])
+                Divider()
                 Button("Open Folder or Art Pack...") { GalleryWindowController.chooseAndOpen() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                 Button("Browse 16colo.rs...") {
@@ -136,6 +142,21 @@ struct AnsiViewApp: App {
                 Button("Presentation Mode") { send(#selector(AnsiPlayerViewController.presentArt(_:))) }
                     .keyboardShortcut("f", modifiers: [.command, .shift])
                 Divider()
+            }
+            CommandMenu("Art") {
+                Button("Fill Selection with Character") { send(#selector(EditorCanvasView.fillWithCharacter(_:))) }
+                    .keyboardShortcut("f", modifiers: [.command, .option])
+                Button("Fill Selection with Colour") { send(#selector(EditorCanvasView.fillWithColour(_:))) }
+                    .keyboardShortcut("f", modifiers: [.command, .option, .shift])
+                Divider()
+                Button("Toggle iCE Colours") { send(#selector(EditorCanvasView.toggleIceColors(_:))) }
+                Button("Canvas Size...") { send(#selector(EditorCanvasView.canvasSize(_:))) }
+                Button("Edit SAUCE...") { send(#selector(EditorCanvasView.editSauce(_:))) }
+                Divider()
+                Button("Zoom In") { send(#selector(EditorCanvasView.zoomIn(_:))) }
+                    .keyboardShortcut("=")
+                Button("Zoom Out") { send(#selector(EditorCanvasView.zoomOut(_:))) }
+                    .keyboardShortcut("-")
             }
             CommandMenu("Playback") {
                 Button("Play / Pause") { send(#selector(AnsiCanvasView.togglePausePlayback(_:))) }
