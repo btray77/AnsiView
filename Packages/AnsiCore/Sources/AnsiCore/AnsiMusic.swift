@@ -32,6 +32,20 @@ public enum MusicMode: Int, CaseIterable, Codable {
         }
     }
 
+    /// The dialing directory's names (BANSI is SyncTERM's name for ESC[| plus ESC[N).
+    public var entryLabel: String {
+        switch self {
+        case .off: return "Off"
+        case .pipe: return "ESC[| only"
+        case .bananaCom: return "BANSI: ESC[| and ESC[N"
+        case .all: return "All: also ESC[M"
+        }
+    }
+
+    /// The entry editor's hint for the music mode.
+    public static let entryHint = "BBS tunes after ESC[M, ESC[N or ESC[|. MF music holds the screen, MB does not. "
+        + "BANSI: ESC[| and ESC[N (SyncTERM). All adds ESC[M."
+
     /// Whether a CSI with no parameters and this final byte starts music.
     public func introduces(_ final: UInt8) -> Bool {
         switch final {

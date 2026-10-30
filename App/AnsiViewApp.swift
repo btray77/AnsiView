@@ -72,6 +72,10 @@ struct AnsiViewApp: App {
     private var holdFinalFrame = false
     @AppStorage(PlaybackSpeed.modemSoundsKey, store: PlaybackSpeed.defaults)
     private var modemSounds = false
+    @AppStorage(PlaybackSpeed.ansiMusicKey, store: PlaybackSpeed.defaults)
+    private var ansiMusic = true
+    @AppStorage(PlaybackSpeed.musicAtInstantKey, store: PlaybackSpeed.defaults)
+    private var musicAtInstant = true
     @AppStorage(SlideshowSettings.autoAdvanceKey, store: PlaybackSpeed.defaults)
     private var autoAdvance = false
     @AppStorage(SlideshowSettings.dwellKey, store: PlaybackSpeed.defaults)
@@ -232,6 +236,14 @@ struct AnsiViewApp: App {
                 Divider()
                 Toggle("Hold Final Frame", isOn: $holdFinalFrame)
                 Toggle("Modem Sounds", isOn: $modemSounds)
+                Divider()
+                Toggle("Play ANSI Music", isOn: $ansiMusic)
+                    .help("Plays the BASIC PLAY tunes some ANSI art carries, as BBS terminals did. Foreground music pauses the drawing until it ends.")
+                Toggle("Play Music at Instant Speed", isOn: $musicAtInstant)
+                    .help("At Instant speed the art appears at once; this plays its music once from the start.")
+                Button("Mute Music in This Window") { send(#selector(AnsiCanvasView.toggleMusicMute(_:))) }
+                    .help("Silences this window's ANSI music, or turns it back on. Other windows are not affected.")
+                Button("About ANSI Music...") { MusicPlaybackHelp.showAbout() }
             }
             // SwiftUI takes at most ten entries per builder, so the later menus share a Group.
             Group {
@@ -320,6 +332,7 @@ struct AnsiPlayerView: NSViewControllerRepresentable {
         let controller = AnsiPlayerViewController(source: source, speed: speed)
         controller.fileURL = fileURL
         controller.sound = ModemSoundPlayer()
+        controller.music = AudioMusicOutput()
         ViewerCopy.enable(controller)
         return controller
     }

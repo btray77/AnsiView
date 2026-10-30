@@ -15,6 +15,9 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         let player = AnsiPlayerViewController(source: ArtFile(data: data, fileExtension: url.pathExtension))
         // Left and Right keep moving between selected files in Quick Look; the scrub bar still works.
         player.handlesArrowKeys = false
+        // Never sound on the spacebar: no ANSI music output, so music neither plays nor holds the
+        // drawing, and art whose only movement is music stays static here (checked by a harness).
+        player.music = nil
         addChild(player)
         player.view.frame = view.bounds
         player.view.autoresizingMask = [.width, .height]

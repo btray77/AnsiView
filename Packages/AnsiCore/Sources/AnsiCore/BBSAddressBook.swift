@@ -102,6 +102,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     public var rloginServerUser: String
     /// RLogin: the client user field carries the Keychain password (Synchronet style RLogin).
     public var rloginClientIsPassword: Bool
+    /// Which escape sequences play ANSI music (SyncTERM's default: ESC[| and ESC[N).
+    public var musicMode: MusicMode
 
     public static let standardTerminalTypes = ["ANSI", "ANSI-BBS", "VT100"]
 
@@ -148,6 +150,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         rloginClientUser = ""
         rloginServerUser = ""
         rloginClientIsPassword = false
+        musicMode = .bananaCom
     }
 
     public var address: String {
@@ -172,6 +175,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         case modemSound, macros, autoLogin, loginScript, busyText, terminalType, iceColors
         case sshKeyBookmark, sshKeyName, sshTrustNewHostKey, webSocketPath, webSocketSecure, webSocketSubprotocols
         case webSocketTelnet, rloginClientUser, rloginServerUser, rloginClientIsPassword
+        case musicMode
     }
 
     /// Missing or out of range fields fall back to the defaults, so older (plan 7) or hand edited books load.
@@ -214,6 +218,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         if let value = try? c.decode(String.self, forKey: .rloginClientUser) { rloginClientUser = value }
         if let value = try? c.decode(String.self, forKey: .rloginServerUser) { rloginServerUser = value }
         if let value = try? c.decode(Bool.self, forKey: .rloginClientIsPassword) { rloginClientIsPassword = value }
+        if let value = try? c.decode(MusicMode.self, forKey: .musicMode) { musicMode = value }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -254,6 +259,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         try c.encode(rloginClientUser, forKey: .rloginClientUser)
         try c.encode(rloginServerUser, forKey: .rloginServerUser)
         try c.encode(rloginClientIsPassword, forKey: .rloginClientIsPassword)
+        try c.encode(musicMode, forKey: .musicMode)
     }
 
     private static func clampSize(_ value: Int) -> Int {

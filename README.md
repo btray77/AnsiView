@@ -81,8 +81,9 @@ solid block and shade characters, and box drawing that lines up without gaps.
   a best character per cell search, five dithering methods and picture adjustments. File >
   Convert Images to ANSI... and `ansirender --from-image` convert whole folders.
 - **ANSI music.** Window > ANSI Music Editor composes BBS "ANSI music" (BASIC PLAY strings
-  sent after `ESC[M`, `ESC[N` or `ESC[|`) with a piano roll and plays it like a PC speaker. The
-  viewer no longer prints the PLAY text of music in art files. See [ANSI music](#ansi-music).
+  sent after `ESC[M`, `ESC[N` or `ESC[|`) with a piano roll and plays it like a PC speaker. Art
+  files and BBSes that carry music play it as they draw (foreground music pauses the drawing,
+  as the old terminals did), and MP4 exports keep it as a sound track. See [ANSI music](#ansi-music).
 - **Open in an editor.** File > Open in Moebius and Open in PabloDraw hand the current file to
   [Moebius](https://github.com/blocktronics/moebius) or [PabloDraw](https://github.com/cwensley/pablodraw)
   when it is installed (AnsiView offers the download page when it is not).
@@ -543,10 +544,34 @@ ansirender --music art.ans                    # sequences with byte offsets and 
 ansirender --music-wav art.ans music.wav      # --soft for a gentler tone, --mode off|pipe|bananacom|all
 ansirender --music-midi art.ans music.mid
 ansirender --music-wav --play "T120 O3 L8 C D E F G4" tune.wav
+ansirender --animate mp4 2400 2 art.ans art.mp4 --with-music   # MP4 with the music as its sound track
 ```
 
-Playing music while a file draws at modem speed, and in the BBS terminal, is the next step: the
-engine reports each sequence's byte offset for that (see the plan's integration section).
+#### Playback in viewer windows, the terminal and exports
+
+- **Viewer.** A tune plays when the playback cursor passes it, at any speed. Foreground music
+  (`MF`, the default) pauses the drawing until it ends; background music (`MB`) plays while the art
+  keeps drawing. Tunes share one speaker, so each starts when the one before has finished. Art whose
+  only movement is music replays at modem speed like an animation, with a scrub bar. At Instant
+  speed the art appears at once and its music plays once from the start. Pause pauses the music;
+  seeking, Replay, Skip to End and closing the window stop it; a tune still sounding when the art
+  finishes on its own plays out. A small "♪ ANSI music" badge shows while music plays (click it
+  to mute the window).
+- **Playback menu.** Play ANSI Music (on by default, shared with every window), Play Music at
+  Instant Speed (on by default), Mute Music in This Window (not remembered), About ANSI Music...
+- **Quick Look** never plays sound: its preview has no music output, so music neither sounds nor
+  pauses the drawing there, and art whose only movement is music stays a still picture.
+- **Terminal.** Each dialing directory entry has an "ANSI music" choice: Off, `ESC[|` only, BANSI
+  (`ESC[|` and `ESC[N`, SyncTERM's default and AnsiView's), or All (also `ESC[M`, which then is no
+  longer Delete Line). A BBS can switch with `ESC[=0M`, `ESC[=1M` or `ESC[=2M` unless the entry says
+  Off. Music plays when its bytes reach the screen at the simulated speed; foreground music holds
+  the rest of the screen until it ends. Captures keep the music bytes.
+- **Export.** File > Export Animation adds an "Include ANSI music" checkbox for art with music
+  (on by default): MP4 gets an AAC sound track timed with the frames, and the frames hold during
+  foreground music as in the viewer. GIF and WebP have no sound; the panel says so.
+
+The timing rules and the reasons behind them are in
+`docs/superpowers/plans/2026-10-30-ansiview-2.0-music-playback.md`.
 
 ## Build from source
 
