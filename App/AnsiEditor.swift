@@ -29,6 +29,7 @@ final class EditorCanvasView: NSView {
     init(editor: CanvasEditor) {
         self.editor = editor
         super.init(frame: .zero)
+        registerForDraggedTypes([.fileURL])  // image drops open the import window (App/ImageImport.swift)
         refresh()
     }
 

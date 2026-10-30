@@ -46,7 +46,7 @@ private func options(_ columns: Int, _ mode: ImageToAnsi.Mode = .halfBlocks, pal
         let o = ImageToAnsi.Options()
         #expect(o.columns == 80 && o.mode == .glyphs && o.palette == .vga16 && o.dither == .serpentine)
         #expect(o.iceColors && o.aspectCorrection && !o.extendedGlyphs && !o.nearestNeighbour && o.crop == nil)
-        #expect(o.ditherStrength == 0.5 && o.adjustments == ImageAdjustments())
+        #expect(o.ditherStrength == 1 && o.adjustments == ImageAdjustments())
     }
 
     @Test func halfBlocksExactColours() {

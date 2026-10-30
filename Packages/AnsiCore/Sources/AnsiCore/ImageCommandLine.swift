@@ -93,9 +93,11 @@ public struct ImageCommand {
                     if let tolerance { $0.adjustments.backgroundTolerance = tolerance }
                 }
             case "--crop":
-                let parts = try value(argument).split(separator: ",").compactMap { Double($0) }
-                guard parts.count == 4, parts[2] > 0, parts[3] > 0 else { throw fail("--crop takes x,y,width,height") }
-                let rect = CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
+                let parts = try value(argument).split(separator: ",", omittingEmptySubsequences: false).map { Double($0) }
+                guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3], w > 0, h > 0 else {
+                    throw fail("--crop takes x,y,width,height")
+                }
+                let rect = CGRect(x: x, y: y, width: w, height: h)
                 c.changes.append { $0.crop = rect }
             case "-o", "--output":
                 c.output = try value(argument)

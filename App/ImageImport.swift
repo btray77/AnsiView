@@ -142,3 +142,16 @@ enum ImageBatchConverter {
         }
     }
 }
+
+/// Dropping an image file on an editor opens the import window (image import ruling 11).
+extension EditorCanvasView {
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        ImageImportRootView.imageURL(from: sender) == nil ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let url = ImageImportRootView.imageURL(from: sender) else { return false }
+        ImageImportWindowController.open(url: url)
+        return true
+    }
+}

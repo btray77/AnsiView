@@ -58,11 +58,12 @@ extension ImageToAnsi {
     static let bayer: [[Int]] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
 
     /// Ordered dithering: a 4x4 Bayer threshold added in gamma space before quantising.
-    static func applyOrdered(_ grid: inout PixelGrid, strength: Float) {
+    /// `cellWidth` x `cellHeight` samples share one threshold (1 x 1: every sample has its own).
+    static func applyOrdered(_ grid: inout PixelGrid, strength: Float, cellWidth: Int = 1, cellHeight: Int = 1) {
         guard strength > 0 else { return }
         for y in 0..<grid.height {
             for x in 0..<grid.width {
-                let bias = (Float(bayer[y % 4][x % 4]) / 16 - 0.5) * 0.25 * strength
+                let bias = (Float(bayer[(y / cellHeight) % 4][(x / cellWidth) % 4]) / 16 - 0.5) * 0.25 * strength
                 grid.srgb[y * grid.width + x] += SIMD3(repeating: bias)
             }
         }

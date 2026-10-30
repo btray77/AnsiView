@@ -26,6 +26,8 @@ public struct AnsiScreen {
     public var title: String?
     public var sauce: Sauce?
     public var font: BitmapFont = .vga
+    /// An XBin file's own 16 colour palette (nil for VGA), kept so editing and saving keeps it.
+    public var palette: [RGB]?
 
     public var hasBlink: Bool { rows.contains { $0.contains { $0.blink } } }
 

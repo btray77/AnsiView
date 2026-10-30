@@ -69,7 +69,7 @@ public enum ImageToAnsi {
         public var palette = PaletteChoice.vga16
         public var dither = Dither.serpentine
         /// 0 to 1: how much of the error dithering spreads (or how strong the ordered pattern is).
-        public var ditherStrength: Float = 0.5
+        public var ditherStrength: Float = 1
         public var iceColors = true
         /// Compensates for the 8x16 character cell so the picture keeps its proportions.
         public var aspectCorrection = true
@@ -95,6 +95,16 @@ public enum ImageToAnsi {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               CGImageSourceGetCount(source) > 0,
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw ImportError.unreadable }
+        // A photo taken in portrait is stored sideways with an EXIF orientation: draw it upright.
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        if let orientation = properties?[kCGImagePropertyOrientation] as? Int, orientation != 1,
+           let upright = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+               kCGImageSourceCreateThumbnailFromImageAlways: true,
+               kCGImageSourceCreateThumbnailWithTransform: true,
+               kCGImageSourceThumbnailMaxPixelSize: max(image.width, image.height),
+           ] as CFDictionary) {
+            return upright
+        }
         return image
     }
 
@@ -174,7 +184,11 @@ public enum ImageToAnsi {
         if options.palette == .trueColor {
             return trueColor(grid: grid, canvas: canvas, geometry: g, mode: options.mode, search: search, cancel: cancel)
         }
-        if options.dither == .ordered { applyOrdered(&grid, strength: strength) }
+        if options.dither == .ordered {
+            // Glyph search sees whole cells, so the threshold pattern steps per cell there.
+            if let search { applyOrdered(&grid, strength: strength, cellWidth: search.subWidth, cellHeight: search.subHeight) }
+            else { applyOrdered(&grid, strength: strength) }
+        }
         var values = grid.linear
         let paletteLinear = palette.map { OKLab.linear($0) }
         let paletteLab = palette.map { OKLab.match(linear: OKLab.linear($0)) }

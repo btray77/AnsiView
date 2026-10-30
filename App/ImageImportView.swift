@@ -51,6 +51,9 @@ final class ImageComparisonView: NSView {
     /// The whole picture, shown while choosing a crop.
     var fullOriginal: CGImage? { didSet { needsDisplay = true } }
     var result: CGImage? { didSet { needsDisplay = true } }
+    /// The result's full size in pixels (8x16 per cell). Larger than `result` when the renderer
+    /// could draw only the first rows of a huge canvas; those rows are drawn at the top.
+    var resultSize: CGSize? { didSet { needsDisplay = true } }
     var mode = Mode.split { didSet { needsDisplay = true } }
     var smoothOriginal = true { didSet { needsDisplay = true } }
     /// 0 to 1 across the frame: original on the left of it, result on the right.
@@ -105,6 +108,7 @@ final class ImageComparisonView: NSView {
     /// picture's, rounded to whole cells), else the original's.
     private var aspect: CGSize {
         if cropping, let full = fullOriginal { return CGSize(width: full.width, height: full.height) }
+        if let resultSize { return resultSize }
         if let result { return CGSize(width: result.width, height: result.height) }
         if let original { return CGSize(width: original.width, height: original.height) }
         return CGSize(width: 4, height: 3)
@@ -124,7 +128,12 @@ final class ImageComparisonView: NSView {
             context.saveGState()
             context.clip(to: clip ?? panel)
             context.interpolationQuality = smooth ? .high : .none
-            context.draw(image, in: frame(in: panel, aspect: aspect))
+            var f = frame(in: panel, aspect: aspect)
+            if image === result, let full = resultSize, full.height > CGFloat(image.height) {
+                let shown = f.height * CGFloat(image.height) / full.height
+                f = CGRect(x: f.minX, y: f.maxY - shown, width: f.width, height: shown)
+            }
+            context.draw(image, in: f)
             context.restoreGState()
         }
         switch mode {
@@ -493,7 +502,7 @@ final class ImageImportViewController: NSViewController {
             [label("Brightness:"), slider(brightnessSlider, "brightness", range: -100...100, format: signed), NSGridCell.emptyContentView],
             [label("Contrast:"), slider(contrastSlider, "contrast", range: -100...100, format: signed), NSGridCell.emptyContentView],
             [label("Saturation:"), slider(saturationSlider, "saturation", range: -100...100, format: signed), NSGridCell.emptyContentView],
-            [label("Gamma:"), slider(gammaSlider, "gamma", range: 0.2...3, format: { String(format: "%.2f", $0) }), NSGridCell.emptyContentView],
+            [label("Gamma:"), slider(gammaSlider, "gamma", range: 0.2...5, format: { String(format: "%.2f", $0) }), NSGridCell.emptyContentView],
             [label("Sharpen:"), slider(sharpenSlider, "sharpen", range: 0...200, format: percent), NSGridCell.emptyContentView],
             [NSGridCell.emptyContentView, backgroundBox, NSGridCell.emptyContentView],
             [label("Tolerance:"), slider(toleranceSlider, "tolerance", range: 0...50, format: percent), NSGridCell.emptyContentView],
@@ -727,6 +736,7 @@ final class ImageImportViewController: NSViewController {
 
     private func showSelected() {
         guard let c = currentCandidate else { return }
+        comparison.resultSize = CGSize(width: c.canvas.columns * c.canvas.font.width, height: c.canvas.height * c.canvas.font.height)
         comparison.result = c.image
         if preset == .auto {
             // Show what Auto chose in the (disabled) method controls.
@@ -741,10 +751,12 @@ final class ImageImportViewController: NSViewController {
             options = kept
         }
         let format = c.options.palette.saveFormat
+        let shownRows = c.image.height / max(1, c.canvas.font.height)
+        let partial = shownRows < c.canvas.height ? "  |  preview shows the first \(shownRows) rows" : ""
         status.stringValue = String(format: "%d x %d characters, %@ bytes (.%@)  |  difference %.1f  |  preview %.0f ms",
                                     c.canvas.columns, c.canvas.height,
                                     NumberFormatter.localizedString(from: NSNumber(value: c.bytes), number: .decimal),
-                                    format.fileExtension, c.score.deltaE, lastLatencyMilliseconds)
+                                    format.fileExtension, c.score.deltaE, lastLatencyMilliseconds) + partial
     }
 
     @objc private func pickCandidate(_ sender: NSButton) {
@@ -824,7 +836,11 @@ final class ImageImportViewController: NSViewController {
         panel.allowedContentTypes = [UTType(filenameExtension: format.fileExtension) ?? .data]
         panel.nameFieldStringValue = name + "." + format.fileExtension
         panel.beginSheetModal(for: window) { [weak self] response in
-            guard response == .OK, let url = panel.url else { return }
+            guard response == .OK, var url = panel.url else { return }
+            // The palette choice decides the format; the name must not claim another one.
+            if url.pathExtension.lowercased() != format.fileExtension {
+                url = url.deletingPathExtension().appendingPathExtension(format.fileExtension)
+            }
             do {
                 try ArtWriter.data(canvas, format: format).write(to: url)
                 self?.remember()
@@ -857,8 +873,11 @@ final class ImageImportRootView: NSView {
         dirtyRect.fill()
     }
 
-    static func imageURL(from info: NSDraggingInfo) -> URL? {
-        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+    static func imageURL(from info: NSDraggingInfo) -> URL? { imageURL(from: info.draggingPasteboard) }
+
+    /// The first image file on `pasteboard`, if any.
+    static func imageURL(from pasteboard: NSPasteboard) -> URL? {
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
         return urls?.first(where: ImageBatch.isImage)
     }
 

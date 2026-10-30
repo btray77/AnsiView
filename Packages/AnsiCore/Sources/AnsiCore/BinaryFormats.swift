@@ -46,6 +46,7 @@ public enum BinaryFormats {
         if pairs.count < cellCount * 2 { pairs += [UInt8](repeating: 0, count: cellCount * 2 - pairs.count) }
         var result = screen(pairs: pairs[...], columns: max(1, width), palette: palette, ice: ice)
         if let font { result.font = font }
+        if flags & 0x01 != 0, palette != Palette.vga { result.palette = palette }
         return (result, font)
     }
 

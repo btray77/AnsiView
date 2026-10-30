@@ -102,6 +102,7 @@ public struct EditCanvas: Equatable {
         }
         if rows.isEmpty { rows = [Array(repeating: AnsiCell(), count: width)] }
         self.iceColors = iceColors || rows.contains { $0.contains { Self.isBrightVGA($0.bg) } }
+        if let palette = screen.palette, palette.count == 16 { self.palette = palette }
         if let sauce = screen.sauce {
             title = sauce.title
             author = sauce.author

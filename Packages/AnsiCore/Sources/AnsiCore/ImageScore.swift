@@ -18,18 +18,41 @@ public enum ImageScore {
         public var description: String { String(format: "dE %.2f, SSIM %.3f", deltaE, ssim) }
     }
 
+    /// The reference picture is sampled at most this many pixels (then box reduced in linear light).
+    static let referencePixelBudget = 4_000_000
+
     /// Scores `canvas` against `source` as `options` prepared it (crop and adjustments applied).
+    /// The canvas is not rendered: each cell's 2x4 reduced samples come straight from the font's
+    /// coverage, the same values a render reduced by 4x4 gives, so any canvas size is scored
+    /// whole in bounded memory.
     public static func score(_ canvas: EditCanvas, source: CGImage, options: ImageToAnsi.Options) -> Result {
-        let screen = canvas.screen(trimmed: false)
-        guard let rendered = AnsiRenderer.render(screen, options: RenderOptions(font: canvas.font, scale: 1)) else {
-            return Result(deltaE: .infinity, ssim: 0)
+        let font = canvas.font
+        let bw = max(1, font.width / 2), bh = max(1, font.height / 4)
+        let w = canvas.columns * 2, h = canvas.height * 4
+        var coverage: [UInt8: [Float]] = [:]
+        func blocks(_ code: UInt8) -> [Float] {
+            if let known = coverage[code] { return known }
+            let pixels = font.pixels(for: code)
+            var out = [Float](repeating: 0, count: 8)
+            for y in 0..<(bh * 4) { for x in 0..<(bw * 2) where pixels[y * font.width + x] { out[(y / bh) * 2 + x / bw] += 1 } }
+            out = out.map { $0 / Float(bw * bh) }
+            coverage[code] = out
+            return out
         }
-        var reference = PixelGrid.sample(source, width: rendered.image.width, height: rendered.image.height,
+        var drawn = [SIMD3<Float>](repeating: .zero, count: w * h)
+        for (y, row) in canvas.rows.enumerated() {
+            for (x, cell) in row.enumerated() where x < canvas.columns {
+                let fg = OKLab.linear(cell.fg), bg = OKLab.linear(cell.bg)
+                let k = blocks(cell.code)
+                for i in 0..<8 { drawn[(y * 4 + i / 2) * w + x * 2 + i % 2] = fg * k[i] + bg * (1 - k[i]) }
+            }
+        }
+        var factor = 4
+        while factor > 1, w * factor * h * factor > referencePixelBudget { factor /= 2 }
+        var reference = PixelGrid.sample(source, width: w * factor, height: h * factor,
                                          crop: options.crop, nearest: options.nearestNeighbour)
         reference.apply(options.adjustments)
-        let drawn = PixelGrid.sample(rendered.image, width: rendered.image.width, height: rendered.image.height,
-                                     crop: nil, nearest: true)
-        return compare(drawn, reference)
+        return compare(Reduced(width: w, height: h, values: drawn), reduced(reference, by: factor))
     }
 
     /// Compares two images of any size at the first one's size.
@@ -41,7 +64,16 @@ public enum ImageScore {
     }
 
     static func compare(_ a: PixelGrid, _ b: PixelGrid) -> Result {
-        let ra = reduced(a), rb = reduced(b)
+        compare(reduced(a, by: 4), reduced(b, by: 4))
+    }
+
+    struct Reduced {
+        let width: Int
+        let height: Int
+        let values: [SIMD3<Float>]
+    }
+
+    static func compare(_ ra: Reduced, _ rb: Reduced) -> Result {
         let labA = ra.values.map { OKLab.lab(linear: $0) }, labB = rb.values.map { OKLab.lab(linear: $0) }
         var sum = 0.0
         for i in labA.indices {
@@ -52,20 +84,21 @@ public enum ImageScore {
         return Result(deltaE: deltaE, ssim: ssim(labA.map(\.x), labB.map(\.x), width: ra.width, height: ra.height))
     }
 
-    /// 4x4 box averages in linear light (partial blocks at the edges average what they have).
-    static func reduced(_ grid: PixelGrid) -> (width: Int, height: Int, values: [SIMD3<Float>]) {
+    /// `factor` x `factor` box averages in linear light (partial blocks at the edges average what they have).
+    static func reduced(_ grid: PixelGrid, by factor: Int) -> Reduced {
+        let f = max(1, factor)
         let linear = grid.linear
-        let w = max(1, (grid.width + 3) / 4), h = max(1, (grid.height + 3) / 4)
+        let w = max(1, (grid.width + f - 1) / f), h = max(1, (grid.height + f - 1) / f)
         var out = [SIMD3<Float>](repeating: .zero, count: w * h)
         var counts = [Float](repeating: 0, count: w * h)
         for y in 0..<grid.height {
             for x in 0..<grid.width {
-                out[(y / 4) * w + x / 4] += linear[y * grid.width + x]
-                counts[(y / 4) * w + x / 4] += 1
+                out[(y / f) * w + x / f] += linear[y * grid.width + x]
+                counts[(y / f) * w + x / f] += 1
             }
         }
         for i in out.indices where counts[i] > 0 { out[i] /= counts[i] }
-        return (w, h, out)
+        return Reduced(width: w, height: h, values: out)
     }
 
     /// Mean SSIM over 8x8 blocks (one block when the image is smaller), lightness 0 to 1.
