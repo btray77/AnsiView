@@ -18,5 +18,5 @@ for appex in ~/Applications/AnsiView.app/Contents/PlugIns/*.appex; do pluginkit 
 qlmanage -r >/dev/null 2>&1
 qlmanage -r cache >/dev/null 2>&1
 
-for id in Preview Thumbnail; do pluginkit -m -i com.traynham.AnsiView.$id; done
+for id in Preview Thumbnail Spotlight; do pluginkit -m -i com.traynham.AnsiView.$id; done
 echo "Installed. Select a .ANS file in Finder and press space."

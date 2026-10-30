@@ -12,7 +12,7 @@ packages:
 settings:
   base:
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "28"
+    CURRENT_PROJECT_VERSION: "29"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -73,6 +73,7 @@ targets:
     dependencies:
       - target: AnsiPreview
       - target: AnsiThumbnail
+      - target: AnsiSpotlight
       - package: AnsiCore
       - package: libwebp
   AnsiPreview:
@@ -129,6 +130,32 @@ targets:
           NSExtensionAttributes:
             QLSupportedContentTypes: [com.traynham.ansiview.ans]
             QLThumbnailMinimumDimension: 0
+  AnsiSpotlight:
+    type: app-extension
+    platform: macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.Spotlight
+    sources: [Spotlight]
+    dependencies:
+      - package: AnsiCore
+    entitlements:
+      path: Spotlight/AnsiSpotlight.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-only: true
+    info:
+      path: Spotlight/Info.plist
+      properties:
+        CFBundleDisplayName: AnsiView Spotlight
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CSExtensionLabel: AnsiViewImporter
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.spotlight.import
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ImportExtension
+          NSExtensionAttributes:
+            CSSupportedContentTypes: [com.traynham.ansiview.ans, com.traynham.ansiview.asc]
   ansirender:
     type: tool
     platform: macOS
