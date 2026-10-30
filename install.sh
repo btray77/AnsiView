@@ -15,6 +15,8 @@ cp -R build/Build/Products/Release/AnsiView.app ~/Applications/
   -f ~/Applications/AnsiView.app
 # Register the extensions now rather than whenever LaunchServices gets to them.
 for appex in ~/Applications/AnsiView.app/Contents/PlugIns/*.appex; do pluginkit -a "$appex"; done
+# Ask Spotlight to (re)load the embedded importer and reindex art files.
+mdimport -r ~/Applications/AnsiView.app/Contents/Library/Spotlight/AnsiView.mdimporter >/dev/null 2>&1 || true
 qlmanage -r >/dev/null 2>&1
 qlmanage -r cache >/dev/null 2>&1
 

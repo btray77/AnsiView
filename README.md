@@ -37,7 +37,8 @@ solid block and shade characters, and box drawing that lines up without gaps.
 - **Finder thumbnails.** Art files show the art itself as their Finder icon (except `.asc`, which
   macOS does not let thumbnail extensions claim).
 - **Spotlight.** SAUCE fields and the words in the art are indexed, so Spotlight finds art by
-  title, artist, group or text.
+  title, artist, group or text. (Install AnsiView in Applications; Spotlight looks for app
+  importers there.)
 
 ## Install
 

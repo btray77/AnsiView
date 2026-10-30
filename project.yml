@@ -12,7 +12,7 @@ packages:
 settings:
   base:
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "30"
+    CURRENT_PROJECT_VERSION: "31"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -74,6 +74,13 @@ targets:
       - target: AnsiPreview
       - target: AnsiThumbnail
       - target: AnsiSpotlight
+      # Legacy Spotlight importer: macOS 26 does not run the Core Spotlight import extension
+      # during indexing (see plan 3 ruling 9), so this is what fills the index.
+      - target: AnsiImporter
+        embed: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Library/Spotlight
       - package: AnsiCore
       - package: libwebp
   AnsiPreview:
@@ -156,6 +163,33 @@ targets:
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ImportExtension
           NSExtensionAttributes:
             CSSupportedContentTypes: [com.traynham.ansiview.ans, com.traynham.ansiview.asc]
+  AnsiImporter:
+    type: bundle
+    platform: macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.Importer
+        PRODUCT_NAME: AnsiView
+        PRODUCT_MODULE_NAME: AnsiImporter
+        WRAPPER_EXTENSION: mdimporter
+        SKIP_INSTALL: YES
+    sources: [Importer]
+    dependencies:
+      - package: AnsiCore
+    info:
+      path: Importer/Info.plist
+      properties:
+        CFBundleDisplayName: AnsiView Spotlight Importer
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDocumentTypes:
+          - CFBundleTypeRole: MDImporter
+            LSItemContentTypes: [com.traynham.ansiview.ans, com.traynham.ansiview.asc]
+        CFPlugInDynamicRegistration: false
+        CFPlugInFactories:
+          CA227D08-16EB-4DF8-85A9-B12350FDAB21: AnsiViewImporterFactory
+        CFPlugInTypes:
+          8B08C4BF-415B-11D8-B3F9-0003936726FC: [CA227D08-16EB-4DF8-85A9-B12350FDAB21]
   ansirender:
     type: tool
     platform: macOS
