@@ -1,0 +1,271 @@
+#!/bin/bash
+# Interoperability tests for the AnsiCore transfer engines against independent implementations:
+# lrzsz (lsz/lrz, lsb/lrb, lsx/lrx) and C-Kermit. Every test compares SHA-256 of what arrived
+# with the original.
+#
+#   brew install lrzsz c-kermit
+#   swift build -c release --product ansixfer      (in Packages/AnsiCore)
+#   Scripts/transfer-interop.sh <work-dir> [test ...]
+#
+# Tests: files xmodem ymodem zmodem zresume kermit auto telnet throughput (default: all)
+set -u
+WORK=${1:?work directory}
+shift
+TESTS=${*:-files xmodem ymodem zmodem zresume kermit auto telnet throughput}
+HERE=$(cd "$(dirname "$0")/.." && pwd)
+X=${ANSIXFER:-$HERE/.build/release/ansixfer}
+F=$WORK/files
+PASS=0
+FAIL=0
+mkdir -p "$WORK"
+
+sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
+
+check() { # label original received
+    local want got
+    want=$(sha "$2")
+    if [ -f "$3" ]; then got=$(sha "$3"); else got=missing; fi
+    if [ "$want" = "$got" ]; then
+        echo "PASS $1 $(basename "$2") $(wc -c < "$2" | tr -d ' ') bytes sha256=$got"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL $1 $(basename "$2") want=$want got=$got"
+        FAIL=$((FAIL + 1))
+    fi
+}
+
+# Plain XMODEM pads to 128: the received copy must be the original plus SUB (0x1A) padding.
+check_padded() { # label original received
+    local size padded
+    size=$(wc -c < "$2" | tr -d ' ')
+    if [ ! -f "$3" ]; then echo "FAIL $1 $(basename "$2") missing"; FAIL=$((FAIL + 1)); return; fi
+    if python3 -I -c "
+import sys
+a = open(sys.argv[1], 'rb').read(); b = open(sys.argv[2], 'rb').read()
+ok = b[:len(a)] == a and set(b[len(a):]) <= {0x1a} and len(b) % 128 == 0 and len(b) - len(a) < 128
+sys.exit(0 if ok else 1)" "$2" "$3"; then
+        echo "PASS $1 $(basename "$2") $size bytes, received $(wc -c < "$3" | tr -d ' ') = original + SUB padding (no length in XMODEM)"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL $1 $(basename "$2") content differs"
+        FAIL=$((FAIL + 1))
+    fi
+}
+
+fresh() { rm -rf "$1"; mkdir -p "$1"; }
+
+SIZES="r0.bin r1.bin r127.bin r128.bin r129.bin r1023.bin r1024.bin r1025.bin r1048576.bin everybyte.bin"
+
+t_files() {
+    mkdir -p "$F"
+    python3 -I - "$F" <<'EOF'
+import os, random, sys
+out = sys.argv[1]
+r = random.Random(42)
+for n in [0, 1, 127, 128, 129, 1023, 1024, 1025, 1048576]:
+    data = bytes(r.getrandbits(8) for _ in range(n))
+    if data and data[-1] == 0x1a:
+        data = data[:-1] + b'\x1b'
+    open(os.path.join(out, 'r%d.bin' % n), 'wb').write(data)
+eb = bytes(range(256)) + bytes([0x18] * 7 + [0x11, 0x13, 0x91, 0x93, 0xff, 0xff, 0xff, 0x0d, 0x0a, 0x40, 0x0d])
+eb += b'**\x18B00000000000000\r\n' + bytes([1, 0x23, 0x20, 0x53, 0x7e, 0x7e, 0x26, 0x23, 0x10, 0x90]) + bytes(range(255, -1, -1))
+open(os.path.join(out, 'everybyte.bin'), 'wb').write(eb)
+r2 = random.Random(7)
+open(os.path.join(out, 'big10m.bin'), 'wb').write(bytes(r2.getrandbits(8) for _ in range(10 * 1024 * 1024)))
+EOF
+    ls -l "$F"
+}
+
+t_xmodem() {
+    local out=$WORK/x f
+    # Our sender to lrx (lrzsz rx): checksum (lrx default), CRC (lrx -c), 1K blocks (our xmodem-1k, lrx -c).
+    for mode in "xmodem:" "xmodem-crc:-c" "xmodem-1k:-c"; do
+        proto=${mode%%:*}; flag=${mode#*:}
+        for f in $SIZES; do
+            fresh "$out"
+            echo "+ ansixfer send $proto $f --exec \"lrx $flag $f\""
+            (cd "$F" && "$X" send "$proto" "$f" --exec "cd '$out' && lrx $flag -q '$f' 2>>'$WORK/lrx.log'") 2>&1 | grep -E "negotiated|^result|^elapsed"
+            if [ "$f" = r0.bin ]; then check "$proto ours->lrx" "$F/$f" "$out/$f"; else check_padded "$proto ours->lrx" "$F/$f" "$out/$f"; fi
+        done
+    done
+    # lsx (lrzsz sx) to our receiver: checksum (our xmodem), CRC (our xmodem-crc), 1K (lsx -k, our xmodem-1k).
+    for mode in "xmodem:" "xmodem-crc:" "xmodem-1k:-k"; do
+        proto=${mode%%:*}; flag=${mode#*:}
+        for f in $SIZES; do
+            fresh "$out"
+            echo "+ ansixfer receive $proto --padding keep --exec \"lsx $flag $f\""
+            "$X" receive "$proto" --padding keep --name "$f" --dir "$out" --exec "cd '$F' && lsx $flag -q '$f' 2>>'$WORK/lsx.log'" 2>&1 | grep -E "negotiated|blocks of|^result|^elapsed"
+            if [ "$f" = r0.bin ]; then check "$proto lsx->ours" "$F/$f" "$out/$f"; else check_padded "$proto lsx->ours" "$F/$f" "$out/$f"; fi
+        done
+    done
+}
+
+t_ymodem() {
+    local out=$WORK/y f
+    fresh "$out"
+    echo "+ ansixfer send ymodem <all sizes> --exec \"lrb -y\""
+    (cd "$F" && "$X" send ymodem --quiet $SIZES --exec "cd '$out' && lrb -y -q 2>>'$WORK/lrb.log'") | tail -2
+    for f in $SIZES; do check "ymodem ours->lrb" "$F/$f" "$out/$f"; done
+    fresh "$out"
+    echo "+ ansixfer receive ymodem --exec \"lsb <all sizes>\""
+    "$X" receive ymodem --quiet --dir "$out" --exec "cd '$F' && lsb -q $SIZES 2>>'$WORK/lsb.log'" | tail -2
+    for f in $SIZES; do check "ymodem lsb->ours" "$F/$f" "$out/$f"; done
+    fresh "$out"
+    echo "+ ansixfer receive ymodem-g --exec \"lsb <all sizes>\"   (lsb streams when it sees G)"
+    "$X" receive ymodem-g --quiet --dir "$out" --exec "cd '$F' && lsb -q $SIZES 2>>'$WORK/lsb.log'" | tail -2
+    for f in $SIZES; do check "ymodem-g lsb->ours" "$F/$f" "$out/$f"; done
+}
+
+t_zmodem() {
+    local out=$WORK/z f opts
+    for opts in "" "--escctl" "--crc16" "--block 8192" "--escape-telnet"; do
+        fresh "$out"
+        echo "+ ansixfer send zmodem $opts <all sizes> --exec \"lrz -y\""
+        (cd "$F" && "$X" send zmodem $opts $SIZES --exec "cd '$out' && lrz -y -q 2>>'$WORK/lrz.log'") 2>&1 | grep -E "negotiated|^result|^elapsed"
+        for f in $SIZES; do check "zmodem ours->lrz $opts" "$F/$f" "$out/$f"; done
+    done
+    for opts in "" "-e" "-o" "-8" "-w 4096"; do
+        fresh "$out"
+        echo "+ ansixfer receive zmodem --exec \"lsz $opts <all sizes>\""
+        "$X" receive zmodem --dir "$out" --exec "cd '$F' && lsz -q $opts $SIZES 2>>'$WORK/lsz.log'" 2>&1 | grep -E "frames so far|^result|^elapsed" | tail -3
+        for f in $SIZES; do check "zmodem lsz $opts->ours" "$F/$f" "$out/$f"; done
+    done
+    for opts in "--window 4096" "--escctl"; do
+        fresh "$out"
+        echo "+ ansixfer receive zmodem $opts --exec \"lsz r1048576.bin\""
+        "$X" receive zmodem $opts --dir "$out" --exec "cd '$F' && lsz -q r1048576.bin 2>>'$WORK/lsz.log'" 2>&1 | grep -E "frames so far|^result|^elapsed" | tail -3
+        check "zmodem lsz->ours $opts" "$F/r1048576.bin" "$out/r1048576.bin"
+    done
+}
+
+t_zresume() {
+    local out=$WORK/zr
+    # 1. Our receiver, lsz -r sender: kill our side mid file, keep the .part, then run again.
+    fresh "$out"
+    echo "+ ansixfer receive zmodem --keep-partial --abort-after 300000 --exec \"lsz r1048576.bin\""
+    "$X" receive zmodem --quiet --keep-partial --abort-after 300000 --dir "$out" --exec "cd '$F' && lsz -q r1048576.bin 2>>'$WORK/lsz.log'" | tail -2
+    ls -l "$out"
+    echo "+ ansixfer receive zmodem --resume --exec \"lsz -r r1048576.bin\""
+    "$X" receive zmodem --resume --dir "$out" --exec "cd '$F' && lsz -q -r r1048576.bin 2>>'$WORK/lsz.log'" 2>&1 | grep -E "resum|result|elapsed|file:"
+    check "zmodem resume lsz->ours" "$F/r1048576.bin" "$out/r1048576.bin"
+    # 2. Our sender, lrz receiver: lrz keeps the partial (--keep-incomplete), our sender resumes (ZCRESUM).
+    fresh "$out"
+    echo "+ ansixfer send zmodem --abort-after 300000 r1048576.bin --exec \"lrz --keep-incomplete\""
+    (cd "$F" && "$X" send zmodem --quiet --abort-after 300000 r1048576.bin --exec "cd '$out' && lrz -q --keep-incomplete 2>>'$WORK/lrz.log'") | tail -2
+    ls -l "$out"
+    echo "+ ansixfer send zmodem --resume r1048576.bin --exec \"lrz -r\""
+    (cd "$F" && "$X" send zmodem --resume r1048576.bin --exec "cd '$out' && lrz -r -q 2>>'$WORK/lrz.log'") 2>&1 | grep -E "resum|result|elapsed|file:|offset"
+    check "zmodem resume ours->lrz" "$F/r1048576.bin" "$out/r1048576.bin"
+}
+
+KERMIT="kermit -Y -q -B"
+
+# C-Kermit 9.0.302 (Homebrew, macOS 26) refuses to create a new file when receiving: its zchko()
+# check opens the not yet existing name and reports "Write access denied", also with another
+# C-Kermit as the sender. Workaround: give each expected file placeholder content (so a failed
+# transfer cannot pass) and let C-Kermit overwrite it (-w).
+placeholders() { local f; for f in $SIZES; do echo "placeholder, not transferred" > "$1/$f"; done; }
+
+t_kermit() {
+    local out=$WORK/k f opts
+    for opts in "" "--check 1" "--check 2" "--packet 94" "--eighth-bit" "--kermit-window 8" "--kermit-window 31 --packet 94"; do
+        fresh "$out"
+        placeholders "$out"
+        echo "+ ansixfer send kermit $opts <all sizes> --pty \"kermit -i -w -r\""
+        (cd "$F" && "$X" send kermit $opts $SIZES --pty "cd '$out' && $KERMIT -i -w -r 2>>'$WORK/kermit.log'") 2>&1 | grep -E "negotiated|^result|^elapsed"
+        for f in $SIZES; do check "kermit ours->ckermit $opts" "$F/$f" "$out/$f"; done
+        fresh "$out"
+        echo "+ ansixfer receive kermit $opts --pty \"kermit -i -s <all sizes>\"   (C-Kermit sends names in upper case)"
+        "$X" receive kermit $opts --dir "$out" --pty "cd '$F' && $KERMIT -i -s $SIZES 2>>'$WORK/kermit.log'" 2>&1 | grep -E "negotiated|^result|^elapsed"
+        for f in $SIZES; do check "kermit ckermit->ours $opts" "$F/$f" "$out/$(echo "$f" | tr a-z A-Z)"; done
+    done
+    # C-Kermit's own window and packet settings (-v window slots, -e packet length).
+    for kopts in "-v 31 -e 9024" "-v 4 -e 1000" "-v 1 -e 94"; do
+        fresh "$out"
+        echo "+ ansixfer receive kermit --kermit-window 31 --packet 9024 --pty \"kermit $kopts -i -s r1048576.bin\""
+        "$X" receive kermit --kermit-window 31 --packet 9024 --dir "$out" --pty "cd '$F' && $KERMIT $kopts -i -s r1048576.bin 2>>'$WORK/kermit.log'" 2>&1 | grep -E "negotiated|^result|^elapsed"
+        check "kermit ckermit $kopts->ours" "$F/r1048576.bin" "$out/R1048576.BIN"
+        fresh "$out"
+        placeholders "$out"
+        echo "+ ansixfer send kermit --kermit-window 31 --packet 9024 r1048576.bin --pty \"kermit $kopts -i -w -r\""
+        (cd "$F" && "$X" send kermit --kermit-window 31 --packet 9024 r1048576.bin --pty "cd '$out' && $KERMIT $kopts -i -w -r 2>>'$WORK/kermit.log'") 2>&1 | grep -E "negotiated|^result|^elapsed"
+        check "kermit ours->ckermit $kopts" "$F/r1048576.bin" "$out/r1048576.bin"
+    done
+}
+
+t_telnet() {
+    local out=$WORK/tn port=23571 kind
+    for kind in xmodem-1k ymodem zmodem kermit; do
+        fresh "$out"
+        port=$((port + 1))
+        echo "+ ansixfer receive $kind --telnet --listen $port  |  ansixfer send $kind --telnet --connect 127.0.0.1:$port everybyte.bin r1048576.bin"
+        "$X" receive "$kind" --quiet --telnet --name everybyte.bin --padding keep --dir "$out" --listen $port > "$WORK/tn-recv.txt" 2>&1 &
+        sleep 0.5
+        if [ "$kind" = xmodem-1k ]; then files=everybyte.bin; else files="everybyte.bin r1048576.bin"; fi
+        (cd "$F" && "$X" send "$kind" --quiet --telnet $files --connect 127.0.0.1:$port) | grep -E "^telnet|^result|^elapsed"
+        wait
+        grep -E "^telnet|^result|^elapsed" "$WORK/tn-recv.txt"
+        if [ "$kind" = xmodem-1k ]; then check_padded "$kind over telnet" "$F/everybyte.bin" "$out/everybyte.bin"; else
+            check "$kind over telnet" "$F/everybyte.bin" "$out/everybyte.bin"
+            check "$kind over telnet" "$F/r1048576.bin" "$out/r1048576.bin"
+        fi
+    done
+}
+
+t_throughput() {
+    # 10 MiB, ansixfer to ansixfer over loopback TCP. "kind|send options|receive options".
+    local out=$WORK/tp port=23600 entry kind sopts ropts
+    for entry in "xmodem||" "xmodem-crc||" "xmodem-1k||" "ymodem||" "ymodem-g||" "zmodem||" "zmodem|--block 8192|" \
+                 "kermit||" "kermit|--kermit-window 31|--kermit-window 31" "kermit|--kermit-window 31 --packet 9024|--kermit-window 31 --packet 9024"; do
+        IFS='|' read -r kind sopts ropts <<< "$entry"
+        fresh "$out"
+        port=$((port + 1))
+        "$X" receive "$kind" --quiet $ropts --name big10m.bin --dir "$out" --listen $port > "$WORK/tp-recv.txt" 2>&1 &
+        sleep 0.5
+        echo "+ $kind $sopts 10 MiB over 127.0.0.1:$port (ansixfer to ansixfer)"
+        (cd "$F" && "$X" send "$kind" --quiet $sopts big10m.bin --connect 127.0.0.1:$port) | grep elapsed
+        wait
+        if [ "${kind#xmodem}" != "$kind" ]; then check_padded "$kind $sopts throughput" "$F/big10m.bin" "$out/big10m.bin"; else
+            check "$kind $sopts throughput" "$F/big10m.bin" "$out/big10m.bin"; fi
+    done
+    # The same file with lrzsz on the other end, for comparison.
+    fresh "$out"
+    echo "+ zmodem 10 MiB ansixfer send -> lrz (socket pair)"
+    (cd "$F" && "$X" send zmodem --quiet big10m.bin --exec "cd '$out' && lrz -q -y") | grep elapsed
+    check "zmodem ours->lrz throughput" "$F/big10m.bin" "$out/big10m.bin"
+    fresh "$out"
+    echo "+ zmodem 10 MiB lsz -> ansixfer receive (socket pair)"
+    "$X" receive zmodem --quiet --dir "$out" --exec "cd '$F' && lsz -q big10m.bin" | grep elapsed
+    check "zmodem lsz->ours throughput" "$F/big10m.bin" "$out/big10m.bin"
+}
+
+t_auto() {
+    # A "BBS" prints a banner, then starts a transfer program; ansixfer auto acts like the
+    # terminal: it shows the text until the detector sees the start, then runs the engine.
+    local out=$WORK/auto
+    fresh "$out"
+    echo "+ ansixfer auto --exec \"banner; lsz r1048576.bin everybyte.bin\""
+    "$X" auto --quiet --dir "$out" --exec "printf 'Welcome to the test BBS\r\nStarting ZMODEM download...\r\n'; sleep 1; cd '$F' && lsz -q r1048576.bin everybyte.bin" 2>&1 | grep -E "^\[auto\]|^terminal|^result|^elapsed"
+    check "auto zmodem lsz->ours" "$F/r1048576.bin" "$out/r1048576.bin"
+    check "auto zmodem lsz->ours" "$F/everybyte.bin" "$out/everybyte.bin"
+    fresh "$out"
+    echo "+ ansixfer auto r1025.bin --exec \"banner; lrz\""
+    (cd "$F" && "$X" auto --quiet --dir "$out" r1025.bin --exec "printf 'Upload with ZMODEM now\r\n'; cd '$out' && lrz -q -y") 2>&1 | grep -E "^\[auto\]|^terminal|^result|^elapsed"
+    check "auto zmodem ours->lrz" "$F/r1025.bin" "$out/r1025.bin"
+    fresh "$out"
+    echo "+ ansixfer auto --pty \"banner; kermit -s r1025.bin\""
+    "$X" auto --quiet --dir "$out" --pty "printf 'Kermit download\r\n'; cd '$F' && $KERMIT -i -s r1025.bin" 2>&1 | grep -E "^\[auto\]|^terminal|^result|^elapsed"
+    check "auto kermit ckermit->ours" "$F/r1025.bin" "$out/R1025.BIN"
+    fresh "$out"
+    placeholders "$out"
+    echo "+ ansixfer auto r1025.bin --pty \"banner; kermit -w -r\""
+    (cd "$F" && "$X" auto --quiet --dir "$out" r1025.bin --pty "printf 'Kermit upload\r\n'; cd '$out' && $KERMIT -i -w -r") 2>&1 | grep -E "^\[auto\]|^terminal|^result|^elapsed"
+    check "auto kermit ours->ckermit" "$F/r1025.bin" "$out/r1025.bin"
+}
+
+for t in $TESTS; do
+    echo "=== $t"
+    "t_$t"
+done
+echo "=== passed $PASS, failed $FAIL"
+[ "$FAIL" = 0 ]
