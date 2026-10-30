@@ -28,6 +28,14 @@ enum PlaybackSpeed {
     static let modemSoundsKey = "modemSounds"
     static var modemSounds: Bool { defaults.bool(forKey: modemSoundsKey) }
 
+    /// ANSI music in the app's windows (Quick Look never plays it). On unless turned off.
+    static let ansiMusicKey = "ansiMusic"
+    static var ansiMusic: Bool { defaults.object(forKey: ansiMusicKey) as? Bool ?? true }
+
+    /// At Instant speed (and when replaying there), play the file's music once from the start.
+    static let musicAtInstantKey = "ansiMusicAtInstant"
+    static var musicAtInstant: Bool { defaults.object(forKey: musicAtInstantKey) as? Bool ?? true }
+
     /// Hold the last frame of a playback until clicked, instead of going straight to the finished art.
     static let holdFinalFrameKey = "holdFinalFrame"
     static var holdFinalFrame: Bool { defaults.bool(forKey: holdFinalFrameKey) }
@@ -91,6 +99,27 @@ final class PlayerSpeed: ObservableObject {
     }
 }
 
+/// Plays ANSI music for a player: queued tunes play one after another on one speaker. The app
+/// supplies one; Quick Look does not, so its previews stay silent.
+protocol MusicOutput: AnyObject {
+    /// Queues `notes` (times relative to their first note) after anything already queued.
+    func enqueue(_ notes: [TimedNote])
+    func pause()
+    func resume()
+    /// Silences everything queued.
+    func stop()
+}
+
+/// What the music indicator and its tooltip say.
+enum MusicIndicator {
+    static let foreground = "\u{266A} ANSI music"
+    static let background = "\u{266A} ANSI music (background)"
+    static let paused = "\u{266A} ANSI music (paused)"
+    static let tip = "This art is playing ANSI music: a BASIC PLAY tune sent inside the file, as BBS terminals played it. "
+        + "Foreground music (MF) pauses the drawing until it ends; background music (MB) plays while it draws. "
+        + "Click to mute this window. Playback > Play ANSI Music turns it off everywhere."
+}
+
 /// Shows an ANSI file in a scroll view. Animated files replay at modem speed and blinking text blinks.
 /// Clicking skips an animation to its end, or replays it once it has finished.
 final class AnsiPlayerViewController: NSViewController {
@@ -109,7 +138,7 @@ final class AnsiPlayerViewController: NSViewController {
     }
     let speed: PlayerSpeed
     /// Frame positions for the scrub bar and stepping; nil for static art, which has no bar.
-    let timeline: PlaybackTimeline?
+    private(set) var timeline: PlaybackTimeline?
     /// The frame currently on screen.
     private(set) var screen: AnsiScreen
     private let renderOptions: RenderOptions
@@ -144,6 +173,7 @@ final class AnsiPlayerViewController: NSViewController {
         self.renderOptions = options
         self.terminal = AnsiTerminal(source)
         self.screen = analysis.finalScreen
+        self.musicScheduler = MusicPlaybackScheduler(file: source)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -152,6 +182,117 @@ final class AnsiPlayerViewController: NSViewController {
 
     deinit {
         if let defaultsObserver { NotificationCenter.default.removeObserver(defaultsObserver) }
+        musicTimer?.invalidate()
+        music?.stop()
+    }
+
+    // MARK: ANSI music
+
+    /// Plays the file's ANSI music. Set it before the view loads (as hosts set `sound`): a file whose
+    /// only movement is music then plays back like an animation. Nil (Quick Look) means silence,
+    /// no holds, and the file behaves exactly as it would without music.
+    var music: MusicOutput? {
+        didSet {
+            guard !isViewLoaded else { return }
+            hasMusicPlayback = music != nil && musicScheduler.hasMusic && PlaybackSpeed.ansiMusic
+            timeline = isPlayable ? PlaybackTimeline(source) : nil
+        }
+    }
+    /// True when this window plays the file's music (decided when the output is set).
+    private(set) var hasMusicPlayback = false
+    /// The file replays: it is animated, or it has music this window plays.
+    var isPlayable: Bool { analysis.isAnimated || hasMusicPlayback }
+    /// Silences this window only (not remembered).
+    var musicMuted = false {
+        didSet {
+            guard musicMuted != oldValue else { return }
+            musicSettingsChanged()
+            if isViewLoaded, hasMusicPlayback { showHUD(musicMuted ? "Music muted in this window" : "Music on") }
+        }
+    }
+    /// The clock music is timed by (a harness may replace it).
+    var clock: () -> Double = { ProcessInfo.processInfo.systemUptime }
+    private var musicScheduler: MusicPlaybackScheduler
+    private var musicTimer: Timer?
+    private let musicBadge = NSButton(title: "", target: nil, action: nil)
+    /// Music sounds and holds only with an output, the setting on and the window not muted.
+    private var musicOn: Bool { music != nil && hasMusicPlayback && !musicMuted && PlaybackSpeed.ansiMusic }
+    /// The display is waiting for foreground music.
+    var isHoldingForMusic: Bool { musicOn && musicScheduler.isHolding(at: clock()) }
+    /// The music sounding now, if any.
+    var musicPlayingNow: ScheduledMusic? { musicScheduler.queue.playing(at: clock()) }
+    /// True while the music indicator is on screen.
+    var musicIndicatorShown: Bool { !musicBadge.isHidden }
+
+    private func perform(_ events: [MusicEvent]) {
+        guard !events.isEmpty else { return }
+        for event in events {
+            switch event {
+            case .play(let scheduled): music?.enqueue(scheduled.notes)
+            case .pause: music?.pause()
+            case .resume: music?.resume()
+            case .stop: music?.stop()
+            }
+        }
+        updateMusicIndicator()
+    }
+
+    /// Music was turned off or muted: silence it and stop holding the drawing.
+    private func musicSettingsChanged() {
+        guard !musicOn else { return }
+        perform(musicScheduler.stop())
+        musicScheduler.skip(to: terminal.position)
+    }
+
+    private func updateMusicIndicator() {
+        guard isViewLoaded else { return }
+        let now = clock()
+        let queue = musicScheduler.queue
+        let active = musicOn && queue.isActive(at: now)
+        musicBadge.isHidden = !active
+        if active {
+            let title = queue.pausedAt != nil ? MusicIndicator.paused
+                : queue.playing(at: now)?.holds == false ? MusicIndicator.background : MusicIndicator.foreground
+            if musicBadge.title != title { musicBadge.title = title }
+            if musicTimer == nil {
+                let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.updateMusicIndicator() }
+                }
+                RunLoop.main.add(timer, forMode: .common)
+                musicTimer = timer
+            }
+        } else if let timer = musicTimer {
+            timer.invalidate()
+            musicTimer = nil
+        }
+    }
+
+    @objc private func musicBadgeClicked(_ sender: Any?) {
+        musicMuted = true
+    }
+
+    private func installMusicBadge(in container: NSView) {
+        musicBadge.isBordered = false
+        musicBadge.wantsLayer = true
+        musicBadge.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
+        musicBadge.layer?.cornerRadius = 4
+        musicBadge.appearance = NSAppearance(named: .darkAqua)
+        musicBadge.contentTintColor = .white
+        musicBadge.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
+        musicBadge.title = MusicIndicator.foreground
+        musicBadge.toolTip = MusicIndicator.tip
+        musicBadge.setAccessibilityLabel("ANSI music playing. Press to mute this window.")
+        musicBadge.refusesFirstResponder = true
+        musicBadge.target = self
+        musicBadge.action = #selector(musicBadgeClicked(_:))
+        musicBadge.isHidden = true
+        musicBadge.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(musicBadge)
+        NSLayoutConstraint.activate([
+            musicBadge.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+            musicBadge.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
+            musicBadge.heightAnchor.constraint(equalToConstant: 22),
+        ])
     }
 
     /// Size of the art in points, one point per VGA pixel.
@@ -230,7 +371,9 @@ final class AnsiPlayerViewController: NSViewController {
     var isPlaying: Bool { frameTimer != nil || connectTimer != nil }
     /// Bytes of the stream played so far.
     var playbackPosition: Int { terminal.position }
-    var isPaused: Bool { !isPlaying && terminal.position > 0 && !terminal.isFinished }
+    var isPaused: Bool {
+        !isPlaying && ((terminal.position > 0 && !terminal.isFinished) || musicScheduler.queue.pausedAt != nil)
+    }
 
     /// Art taller than this many lines is a "scroller": it fits the window width and scrolls.
     static let scrollerRows = 50
@@ -270,6 +413,7 @@ final class AnsiPlayerViewController: NSViewController {
         hud.alphaValue = 0
         hud.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(hud)
+        installMusicBadge(in: container)
 
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -391,7 +535,7 @@ final class AnsiPlayerViewController: NSViewController {
     override func viewDidAppear() {
         super.viewDidAppear()
         view.window?.makeFirstResponder(canvas)
-        if analysis.isAnimated && !isPlaying && terminal.position == 0 {
+        if isPlayable && !isPlaying && terminal.position == 0 {
             replay()
         }
         updateBlinkTimer()
@@ -400,6 +544,7 @@ final class AnsiPlayerViewController: NSViewController {
     override func viewWillDisappear() {
         super.viewWillDisappear()
         stopPlayback()
+        perform(musicScheduler.stop())
         blinkTimer?.invalidate()
         blinkTimer = nil
     }
@@ -410,9 +555,11 @@ final class AnsiPlayerViewController: NSViewController {
         stopPlayback()
         isHolding = false
         terminal = AnsiTerminal(source)
+        perform(musicScheduler.seek(to: 0))
         if speed.baud == 0 {
             showFinal()
             onFinished?()
+            if musicOn, PlaybackSpeed.musicAtInstant { perform(musicScheduler.playAll(at: clock())) }
             return
         }
         viewportTop = nil
@@ -446,9 +593,15 @@ final class AnsiPlayerViewController: NSViewController {
         sound?.playbackStateChanged(state)
     }
 
-    /// Finishes playback and shows the finished art.
+    /// Finishes playback and shows the finished art. A skip stops the music; reaching the end
+    /// on its own lets music still sounding play out.
     func skipToEnd() {
+        skipToEnd(stoppingMusic: true)
+    }
+
+    private func skipToEnd(stoppingMusic: Bool) {
         let wasInProgress = isPlaying || isHolding || isPaused
+        if stoppingMusic { perform(musicScheduler.stop()) }
         showFinal()
         if wasInProgress { onFinished?() }
     }
@@ -456,7 +609,7 @@ final class AnsiPlayerViewController: NSViewController {
     /// Releases a held final frame and shows the finished art.
     func finishHold() {
         guard isHolding else { return }
-        skipToEnd()
+        skipToEnd(stoppingMusic: false)
     }
 
     private func showFinal() {
@@ -477,6 +630,7 @@ final class AnsiPlayerViewController: NSViewController {
         stopPlayback()
         isHolding = false
         terminal.seek(to: position)
+        perform(musicScheduler.seek(to: terminal.position))
         if terminal.isFinished {
             showFinal()
             if wasInProgress { onFinished?() }
@@ -492,6 +646,7 @@ final class AnsiPlayerViewController: NSViewController {
     /// Stops timers and sound without changing what is on screen (another player is taking over).
     func halt() {
         stopPlayback()
+        perform(musicScheduler.stop())
     }
 
     /// Continues where `other` was: the same position, playing, paused, held or finished. `other`
@@ -502,6 +657,8 @@ final class AnsiPlayerViewController: NSViewController {
         let wasHolding = other.isHolding
         let wasFinal = other.screenIsFinal && !wasPlaying
         other.halt()
+        // Music the other player already reached is not replayed here.
+        musicScheduler.skip(to: wasFinal ? source.stream.count : position)
         if wasFinal {
             showFinal()
         } else if wasHolding {
@@ -545,9 +702,11 @@ final class AnsiPlayerViewController: NSViewController {
             finishHold()
         } else if isPlaying {
             stopPlayback()
+            perform(musicScheduler.pause(at: clock()))
             showHUD("Paused")
         } else if isPaused {
             showHUD(PlaybackSpeed.label(speed.baud))
+            perform(musicScheduler.resume(at: clock()))
             startTimer()
         } else {
             replay()
@@ -559,13 +718,13 @@ final class AnsiPlayerViewController: NSViewController {
             finishHold()
         } else if isPlaying || isPaused {
             skipToEnd()
-        } else if analysis.isAnimated {
+        } else if isPlayable {
             replay()
         }
     }
 
     private func startTimer() {
-        lastFrameTime = ProcessInfo.processInfo.systemUptime
+        lastFrameTime = clock()
         byteCredit = 0
         let timer = Timer(timeInterval: Self.frameInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.advanceFrame() }
@@ -584,23 +743,39 @@ final class AnsiPlayerViewController: NSViewController {
     }
 
     private func advanceFrame() {
-        let now = ProcessInfo.processInfo.systemUptime
+        let now = clock()
         let baud = speed.baud
         guard baud > 0 else { skipToEnd(); return }
+        // Foreground music holds the drawing; line time is not saved up meanwhile.
+        if musicOn, musicScheduler.isHolding(at: now) {
+            lastFrameTime = now
+            byteCredit = 0
+            return
+        }
         // 8N1 serial framing: 10 bits on the wire per byte.
         byteCredit += (now - lastFrameTime) * Double(baud) / 10
         lastFrameTime = now
         let count = Int(byteCredit)
-        guard count > 0 else { return }
+        guard count > 0 || terminal.isFinished else { return }
         byteCredit -= Double(count)
-        terminal.advance(byteCount: count)
-        if terminal.isFinished, PlaybackSpeed.holdFinalFrame {
+        if musicOn {
+            // Stops at each music sequence so its tune starts as the cursor passes it.
+            perform(musicScheduler.advance(&terminal, by: count, at: now))
+            if musicScheduler.isHolding(at: now) { byteCredit = 0 }
+        } else {
+            terminal.advance(byteCount: count)
+            musicScheduler.skip(to: terminal.position)
+        }
+        if terminal.isFinished, musicOn, musicScheduler.isHolding(at: now) {
+            // Music sent at the very end: the last screen stays until it has played.
+            showTerminal()
+        } else if terminal.isFinished, PlaybackSpeed.holdFinalFrame {
             stopPlayback()
             isHolding = true
             showTerminal()
             showHUD("Click to continue")
         } else if terminal.isFinished {
-            skipToEnd()
+            skipToEnd(stoppingMusic: false)
         } else {
             showTerminal()
         }
@@ -611,6 +786,7 @@ final class AnsiPlayerViewController: NSViewController {
             shownCRT = PlaybackSpeed.crtEffect
             redraw()
         }
+        musicSettingsChanged()
         if !soundsOn {
             setSound(.quiet)
             if isConnecting {
@@ -889,6 +1065,7 @@ final class AnsiCanvasView: NSView {
     @objc func togglePausePlayback(_ sender: Any?) { player?.togglePause() }
     @objc func previousFrame(_ sender: Any?) { player?.stepFrame(-1) }
     @objc func nextFrame(_ sender: Any?) { player?.stepFrame(1) }
+    @objc func toggleMusicMute(_ sender: Any?) { player?.musicMuted.toggle() }
     // View menu zoom presets.
     @objc func zoomToFit(_ sender: Any?) { player?.zoom = .fit }
     @objc func zoomIntegerFit(_ sender: Any?) { player?.zoom = .integerFit }

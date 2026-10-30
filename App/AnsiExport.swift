@@ -19,18 +19,44 @@ enum AnsiFrameSequence {
     /// Plays the file at `baud`, sampling `fps` times a second and merging frames that did not change.
     /// Ends with a hold on the final screen; blinking text blinks during the hold.
     static func make(_ source: ArtFile, baud: Int, fps: Double = 15) -> [AnsiFrame] {
+        make(source, baud: baud, fps: fps, music: false).frames
+    }
+
+    /// As `make`, and with `music` the file's ANSI music on the video's clock: foreground music
+    /// holds the frames as it holds the viewer, and the final hold lasts until the music ends.
+    /// At baud 0 the music plays once from the start.
+    static func make(_ source: ArtFile, baud: Int, fps: Double = 15, music: Bool)
+        -> (frames: [AnsiFrame], music: [ScheduledMusic]) {
         let analysis = AnsiAnalysis(source)
         let rows = analysis.canvasRows
         var frames: [AnsiFrame] = []
+        var scheduler = MusicPlaybackScheduler(file: source)
+        let withMusic = music && scheduler.hasMusic
+        var elapsed = 0.0
         if baud > 0 {
             var terminal = AnsiTerminal(source)
             let bytesPerFrame = Double(baud) / 10 / fps
             var credit = 0.0
-            while !terminal.isFinished {
-                credit += bytesPerFrame
-                let count = Int(credit)
-                credit -= Double(count)
-                if count > 0 { terminal.advance(byteCount: count) }
+            var index = 0
+            while !terminal.isFinished || (withMusic && scheduler.isHolding(at: Double(index) / fps)) {
+                let time = Double(index) / fps
+                index += 1
+                if withMusic, scheduler.isHolding(at: time) {
+                    credit = 0
+                } else {
+                    credit += bytesPerFrame
+                    let count = Int(credit)
+                    credit -= Double(count)
+                    if count > 0 {
+                        if withMusic {
+                            _ = scheduler.advance(&terminal, by: count, at: time)
+                            if scheduler.isHolding(at: time) { credit = 0 }
+                        } else {
+                            terminal.advance(byteCount: count)
+                        }
+                    }
+                }
+                elapsed += 1 / fps
                 let screen = terminal.screen(minimumRows: rows)
                 if let last = frames.last, last.screen.rows == screen.rows {
                     frames[frames.count - 1].duration += 1 / fps
@@ -39,22 +65,34 @@ enum AnsiFrameSequence {
                 }
             }
         }
+        if withMusic, baud <= 0 { _ = scheduler.playAll(at: 0) }
+        let played = withMusic ? scheduler.started : []
+        // The finished art stays until background music sent at the end has played.
+        let musicEnd = played.map(\.end).max() ?? 0
+        let hold = max(holdSeconds, musicEnd - elapsed)
         var final = analysis.finalScreen
         while final.rows.count < rows {
             final.rows.append(Array(repeating: AnsiCell(), count: source.columns))
         }
         if final.hasBlink {
-            let blinks = Int(holdSeconds / AnsiPlayerViewController.blinkInterval)
+            let interval = AnsiPlayerViewController.blinkInterval
+            var blinks = Int(hold / interval)
+            if Double(blinks) * interval < musicEnd - elapsed { blinks += 1 }  // cover the music's end
             for i in 0..<max(2, blinks) {
                 frames.append(AnsiFrame(screen: final, duration: AnsiPlayerViewController.blinkInterval,
                                         blinkVisible: i % 2 == 0))
             }
         } else if let last = frames.last, last.screen.rows == final.rows {
-            frames[frames.count - 1].duration += holdSeconds
+            frames[frames.count - 1].duration += hold
         } else {
-            frames.append(AnsiFrame(screen: final, duration: holdSeconds))
+            frames.append(AnsiFrame(screen: final, duration: hold))
         }
-        return frames
+        return (frames, played)
+    }
+
+    /// The music of an export as mono 44.1 kHz samples from the video's start (empty without music).
+    static func audio(_ music: [ScheduledMusic]) -> [Float] {
+        music.isEmpty ? [] : MusicSynth(waveform: .square).render(MusicPlaybackScheduler.audioNotes(music))
     }
 }
 
@@ -146,6 +184,8 @@ struct ExportSettings {
     var fps = 15.0
     var palette: GIFPalette = .automatic
     var limit: SizeLimit = .none
+    /// MP4 only: the file's ANSI music as a sound track (GIF and WebP have no sound).
+    var includeMusic = false
 }
 
 /// What an export produced.
@@ -189,8 +229,10 @@ enum AnsiExporter {
                 try writeStill(still, format: format, scale: attempt.scale, to: destination)
                 progress(1)
             case .animation(let format):
-                let frames = AnsiFrameSequence.make(source, baud: settings.baud, fps: attempt.fps)
-                try writeAnimation(frames, format: format, scale: attempt.scale, palette: settings.palette,
+                let made = AnsiFrameSequence.make(source, baud: settings.baud, fps: attempt.fps,
+                                                  music: settings.includeMusic && format == .mp4)
+                try writeAnimation(made.frames, format: format, scale: attempt.scale, palette: settings.palette,
+                                   audio: AnsiFrameSequence.audio(made.music),
                                    to: destination, progress: progress, isCancelled: isCancelled)
             case .text:
                 break
@@ -330,8 +372,8 @@ enum AnsiExporter {
     }
 
     static func writeAnimation(
-        _ frames: [AnsiFrame], format: AnimationFormat, scale: Double, palette: GIFPalette, to url: URL,
-        progress: (Double) -> Void, isCancelled: () -> Bool
+        _ frames: [AnsiFrame], format: AnimationFormat, scale: Double, palette: GIFPalette, audio: [Float] = [],
+        to url: URL, progress: (Double) -> Void, isCancelled: () -> Bool
     ) throws {
         let render: (AnsiFrame) throws -> CGImage = { frame in
             if isCancelled() { throw AnsiExportError.cancelled }
@@ -348,7 +390,7 @@ enum AnsiExporter {
                 try writeGIF(frames, render: render, to: url, progress: progress)
             }
         case .webp: try writeAnimatedWebP(frames, render: render, to: url, progress: progress)
-        case .mp4: try writeMP4(frames, render: render, to: url, progress: progress)
+        case .mp4: try writeMP4(frames, render: render, audio: audio, to: url, progress: progress)
         }
     }
 
@@ -457,8 +499,50 @@ enum AnsiExporter {
         try Data(bytes: bytes, count: data.size).write(to: url)
     }
 
+    static let audioSampleRate = 44100
+
+    /// 16 bit mono PCM at 44.1 kHz, the format the audio samples are handed to the writer in.
+    private static func pcmFormat() throws -> CMAudioFormatDescription {
+        var description = AudioStreamBasicDescription(
+            mSampleRate: Double(audioSampleRate), mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked,
+            mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1, mBitsPerChannel: 16,
+            mReserved: 0)
+        var format: CMAudioFormatDescription?
+        guard CMAudioFormatDescriptionCreate(allocator: nil, asbd: &description, layoutSize: 0, layout: nil,
+                                             magicCookieSize: 0, magicCookie: nil, extensions: nil,
+                                             formatDescriptionOut: &format) == noErr, let format
+        else { throw AnsiExportError.encodeFailed("audio format") }
+        return format
+    }
+
+    /// One chunk of samples as a sample buffer starting at sample `start`.
+    private static func audioBuffer(_ samples: ArraySlice<Float>, start: Int,
+                                    format: CMAudioFormatDescription) throws -> CMSampleBuffer {
+        let ints = samples.map { Int16((max(-1, min(1, $0)) * 32767).rounded()) }
+        let length = ints.count * 2
+        var block: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: length,
+                                                 blockAllocator: nil, customBlockSource: nil, offsetToData: 0,
+                                                 dataLength: length, flags: 0, blockBufferOut: &block) == noErr,
+              let block else { throw AnsiExportError.encodeFailed("audio block") }
+        let copied = ints.withUnsafeBytes {
+            CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: block, offsetIntoDestination: 0,
+                                          dataLength: length)
+        }
+        var buffer: CMSampleBuffer?
+        guard copied == noErr,
+              CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+                allocator: nil, dataBuffer: block, formatDescription: format, sampleCount: ints.count,
+                presentationTimeStamp: CMTime(value: CMTimeValue(start), timescale: CMTimeScale(audioSampleRate)),
+                packetDescriptions: nil, sampleBufferOut: &buffer) == noErr,
+              let buffer else { throw AnsiExportError.encodeFailed("audio buffer") }
+        return buffer
+    }
+
     private static func writeMP4(
-        _ frames: [AnsiFrame], render: (AnsiFrame) throws -> CGImage, to url: URL, progress: (Double) -> Void
+        _ frames: [AnsiFrame], render: (AnsiFrame) throws -> CGImage, audio: [Float] = [], to url: URL,
+        progress: (Double) -> Void
     ) throws {
         let first = try render(frames[0])
         let width = first.width, height = first.height
@@ -477,14 +561,54 @@ enum AnsiExporter {
             kCVPixelBufferHeightKey as String: height,
         ])
         writer.add(input)
+        // The music as AAC, fed in step with the frames so the writer can interleave them.
+        var audioInput: AVAssetWriterInput?
+        let audioFormat = audio.isEmpty ? nil : try pcmFormat()
+        if audioFormat != nil {
+            let sound = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: audioSampleRate,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 96_000,
+            ])
+            sound.expectsMediaDataInRealTime = false
+            writer.add(sound)
+            audioInput = sound
+        }
+        var audioWritten = 0
+        var audioFinished = false
+        let audioChunk = audioSampleRate / 10
+        /// Appends audio up to `seconds` while the writer takes it.
+        func feedAudio(upTo seconds: Double) throws {
+            guard let audioInput, let audioFormat else { return }
+            let limit = seconds.isFinite ? min(audio.count, Int(max(0, seconds) * Double(audioSampleRate))) : audio.count
+            while audioWritten < limit, audioInput.isReadyForMoreMediaData {
+                let end = min(audio.count, audioWritten + audioChunk)
+                guard audioInput.append(try audioBuffer(audio[audioWritten..<end], start: audioWritten, format: audioFormat))
+                else { throw AnsiExportError.encodeFailed(writer.error?.localizedDescription ?? "MP4 audio") }
+                audioWritten = end
+            }
+            // Finished audio must say so, or the writer waits for more before taking later video.
+            if audioWritten >= audio.count, !audioFinished {
+                audioFinished = true
+                audioInput.markAsFinished()
+            }
+        }
         guard writer.startWriting() else { throw AnsiExportError.encodeFailed(writer.error?.localizedDescription ?? "MP4") }
         writer.startSession(atSourceTime: .zero)
 
         var milliseconds: Int64 = 0
+        var lastBuffer: CVPixelBuffer?
         do {
             for (index, frame) in frames.enumerated() {
                 let image = index == 0 ? first : try render(frame)
-                while !input.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.005) }
+                try feedAudio(upTo: Double(milliseconds) / 1000 + 1)
+                while !input.isReadyForMoreMediaData {
+                    // The writer may want audio past a long held frame before it takes more video;
+                    // its own readiness keeps audio from running too far ahead.
+                    try feedAudio(upTo: .infinity)
+                    Thread.sleep(forTimeInterval: 0.005)
+                }
                 guard let pool = adaptor.pixelBufferPool else { throw AnsiExportError.encodeFailed("pixel buffer pool") }
                 var buffer: CVPixelBuffer?
                 CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
@@ -501,16 +625,38 @@ enum AnsiExporter {
                 guard adaptor.append(buffer, withPresentationTime: CMTime(value: milliseconds, timescale: 1000)) else {
                     throw AnsiExportError.encodeFailed(writer.error?.localizedDescription ?? "MP4 frame \(index)")
                 }
+                lastBuffer = buffer
                 milliseconds += max(1, Int64((frame.duration * 1000).rounded()))
                 progress(Double(index + 1) / Double(frames.count))
+            }
+            // With a sound track the writer ends the video at its last sample, cutting the final
+            // hold short; the last picture again just before the end keeps the hold.
+            if audioInput != nil, let lastBuffer {
+                while !input.isReadyForMoreMediaData {
+                    try feedAudio(upTo: .infinity)
+                    Thread.sleep(forTimeInterval: 0.005)
+                }
+                guard adaptor.append(lastBuffer, withPresentationTime: CMTime(value: milliseconds - 1, timescale: 1000)) else {
+                    throw AnsiExportError.encodeFailed(writer.error?.localizedDescription ?? "MP4 last frame")
+                }
+            }
+            input.markAsFinished()
+            if let audioInput {
+                while !audioFinished {
+                    if audioInput.isReadyForMoreMediaData {
+                        try feedAudio(upTo: .infinity)
+                    } else {
+                        Thread.sleep(forTimeInterval: 0.005)
+                    }
+                }
             }
         } catch {
             writer.cancelWriting()
             try? FileManager.default.removeItem(at: url)
             throw error
         }
-        input.markAsFinished()
-        writer.endSession(atSourceTime: CMTime(value: milliseconds, timescale: 1000))
+        let audioMilliseconds = Int64((Double(audio.count) / Double(audioSampleRate) * 1000).rounded(.up))
+        writer.endSession(atSourceTime: CMTime(value: max(milliseconds, audioMilliseconds), timescale: 1000))
         let done = DispatchSemaphore(value: 0)
         writer.finishWriting { done.signal() }
         done.wait()

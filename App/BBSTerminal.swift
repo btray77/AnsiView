@@ -157,6 +157,8 @@ final class TerminalViewController: NSViewController {
     /// Bytes released to the screen so far (after pacing).
     private(set) var shownBytes = 0
     private var pacer: LinePacer
+    /// ANSI music in the received stream (App/TerminalMusic.swift).
+    private(set) lazy var music = TerminalMusic(mode: entry.musicMode)
     private var capture: FileHandle?
     private var captureName: String?
     private var shownChanges = -1
@@ -258,6 +260,7 @@ final class TerminalViewController: NSViewController {
             old.disconnect()
         }
         pacer = LinePacer(baud: baud)
+        music.reset(mode: entry.musicMode)
         emulator = TerminalEmulator(columns: emulator.columns, rows: emulator.rows, encoding: entry.encoding)
         emulator.iceColors = entry.iceColors
         scrollOffset = 0
@@ -433,7 +436,8 @@ final class TerminalViewController: NSViewController {
 
     /// One display step: releases paced bytes into the emulator, answers status requests and redraws.
     func tick(elapsed: TimeInterval) {
-        let due = pacer.release(elapsed: elapsed)
+        // Foreground ANSI music holds the line: nothing more is released until it ends.
+        let due = music.screenBytes(music.isHolding ? [] : pacer.release(elapsed: elapsed))
         if !due.isEmpty {
             shownBytes += due.count
             emulator.feed(due)

@@ -6,7 +6,8 @@ import UniformTypeIdentifiers
 // ansirender <input> <output.png> [scale]
 // ansirender --frame <bytes> <input> <output.png>   (screen after that many bytes, as during playback)
 // ansirender --still png|jpeg|webp <scale> <input> <output>
-// ansirender --animate gif|webp|mp4 <baud> <scale> <input> <output>
+// ansirender --animate gif|webp|mp4 <baud> <scale> <input> <output> [--with-music]
+//   (--with-music: MP4 gets the file's ANSI music as a sound track, frames held during foreground music)
 // ansirender --stats <input>...
 // ansirender --convert html|ansi|ansi256|text|utf8 [--inline] [--no-font] <input> [output]   (stdout when output is - or missing)
 // ansirender --export <format> [options] <input> <output>
@@ -384,6 +385,22 @@ if args[1] == "--animate", args.count >= 7, let baud = Int(args[3]), let scale =
     let input = URL(fileURLWithPath: args[5])
     let source = ArtFile(data: try Data(contentsOf: input), fileExtension: input.pathExtension)
     let start = Date()
+    if args.count >= 8, args[7] == "--with-music" {
+        let made = AnsiFrameSequence.make(source, baud: baud, music: format == .mp4)
+        let audio = AnsiFrameSequence.audio(made.music)
+        let seconds = made.frames.reduce(0) { $0 + $1.duration }
+        try AnsiExporter.writeAnimation(made.frames, format: format, scale: Double(scale), palette: .system,
+                                        audio: audio, to: URL(fileURLWithPath: args[6]), progress: { _ in },
+                                        isCancelled: { false })
+        print(String(format: "wrote %@: %d frames, %.3f s of playback, %d tunes, %.3f s of audio, encoded in %.1f s",
+                     args[6], made.frames.count, seconds, made.music.count, Double(audio.count) / 44100,
+                     Date().timeIntervalSince(start)))
+        for music in made.music {
+            print(String(format: "  tune @%d %@ starts %.3f s ends %.3f s", music.sequence.offset,
+                         music.holds ? "fg" : "bg", music.start, music.end))
+        }
+        exit(0)
+    }
     let frames = AnsiFrameSequence.make(source, baud: baud)
     let seconds = frames.reduce(0) { $0 + $1.duration }
     try AnsiExporter.exportAnimation(frames, format: format, scale: scale,

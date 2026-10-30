@@ -42,12 +42,25 @@ final class ExportOptionsView {
     let frameRate: NSPopUpButton
     let palette: NSPopUpButton
     let limit: NSPopUpButton
+    /// True when the art carries playable ANSI music (the music rows are shown only then).
+    let hasMusic: Bool
+    /// MP4 only: add the music as a sound track. On by default when the art has music.
+    let includeMusic = NSButton(checkboxWithTitle: "Include ANSI music", target: nil, action: nil)
+    /// Says which formats carry sound.
+    let musicNote = NSTextField(wrappingLabelWithString: "")
     /// Called after the format changes (after the rows are enabled or disabled).
     var onFormatChange: ((ExportKind) -> Void)?
     private var target: PopupTarget?
 
-    init(kinds: [ExportKind], selected: ExportKind? = nil, scale: Int = 2, baud: Int = PlaybackSpeed.defaultBaud) {
+    init(kinds: [ExportKind], selected: ExportKind? = nil, scale: Int = 2, baud: Int = PlaybackSpeed.defaultBaud,
+         hasMusic: Bool = false) {
         self.kinds = kinds
+        self.hasMusic = hasMusic
+        includeMusic.state = hasMusic ? .on : .off
+        includeMusic.toolTip = MusicPlaybackHelp.export
+        musicNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        musicNote.textColor = .secondaryLabelColor
+        musicNote.preferredMaxLayoutWidth = 240
         format = Self.popup(kinds.map(\.label), selected: selected.flatMap { kinds.firstIndex(of: $0) } ?? 0)
         size = Self.popup(Self.sizeLabels, selected: max(0, min(2, scale - 1)))
         speed = Self.popup(Self.speeds.map(PlaybackSpeed.label),
@@ -78,6 +91,7 @@ final class ExportOptionsView {
         settings.fps = Self.frameRates[frameRate.indexOfSelectedItem]
         settings.palette = GIFPalette.allCases[palette.indexOfSelectedItem]
         settings.limit = limit.isEnabled ? Self.limits[limit.indexOfSelectedItem].1 : .none
+        settings.includeMusic = hasMusic && kind == .animation(.mp4) && includeMusic.state == .on
         return settings
     }
 
@@ -88,6 +102,21 @@ final class ExportOptionsView {
         frameRate.isEnabled = kind.isAnimation
         palette.isEnabled = kind == .animation(.gif)
         limit.isEnabled = !kind.isText
+        includeMusic.isEnabled = hasMusic && kind == .animation(.mp4)
+        musicNote.stringValue = kind == .animation(.mp4)
+            ? "The music becomes the video's sound track, timed with the frames."
+            : "GIF and WebP have no sound. Choose MP4 Video to keep the music."
+    }
+
+    /// The music rows (a checkbox with its (?) and the note), when the art has music.
+    var musicRows: [[NSView]] {
+        guard hasMusic else { return [] }
+        let help = HelpButton(text: MusicPlaybackHelp.export + "\n\n" + MusicPlaybackHelp.about)
+        help.toolTip = "What ANSI music is, and which export formats carry it"
+        let line = NSStackView(views: [includeMusic, help])
+        line.orientation = .horizontal
+        line.spacing = 6
+        return [[NSTextField(labelWithString: "Music:"), line], [NSView(), musicNote]]
     }
 
     /// The rows to show, as label and popup.
@@ -109,9 +138,9 @@ final class ExportOptionsView {
         return button
     }
 
-    /// A panel accessory view: a grid of labelled popups.
-    static func accessory(_ rows: [(String, NSPopUpButton)]) -> NSView {
-        let grid = NSGridView(views: rows.map { [NSTextField(labelWithString: $0.0), $0.1] })
+    /// A panel accessory view: a grid of labelled popups, then any extra rows.
+    static func accessory(_ rows: [(String, NSPopUpButton)], extra: [[NSView]] = []) -> NSView {
+        let grid = NSGridView(views: rows.map { [NSTextField(labelWithString: $0.0), $0.1] } + extra)
         grid.column(at: 0).xPlacement = .trailing
         grid.rowSpacing = 8
         let container = NSView()
@@ -138,7 +167,8 @@ enum ExportController {
 
     static func exportAnimation(from player: AnsiPlayerViewController, in window: NSWindow) {
         let options = ExportOptionsView(kinds: AnimationFormat.allCases.map(ExportKind.animation), scale: 1,
-                                        baud: player.speed.baud)
+                                        baud: player.speed.baud,
+                                        hasMusic: MusicPlaybackScheduler(file: player.source).hasMusic)
         save(options, rows: options.rows(), source: player.source, screen: nil, in: window,
              title: "Exporting Animation")
     }
@@ -155,7 +185,7 @@ enum ExportController {
     private static func save(_ options: ExportOptionsView, rows: [(String, NSPopUpButton)], source: ArtFile,
                              screen: AnsiScreen?, in window: NSWindow, title: String) {
         let panel = NSSavePanel()
-        panel.accessoryView = ExportOptionsView.accessory(rows)
+        panel.accessoryView = ExportOptionsView.accessory(rows, extra: options.musicRows)
         panel.nameFieldStringValue = baseName(window) + "." + options.kind.fileExtension
         panel.allowedContentTypes = [contentType(options.kind)]
         panel.isExtensionHidden = false

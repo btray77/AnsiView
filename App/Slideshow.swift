@@ -85,6 +85,7 @@ final class SlideshowViewController: NSViewController {
         next.fileURL = collection.items.indices.contains(newIndex) ? collection.items[newIndex].fileURL : nil
         next.artName = collection.items.indices.contains(newIndex) ? collection.items[newIndex].name : nil
         next.sound = makeSound?()
+        next.music = makeSound == nil ? nil : AudioMusicOutput()
         next.handlesArrowKeys = false
         ViewerCopy.enable(next)
         next.zoom = zoom
@@ -96,7 +97,7 @@ final class SlideshowViewController: NSViewController {
         view.addSubview(next.view)
         player = next
         view.window?.makeFirstResponder(next.canvasView)
-        if !next.analysis.isAnimated { scheduleAdvance() }
+        if !next.isPlayable { scheduleAdvance() }
         onMove?(newIndex)
     }
 
