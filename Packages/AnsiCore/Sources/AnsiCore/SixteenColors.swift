@@ -289,3 +289,46 @@ public struct RequestSpacing {
 
     public mutating func started(at time: TimeInterval) { lastStart = time }
 }
+
+/// Requests waiting for their turn, in the order they may go: by priority, then first come first
+/// served. One lane serves every request to 16colo.rs, so a selection never waits behind a grid
+/// of thumbnails, and a cancelled waiter (the user moved on) never comes out.
+public struct RequestLane {
+    public enum Priority: Int, Comparable {
+        /// Listings and the selected file (its art and its full size picture).
+        case user
+        /// Thumbnails of visible grid items.
+        case grid
+        /// Thumbnails of visible pack rows.
+        case packRow
+
+        public static func < (a: Priority, b: Priority) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    private var waiting: [(ticket: Int, priority: Priority)] = []
+    private var lastTicket = 0
+
+    public init() {}
+
+    public var count: Int { waiting.count }
+
+    /// Joins the lane; the ticket identifies this waiter.
+    public mutating func enqueue(_ priority: Priority) -> Int {
+        lastTicket += 1
+        waiting.append((lastTicket, priority))
+        return lastTicket
+    }
+
+    /// Leaves the lane. Unknown or already finished tickets are ignored.
+    public mutating func cancel(_ ticket: Int) {
+        waiting.removeAll { $0.ticket == ticket }
+    }
+
+    /// The waiter that goes next (and leaves the lane), or nil when nobody waits.
+    public mutating func next() -> Int? {
+        guard let best = waiting.indices.min(by: { a, b in
+            waiting[a].priority != waiting[b].priority ? waiting[a].priority < waiting[b].priority : waiting[a].ticket < waiting[b].ticket
+        }) else { return nil }
+        return waiting.remove(at: best).ticket
+    }
+}

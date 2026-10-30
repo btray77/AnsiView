@@ -195,6 +195,46 @@ struct SixteenColorsTests {
         #expect(SixteenColors.fileCacheName(pack: "..", file: "x") == nil)
     }
 
+    @Test func laneOrdersByPriorityThenArrival() {
+        var lane = RequestLane()
+        let row = lane.enqueue(.packRow)
+        let grid1 = lane.enqueue(.grid)
+        let user = lane.enqueue(.user)
+        let grid2 = lane.enqueue(.grid)
+        #expect(lane.count == 4)
+        #expect([lane.next(), lane.next(), lane.next(), lane.next(), lane.next()] == [user, grid1, grid2, row, nil])
+        #expect(lane.count == 0)
+    }
+
+    @Test func userBeforeQueuedThumbnails() {
+        var lane = RequestLane()
+        for _ in 0..<20 { _ = lane.enqueue(.grid) }
+        let user = lane.enqueue(.user)
+        #expect(lane.next() == user)
+    }
+
+    @Test func cancelledTicketsNeverComeOut() {
+        var lane = RequestLane()
+        let tickets = (0..<5).map { _ in lane.enqueue(.grid) }
+        for ticket in [tickets[0], tickets[2], tickets[4]] { lane.cancel(ticket) }
+        lane.cancel(tickets[0])
+        lane.cancel(999)
+        #expect(lane.count == 2)
+        #expect([lane.next(), lane.next(), lane.next()] == [tickets[1], tickets[3], nil])
+    }
+
+    /// Arrowing through ten files: each new selection cancels the previous wait; only the last goes out.
+    @Test func staleSelectionsDrain() {
+        var lane = RequestLane()
+        var last = 0
+        for _ in 0..<10 {
+            if last != 0 { lane.cancel(last) }
+            last = lane.enqueue(.user)
+        }
+        #expect(lane.next() == last)
+        #expect(lane.next() == nil)
+    }
+
     @Test func pngSignature() {
         #expect(SixteenColors.isPNG(Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0])))
         #expect(!SixteenColors.isPNG(Data("<!DOCTYPE html>".utf8)))
