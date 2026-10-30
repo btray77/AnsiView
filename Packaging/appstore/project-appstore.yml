@@ -18,6 +18,12 @@ packages:REPLACE:
   libwebp:
     url: https://github.com/SDWebImage/libwebp-Xcode
     exactVersion: 1.6.0
+  swift-nio-ssh:
+    url: https://github.com/apple/swift-nio-ssh
+    exactVersion: 0.15.1
+  swift-nio:
+    url: https://github.com/apple/swift-nio
+    exactVersion: 2.104.0
 targets:
   AnsiView:
     settings:
@@ -42,3 +48,9 @@ targets:
           subpath: Contents/Library/Spotlight
       - package: AnsiCore
       - package: libwebp
+      - package: swift-nio-ssh
+        product: NIOSSH
+      - package: swift-nio
+        product: NIOPosix
+      - package: swift-nio
+        product: NIOCore

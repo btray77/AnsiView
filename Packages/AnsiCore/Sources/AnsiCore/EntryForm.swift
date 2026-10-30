@@ -14,7 +14,7 @@ public enum EntryForm {
         fields.append(.text("name", section: connection, label: "Name", hint: "Only a label for this BBS in the directory list. It is never sent to the BBS and need not match the host.", value: e.name, maxLength: 60))
         fields.append(.text("host", section: connection, label: "Host", hint: "The BBS's internet address, such as bbs.example.com or an IP address. You may also type host:port here.", value: e.host, maxLength: 255))
         fields.append(.number("port", section: connection, label: "Port", hint: "The TCP port the BBS listens on. Telnet BBSes usually use 23; some use 2323 or another number their sysop publishes.", value: e.port, range: 1...65535))
-        fields.append(.choice("mode", section: connection, label: "Protocol", hint: "Telnet suits nearly every BBS. SSH and WebSocket (wss) are encrypted; RLogin logs you in by name. Raw TCP sends bytes unchanged. Left and Right change it.", options: ConnectionMode.allCases.map(\.label), index: ConnectionMode.allCases.firstIndex(of: e.mode) ?? 0))
+        fields.append(.choice("mode", section: connection, label: "Protocol", hint: "Telnet suits nearly every BBS. SSH and wss WebSocket are encrypted. RLogin logs in by name. Raw TCP sends bytes unchanged.", options: ConnectionMode.allCases.map(\.label), index: ConnectionMode.allCases.firstIndex(of: e.mode) ?? 0))
         fields.append(.text("tags", section: connection, label: "Tags", hint: "Groups for the directory's tag filter (press T there), separated by commas, for example: Favourites, Trade Wars games.", value: e.tags.joined(separator: ", "), maxLength: 200))
         fields.append(.text("notes", section: connection, label: "Notes", hint: "Anything you want to remember about this BBS. It shows under the directory list and the / search looks in it.", value: e.notes, maxLength: 300))
         fields += transportFields(e, passphrase: passphrase)
@@ -162,7 +162,7 @@ public enum EntryForm {
             break
         case .ssh:
             let ssh = "SSH"
-            fields.append(.action("chooseKey", section: ssh, label: "Key file", hint: "A private key file (Ed25519 or ECDSA, as made by ssh-keygen) tried before the password. Press Enter to choose one. Most BBSes need no key.", caption: e.sshKeyName ?? "Choose..."))
+            fields.append(.action("chooseKey", section: ssh, label: "Key file", hint: "A private key file (Ed25519 or ECDSA, from ssh-keygen), tried before the password. Enter chooses one. Most BBSes need no key.", caption: e.sshKeyName ?? "Choose..."))
             fields.append(.action("clearKey", section: ssh, label: "Forget key file", hint: "Stops using the key file. The password (or an empty one) is used instead.", caption: "Forget"))
             fields.append(.secret("keyPassphrase", section: ssh, label: "Key passphrase", hint: "The passphrase that protects the key file, if it has one. Saved only in your Mac's Keychain. Needs a username.", value: passphrase, maxLength: 200))
             fields.append(.toggle("trustNewHostKey", section: ssh, label: "Trust new host key", hint: "When on, the BBS's key is saved the first time without asking. A key that changes later is always refused.", isOn: e.sshTrustNewHostKey))

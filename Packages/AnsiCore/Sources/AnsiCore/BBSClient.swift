@@ -104,8 +104,8 @@ public enum BBSConnectionError: Error, Equatable {
             let code = status.map { " (HTTP status \($0))" } ?? ""
             return "\(host) answered as a web server but refused the WebSocket connection\(code). Check the WebSocket path and port the BBS publishes."
         case .rloginRefused(let text):
-            let shown = text.isEmpty ? "no reason given" : text
-            return "The RLogin server refused the login: \(shown)."
+            let shown = text.isEmpty ? "no reason given." : text
+            return "The RLogin server refused the login: \(shown)" + (".!?".contains(shown.last ?? ".") ? "" : ".")
         }
     }
 

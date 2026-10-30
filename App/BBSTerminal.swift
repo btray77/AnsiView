@@ -267,13 +267,29 @@ final class TerminalViewController: NSViewController {
         captureProblem = nil
         busyMatcher = nil
         terminalView.needsDisplay = true
-        let client = BBSClient(host: entry.host, port: entry.port, mode: entry.mode,
-                               columns: emulator.columns, rows: emulator.rows, terminalTypes: entry.terminalTypes)
+        let client = BBSClient(host: entry.host, port: entry.port, settings: TransportSettings(entry: entry),
+                               columns: emulator.columns, rows: emulator.rows, terminalTypes: entry.terminalTypes,
+                               transport: makeTransport())
         client.onData = { [weak self] bytes in self?.receive(bytes) }
         client.onState = { [weak self] state in self?.clientChanged(state) }
         self.client = client
         if playsModemSound { sound?.playbackStateChanged(.connecting) }
         client.connect()
+    }
+
+    /// Asks about SSH host keys (the harness swaps in one that answers by itself).
+    lazy var hostKeys = HostKeyPrompt(window: { [weak self] in self?.view.window })
+    /// Why the SSH key file was not used for this connection.
+    private(set) var transportProblem: String?
+
+    /// The app's SSH transport (AnsiCore makes the others).
+    private func makeTransport() -> BBSTransport? {
+        transportProblem = nil
+        guard entry.mode == .ssh else { return nil }
+        let loaded = SSHLogin.load(entry: entry, passwords: passwords)
+        transportProblem = loaded.problem
+        return SSHTransport(host: entry.host, port: entry.port, settings: TransportSettings(entry: entry), login: loaded.login,
+                            columns: emulator.columns, rows: emulator.rows, queue: .main, verifier: hostKeys)
     }
 
     // MARK: Login, busy text and capture on connect
@@ -286,7 +302,9 @@ final class TerminalViewController: NSViewController {
         let busy = LoginStep.patterns(in: entry.busyText)
         busyMatcher = busy.isEmpty || onBusy == nil ? nil : PromptMatcher(patterns: busy, encoding: entry.encoding)
         if entry.captureOnConnect { startCaptureOnConnect() }
-        if entry.autoLogin, let name = entry.username, !name.isEmpty { runLogin() }
+        // SSH and RLogin already sent the name (and SSH the password), so the script waits for Terminal > Log In.
+        let protocolLogin = entry.mode == .ssh || entry.mode == .rlogin
+        if entry.autoLogin, !protocolLogin, let name = entry.username, !name.isEmpty { runLogin() }
     }
 
     /// Terminal > Log In: runs the entry's login script from its first step.
@@ -395,7 +413,7 @@ final class TerminalViewController: NSViewController {
             if let error {
                 stateText = error.message
                 // A BBS hanging up after logoff is normal: the status line says so, no alert.
-                if showsAlerts, error != .closedByRemote { showError(error) }
+                if showsAlerts, error != .closedByRemote, !error.isHostKeyAnswer { showError(error) }
             } else {
                 stateText = "Disconnected"
             }
@@ -657,7 +675,8 @@ final class TerminalViewController: NSViewController {
     private func updateStatus() {
         var parts = [entry.address, stateText, baud == 0 ? "Unlimited" : "\(baud) baud",
                      "\(emulator.columns)x\(emulator.rows)", entry.encoding.label]
-        if entry.mode == .raw { parts.append("Raw TCP") }
+        if entry.mode != .telnet { parts.append(entry.mode == .webSocket && entry.webSocketSecure ? "WebSocket (wss)" : entry.mode.label) }
+        if let transportProblem { parts.append(transportProblem) }
         if let captureName { parts.append("Capturing to \(captureName)") }
         if scrollOffset > 0 { parts.append("Scrollback -\(scrollOffset)") }
         if let captureProblem { parts.append(captureProblem) }
@@ -748,5 +767,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
         terminal.stopCapture()
         terminal.disconnect()
         Self.open.remove(self)
+    }
+}
+
+private extension BBSConnectionError {
+    /// The host key alert already told the user (or the user said no), so no second alert.
+    var isHostKeyAnswer: Bool {
+        switch self {
+        case .hostKeyChanged, .hostKeyNotTrusted: return true
+        default: return false
+        }
     }
 }
