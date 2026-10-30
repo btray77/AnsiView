@@ -12,7 +12,7 @@ packages:
 settings:
   base:
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "42"
+    CURRENT_PROJECT_VERSION: "43"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -32,7 +32,13 @@ targets:
   AnsiView:
     type: application
     platform: macOS
-    sources: [App, Shared]
+    sources:
+      - App
+      - Shared
+      # Original sample art from Packaging/samples/generate.swift, copied as a folder.
+      - path: Samples
+        type: folder
+        buildPhase: resources
     entitlements:
       path: App/AnsiView.entitlements
       properties:

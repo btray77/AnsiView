@@ -71,6 +71,11 @@ struct AnsiViewApp: App {
             CommandGroup(after: .newItem) {
                 Button("Open Folder or Art Pack...") { GalleryWindowController.chooseAndOpen() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
+                Menu("Open Sample") {
+                    ForEach(SampleArt.all(), id: \.url) { sample in
+                        Button(sample.title) { SampleArt.open(sample) }
+                    }
+                }
             }
             CommandGroup(after: .importExport) {
                 Button("Export Image...") { send(#selector(AnsiCanvasView.exportImage(_:))) }
