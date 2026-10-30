@@ -200,6 +200,15 @@ private func shown(_ actions: [TransferCoordinatorAction]) -> [UInt8] {
         #expect(c.received(Array("Welcome back\r\n".utf8), at: 3, byteClean: true) == [.showOnScreen(Array("Welcome back\r\n".utf8))])
     }
 
+    @Test func restartRightAfterSessionIsOffered() {
+        // The user cancels, then at once asks the BBS to send again: the new start must be asked about.
+        var c = TransferCoordinator(autoAcceptZmodem: false, usesTelnet: false)
+        _ = c.begin(kind: .zmodem, direction: .receive, at: 0, byteClean: true)
+        c.sessionFinished(at: 2)
+        _ = c.received(Array("Starting lsz\r\n".utf8) + zrqinit, at: 2.2, byteClean: true)
+        if case .offering = c.state {} else { Issue.record("a new start right after a session was not offered: \(c.state)") }
+    }
+
     @Test func cancelWhileNegotiatingIsClean() {
         var c = TransferCoordinator(autoAcceptZmodem: false, usesTelnet: true)
         _ = c.received(zrqinit, at: 0, byteClean: false)

@@ -81,8 +81,6 @@ public struct TransferCoordinator {
     public static let binaryWait: Double = 2
     /// Seconds after Ignore during which the same start is drawn without asking.
     public static let quietAfterIgnore: Double = 60
-    /// Seconds after a session ends during which trailing retries of the other side are drawn.
-    public static let quietAfterSession: Double = 3
     /// The lrzsz cancel string: 10 CAN then 10 backspaces (stops ZMODEM, X/YMODEM and Kermit senders).
     public static let cancelSequence: [UInt8] = Array(repeating: 0x18, count: 10) + Array(repeating: 0x08, count: 10)
 
@@ -92,7 +90,6 @@ public struct TransferCoordinator {
     private var detector = TransferStartDetector()
     private var held: [UInt8] = []
     private var quietUntil: [TransferStartDetector.Kind: Double] = [:]
-    private var quietAllUntil: Double = -.infinity
     /// The pending start came from the BBS (its sender or receiver is already running).
     private var remoteStarted = false
 
@@ -131,7 +128,7 @@ public struct TransferCoordinator {
             return []
         case .idle:
             guard let match = detector.scan(bytes) else { return bytes.isEmpty ? [] : [.showOnScreen(bytes)] }
-            if now < quietAllUntil || now < (quietUntil[match.kind] ?? -.infinity) {
+            if now < (quietUntil[match.kind] ?? -.infinity) {
                 detector.reset()
                 return [.showOnScreen(match.terminalBytes + match.transferBytes)]
             }
@@ -202,10 +199,10 @@ public struct TransferCoordinator {
         return []
     }
 
-    /// The running session ended (completed, failed or cancelled).
+    /// The running session ended (completed, failed or cancelled). A new start right after it
+    /// is asked about as usual (the user may have asked the BBS to send again at once).
     public mutating func sessionFinished(at now: Double) {
         reset()
-        quietAllUntil = now + Self.quietAfterSession
     }
 
     /// Escape or Cancel before the session exists: the bar is dismissed like Ignore; a pending
@@ -217,7 +214,6 @@ public struct TransferCoordinator {
         case .negotiating:
             let tell = remoteStarted
             reset()
-            quietAllUntil = now + Self.quietAfterSession
             return tell ? [.sendToRemote(Self.cancelSequence)] : []
         case .idle, .running: return []
         }

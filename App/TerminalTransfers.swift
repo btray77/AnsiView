@@ -839,6 +839,8 @@ final class TransferPanelView: NSView {
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
             bar.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32),
+            fileName.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor, constant: -32),
+            warning.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor, constant: -32),
             summaryScroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32),
             buttons.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -16),
         ])
@@ -890,9 +892,7 @@ final class TransferPanelView: NSView {
         title.toolTip = s.headline
         title.lineBreakMode = .byTruncatingTail
         bar.stopAnimation(nil)
-        bar.isHidden = !s.succeeded
-        bar.isIndeterminate = false
-        bar.doubleValue = 1
+        bar.isHidden = true
         grid.isHidden = true
         fileName.isHidden = s.folder == nil
         fileName.stringValue = s.folder.map { "Saved in " + ($0.path as NSString).abbreviatingWithTildeInPath } ?? ""
