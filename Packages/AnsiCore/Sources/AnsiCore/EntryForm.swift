@@ -6,15 +6,18 @@ import Foundation
 public enum EntryForm {
     static let backspaceOptions = ["BS (8)", "DEL (127)"]
 
-    public static func make(entry e: BBSEntry, password: String, fonts: [String], speeds: [Int]) -> TextForm {
+    /// `passphrase` is the SSH key file's passphrase (from the Keychain, like the password).
+    public static func make(entry e: BBSEntry, password: String, passphrase: String = "", fonts: [String],
+                            speeds: [Int]) -> TextForm {
         var fields: [FormField] = []
         let connection = "Connection"
         fields.append(.text("name", section: connection, label: "Name", hint: "Only a label for this BBS in the directory list. It is never sent to the BBS and need not match the host.", value: e.name, maxLength: 60))
         fields.append(.text("host", section: connection, label: "Host", hint: "The BBS's internet address, such as bbs.example.com or an IP address. You may also type host:port here.", value: e.host, maxLength: 255))
         fields.append(.number("port", section: connection, label: "Port", hint: "The TCP port the BBS listens on. Telnet BBSes usually use 23; some use 2323 or another number their sysop publishes.", value: e.port, range: 1...65535))
-        fields.append(.choice("mode", section: connection, label: "Protocol", hint: "Telnet negotiates screen size and terminal type, and nearly every BBS wants it. Raw TCP sends bytes unchanged, for servers that do not speak telnet.", options: ConnectionMode.allCases.map(\.label), index: ConnectionMode.allCases.firstIndex(of: e.mode) ?? 0))
+        fields.append(.choice("mode", section: connection, label: "Protocol", hint: "Telnet suits nearly every BBS. SSH and WebSocket (wss) are encrypted; RLogin logs you in by name. Raw TCP sends bytes unchanged. Left and Right change it.", options: ConnectionMode.allCases.map(\.label), index: ConnectionMode.allCases.firstIndex(of: e.mode) ?? 0))
         fields.append(.text("tags", section: connection, label: "Tags", hint: "Groups for the directory's tag filter (press T there), separated by commas, for example: Favourites, Trade Wars games.", value: e.tags.joined(separator: ", "), maxLength: 200))
         fields.append(.text("notes", section: connection, label: "Notes", hint: "Anything you want to remember about this BBS. It shows under the directory list and the / search looks in it.", value: e.notes, maxLength: 300))
+        fields += transportFields(e, passphrase: passphrase)
 
         let terminal = "Terminal"
         var types = BBSEntry.standardTerminalTypes
@@ -75,6 +78,16 @@ public enum EntryForm {
         if let v = text("host") { e.host = v.trimmingCharacters(in: .whitespaces) }
         if let f = form.field("port") { e.port = f.number }
         if let f = choice("mode") { e.mode = ConnectionMode.allCases[safe: f.index] ?? .telnet }
+        if let f = form.field("trustNewHostKey") { e.sshTrustNewHostKey = f.isOn }
+        if let f = form.field("wsSecure") { e.webSocketSecure = f.isOn }
+        if let v = text("wsPath") {
+            let trimmed = v.trimmingCharacters(in: .whitespaces)
+            e.webSocketPath = trimmed.isEmpty ? "/" : trimmed
+        }
+        if let v = text("wsSubprotocols") { e.webSocketSubprotocols = v.trimmingCharacters(in: .whitespaces) }
+        if let f = form.field("wsTelnet") { e.webSocketTelnet = f.isOn }
+        if let v = text("rloginClient") { e.rloginClientUser = v.trimmingCharacters(in: .whitespaces) }
+        if let v = text("rloginServer") { e.rloginServerUser = v.trimmingCharacters(in: .whitespaces) }
         if let v = text("tags") { e.tags = v.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
         if let v = text("notes") { e.notes = v }
         if let f = choice("terminalType") { e.terminalType = f.choiceValue }
@@ -117,9 +130,55 @@ public enum EntryForm {
         case "clearFolder":
             e.captureFolderBookmark = nil
             e.captureFolderName = nil
+        case "clearKey":
+            e.sshKeyBookmark = nil
+            e.sshKeyName = nil
         default: break
         }
         return e
+    }
+
+    /// The SSH key passphrase typed (empty when the form has none).
+    public static func passphrase(_ form: TextForm) -> String {
+        form.field("keyPassphrase")?.text ?? ""
+    }
+
+    /// The draft with the form applied after the protocol (or wss) changed: a port still at the
+    /// old protocol's default moves to the new one; a port the user chose stays.
+    public static func changingProtocol(_ form: TextForm, draft: BBSEntry) -> BBSEntry {
+        let old = draft
+        var e = apply(form, to: draft).entry
+        if e.port == old.mode.defaultPort(secure: old.webSocketSecure) {
+            e.port = e.mode.defaultPort(secure: e.webSocketSecure)
+        }
+        return e
+    }
+
+    /// The fields of the chosen protocol (ruling 9 of the transports plan).
+    static func transportFields(_ e: BBSEntry, passphrase: String) -> [FormField] {
+        var fields: [FormField] = []
+        switch e.mode {
+        case .telnet, .raw:
+            break
+        case .ssh:
+            let ssh = "SSH"
+            fields.append(.action("chooseKey", section: ssh, label: "Key file", hint: "A private key file (Ed25519 or ECDSA, as made by ssh-keygen) tried before the password. Press Enter to choose one. Most BBSes need no key.", caption: e.sshKeyName ?? "Choose..."))
+            fields.append(.action("clearKey", section: ssh, label: "Forget key file", hint: "Stops using the key file. The password (or an empty one) is used instead.", caption: "Forget"))
+            fields.append(.secret("keyPassphrase", section: ssh, label: "Key passphrase", hint: "The passphrase that protects the key file, if it has one. Saved only in your Mac's Keychain. Needs a username.", value: passphrase, maxLength: 200))
+            fields.append(.toggle("trustNewHostKey", section: ssh, label: "Trust new host key", hint: "When on, the BBS's key is saved the first time without asking. A key that changes later is always refused.", isOn: e.sshTrustNewHostKey))
+            fields.append(.action("forgetHostKey", section: ssh, label: "Saved host key", hint: "Forgets the host key saved for this address, for when the sysop says the key really changed. The next call asks again.", caption: "Forget"))
+        case .webSocket:
+            let ws = "WebSocket"
+            fields.append(.toggle("wsSecure", section: ws, label: "Secure (wss)", hint: "Uses an encrypted wss:// connection (TLS). Turn it off for a plain ws:// address. The port follows when it is the default.", isOn: e.webSocketSecure))
+            fields.append(.text("wsPath", section: ws, label: "Path", hint: "The part of the WebSocket address after the host and port, such as / or /ws. The BBS's web terminal page shows it.", value: e.webSocketPath, maxLength: 200))
+            fields.append(.text("wsSubprotocols", section: ws, label: "Subprotocols", hint: "Names sent in the Sec-WebSocket-Protocol header, separated by commas, such as telnet or binary. Leave empty if the BBS names none.", value: e.webSocketSubprotocols, maxLength: 120))
+            fields.append(.toggle("wsTelnet", section: ws, label: "Telnet inside", hint: "Turn on when the WebSocket carries a telnet stream (fTelnet or websockify style bridges), so telnet negotiation runs inside it.", isOn: e.webSocketTelnet))
+        case .rlogin:
+            let rl = "RLogin"
+            fields.append(.text("rloginClient", section: rl, label: "Client user", hint: "The client user name sent when connecting. Empty sends your username. Some BBSes expect a password here; check the BBS's RLogin notes.", value: e.rloginClientUser, maxLength: 80))
+            fields.append(.text("rloginServer", section: rl, label: "Server user", hint: "The server user name: the account to log in to on the BBS. Empty sends your username.", value: e.rloginServerUser, maxLength: 80))
+        }
+        return fields
     }
 
     public static func info(for entry: BBSEntry, timeZone: TimeZone = .current) -> String {

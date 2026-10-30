@@ -193,6 +193,8 @@ public struct DialingDirectory: Equatable {
         let chosen = entries.filter { ids?.contains($0.id) ?? true }.map { entry -> BBSEntry in
             var copy = entry
             copy.captureFolderBookmark = nil
+            copy.sshKeyBookmark = nil
+            copy.sshKeyName = nil
             copy.captureFolderName = nil
             copy.captureOnConnect = false
             return copy
