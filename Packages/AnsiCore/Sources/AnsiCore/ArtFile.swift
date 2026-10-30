@@ -135,14 +135,39 @@ public struct ArtFile {
             // DOS end of file marker; anything after it is padding.
             body.removeSubrange(eof...)
         }
+        // iCE files use the blink bit for bright backgrounds instead of blinking.
+        let iceColors = fileExtension?.lowercased() == "ice" || sauce?.iceColors == true
+        var font = BitmapFont.named(sauce?.fontName)
+        var columns = sauce?.columns ?? Self.defaultColumns
+
+        let loaded: (AnsiScreen, BitmapFont?)?
+        switch format {
+        case .bin:
+            // BinaryText without a SAUCE width is conventionally 160 columns.
+            loaded = (BinaryFormats.bin(body, columns: sauce?.columns ?? 160, ice: iceColors), nil)
+        case .xbin: loaded = try? BinaryFormats.xbin(body)
+        case .adf: loaded = (try? BinaryFormats.adf(body)).map { ($0.0, $0.1) }
+        case .idf: loaded = try? BinaryFormats.idf(body)
+        default: loaded = nil
+        }
+
         self.format = format
         self.sauce = sauce
-        self.columns = sauce?.columns ?? Self.defaultColumns
-        // iCE files use the blink bit for bright backgrounds instead of blinking.
-        self.iceColors = fileExtension?.lowercased() == "ice" || sauce?.iceColors == true
-        self.font = BitmapFont.named(sauce?.fontName)
+        self.iceColors = iceColors
         self.ninePixel = sauce?.letterSpacing == .nine
         self.title = sauce.flatMap { $0.title.isEmpty ? nil : $0.title }
-        self.content = .stream(body)
+        if format.isStream {
+            self.content = .stream(body)
+        } else {
+            var screen = loaded?.0 ?? AnsiScreen(columns: columns, rows: [])
+            if let embedded = loaded?.1 { font = embedded }
+            screen.font = font
+            screen.sauce = sauce
+            screen.title = title
+            columns = screen.columns
+            self.content = .screen(screen)
+        }
+        self.columns = columns
+        self.font = font
     }
 }
