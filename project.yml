@@ -12,7 +12,7 @@ packages:
 settings:
   base:
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "10"
+    CURRENT_PROJECT_VERSION: "11"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -51,7 +51,7 @@ targets:
             UTTypeDescription: ANSI Art
             UTTypeConformsTo: [public.data, public.content]
             UTTypeTagSpecification:
-              public.filename-extension: [ans, ice, diz, nfo, asc]
+              public.filename-extension: [ans, ice, diz, nfo, asc, xb, idf, pcb, avt]
         CFBundleDocumentTypes:
           - CFBundleTypeName: ANSI Art
             CFBundleTypeRole: Viewer

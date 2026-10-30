@@ -12,8 +12,9 @@ INSTALL
 
 USE
 
-- In Finder, select any .ANS, .ICE, .DIZ, .NFO or .ASC file and press the
-  spacebar.
+- In Finder, select any .ANS, .ICE, .DIZ, .NFO, .ASC, .XB, .IDF, .PCB or .AVT
+  file and press the spacebar.
+- View > CRT Effect adds scanlines and glow.
 - Or double click the file to open it in the AnsiView app.
 - Click the art to skip an animation to its end, or click again to replay it.
 - In the app, press space to pause, Command ] and Command [ to change speed.

@@ -6,7 +6,10 @@ View classic BBS ANSI art on your Mac. Select a `.ANS` file in Finder and press 
 spacebar: AnsiView draws it the way a DOS screen did, with the VGA 16 color palette,
 solid block and shade characters, and box drawing that lines up without gaps.
 
-- **Quick Look preview.** Spacebar previews for `.ans`, `.ice`, `.diz`, `.nfo` and `.asc` files.
+- **Quick Look preview.** Spacebar previews for `.ans`, `.ice`, `.diz`, `.nfo`, `.asc`, `.xb`, `.idf`, `.pcb` and `.avt` files.
+- **Authentic fonts.** IBM VGA and EGA bitmap fonts chosen from the SAUCE font name, plus fonts embedded in XBin, ADF and IDF files, 9 pixel VGA mode, and 4:3 CRT aspect when the file asks for it.
+- **Every common format.** ANSI, UTF-8 ANSI, 256 and 24 bit color (xterm and PabloDraw), BIN, XBin, ADF, IDF, PCBoard, Wildcat and Avatar. (`.bin` and `.adf` are not claimed in Finder because macOS already uses them for other file types; open them with File > Open.)
+- **CRT effect.** View > CRT Effect adds scanlines, phosphor glow and screen curvature.
 - **Animations play.** Files that redraw themselves replay at modem speed, from 300 baud
   to 115,200 baud or instantly. The default is 2400 baud, the speed most BBS animations
   were timed for. Click the art to skip to the end or replay.
@@ -55,9 +58,13 @@ ansirender --stats *.ans
 
 ## Credits
 
-WebP encoding uses [libwebp](https://chromium.googlesource.com/webm/libwebp) (BSD license)
-via [libwebp-Xcode](https://github.com/SDWebImage/libwebp-Xcode).
+- IBM VGA and EGA fonts: [Oldschool PC Font Pack](https://int10h.org/oldschool-pc-fonts/) by VileR,
+  CC BY-SA 4.0. The font files keep that license. Details in [docs/FONTS.md](docs/FONTS.md).
+- WebP encoding uses [libwebp](https://chromium.googlesource.com/webm/libwebp) (BSD license)
+  via [libwebp-Xcode](https://github.com/SDWebImage/libwebp-Xcode).
+
+See [Credits.md](Credits.md).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+AnsiView's code is MIT. See [LICENSE](LICENSE). Bundled fonts keep their own license (CC BY-SA 4.0).

@@ -77,3 +77,26 @@ private func load(_ raw: [UInt8], _ ext: String? = "ans") -> ArtFile { ArtFile(d
 private extension Array {
     func reserved(_ n: Int) -> [Element] { var a = self; a.reserveCapacity(n); return a }
 }
+
+/// One tiny file of every format: it loads as that format and renders at the expected size.
+@Test(arguments: [
+    (ArtFormat.ansi, "ans", bytes("\u{1B}[1;31mHi")),
+    (ArtFormat.utf8Ansi, "ans", bytes("█ hi")),
+    (ArtFormat.bin, "bin", [0x41, 0x07, 0x42, 0x07]),
+    (ArtFormat.xbin, "xb", bytes("XBIN") + [0x1A, 2, 0, 1, 0, 16, 0, 0x41, 0x07, 0x42, 0x07]),
+    (ArtFormat.adf, "adf", [1] + [UInt8](repeating: 0, count: 192 + 4096) + [0x41, 0x07]),
+    (ArtFormat.idf, "idf", [0x04] + bytes("1.4") + [0, 0, 0, 0, 1, 0, 0, 0, 0x41, 0x07, 0x42, 0x07]
+        + [UInt8](repeating: 0, count: 4096 + 48)),
+    (ArtFormat.pcboard, "pcb", bytes("@X1FHi")),
+    (ArtFormat.wildcat, "txt", bytes("@1F@Hi")),
+    (ArtFormat.avatar, "avt", [0x16, 0x01, 0x1F] + bytes("Hi")),
+])
+func allFormatsRoundTrip(format: ArtFormat, ext: String, raw: [UInt8]) throws {
+    let file = ArtFile(data: Data(raw), fileExtension: ext)
+    #expect(file.format == format)
+    let screen = AnsiAnalysis(file).finalScreen
+    #expect(!screen.rows.isEmpty)
+    let rendered = try #require(AnsiRenderer.render(screen, options: RenderOptions(for: screen, scale: 1)))
+    #expect(rendered.image.width == screen.columns * screen.font.width)
+    #expect(rendered.image.height == screen.rows.count * screen.font.height)
+}

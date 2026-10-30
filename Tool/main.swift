@@ -23,10 +23,10 @@ if args[1] == "--stats" {
         var terminal = AnsiTerminal(source)
         terminal.runToEnd()
         let analysis = AnsiAnalysis(source)
-        print(String(format: "%-14@ bytes=%6d writes=%6d overwrites=%5d clears=%2d blink=%@ animated=%@",
+        print(String(format: "%-14@ bytes=%6d writes=%6d overwrites=%5d clears=%2d blink=%@ animated=%@ format=%@ font=%@",
                      url.lastPathComponent, source.stream.count, terminal.writes, terminal.overwrites,
                      terminal.clearsAfterDrawing, analysis.finalScreen.hasBlink ? "Y" : "n",
-                     analysis.isAnimated ? "Y" : "n"))
+                     analysis.isAnimated ? "Y" : "n", "\(source.format)", source.font.name))
     }
     exit(0)
 }
