@@ -409,22 +409,31 @@ The Protocol field of an entry picks how AnsiView reaches the BBS; the port foll
 
 - **SSH** opens a session with a terminal (the entry's terminal type, columns and rows; a new
   size is sent when you change it) and logs in as the entry's username (`guest` when empty: most
-  BBSes take any name and ask again on their own login screen). It tries the key file if one is
-  chosen, then the password saved in the Keychain, or an empty password when none is saved.
+  BBSes take any name and ask again on their own login screen). It first asks with no
+  password at all (`none`: some BBSes let anyone in and ask on their own screen), then tries the
+  key file if one is chosen, then the password saved in the Keychain (or an empty password when
+  none is saved), then keyboard-interactive: a plain password prompt is answered once from the
+  Keychain; any other question (a second prompt, a new password on first login, no saved
+  password) opens a sheet with the server's prompts, and the answers are sent once and not saved.
   Key files: Ed25519 and ECDSA (P-256, P-384, P-521) in OpenSSH format, with or without a
   passphrase (kept in the Keychain; at most 1024 bcrypt rounds, OpenSSH's default is 16), and PEM
   ECDSA keys. RSA keys are not supported (the SSH
-  library cannot sign with them); make an Ed25519 key with `ssh-keygen -t ed25519`. Keyboard
-  interactive login is not supported either. The first connection to a server shows its host key
+  library cannot sign with them); make an Ed25519 key with `ssh-keygen -t ed25519`. The first
+  connection to a server shows its host key
   fingerprint (`SHA256:...`, as `ssh-keygen -l` prints it) and asks whether to trust it, unless
   the entry's Trust new host key is on; trusted keys are kept in
   `~/Library/Containers/com.traynham.AnsiView/Data/Library/Application Support/AnsiView/known_hosts`
   (OpenSSH format). If a server later offers a different key, AnsiView refuses to connect and
   shows both fingerprints; Forget the Saved Key (or the entry's Saved host key: Forget) lets the
-  next connection ask again. **Limitation:** the SSH library (Apple's swift-nio-ssh) only speaks
-  curve25519 and ECDH key exchange, Ed25519 and ECDSA host keys and AES-GCM. Many BBS SSH servers
-  (Synchronet and other cryptlib based ones, and ENiGMA 1/2 with an RSA host key) offer only
-  older methods, and AnsiView then says so; use their telnet port.
+  next connection ask again. **Algorithms:** modern ones are preferred (curve25519 and ECDH key
+  exchange, Ed25519 and ECDSA host keys, AES-GCM), and the older ones classic BBS servers use
+  follow: Diffie-Hellman group 16, group exchange and group 14 (and group 1 and SHA-1 variants
+  last), RSA (rsa-sha2-512, rsa-sha2-256, ssh-rsa) and DSA host keys, AES-CTR, AES-CBC and 3DES
+  with HMAC-SHA2, HMAC-SHA1 and HMAC-MD5. Synchronet and other cryptlib servers and ENiGMA 1/2
+  connect. When a weak one is in use (SHA-1 or 1024 bit key exchange, ssh-rsa or ssh-dss, CBC or
+  3DES, SHA-1 or MD5 MACs) the status bar says Legacy SSH encryption, and its tooltip names
+  them. A server that offers nothing in common gets a message naming what failed and what it
+  offers. The per board details are in [docs/BBS-COMPAT.md](docs/BBS-COMPAT.md).
 - **WebSocket** connects to `ws://host:port/path`, or `wss://` with Secure on (TLS, with the
   Mac's certificate trust). Data goes out as binary frames; binary and text frames are shown.
   Subprotocols (such as `telnet` or `binary`) are sent when the BBS's web terminal names them.
@@ -764,8 +773,10 @@ Formats: `png jpeg webp gif awebp mp4 html ansi ansi256 text utf8`. Options: `--
 - WebP encoding uses [libwebp](https://chromium.googlesource.com/webm/libwebp) (BSD license)
   via [libwebp-Xcode](https://github.com/SDWebImage/libwebp-Xcode).
 - Updates use [Sparkle](https://sparkle-project.org) (MIT license), in the downloaded build only.
-- SSH connections use Apple's [swift-nio-ssh](https://github.com/apple/swift-nio-ssh) with
-  swift-nio, swift-crypto, swift-atomics, swift-collections and swift-system (Apache License 2.0).
+- SSH connections use a copy of Apple's [swift-nio-ssh](https://github.com/apple/swift-nio-ssh)
+  0.15.1 with classic BBS algorithms added (`Packages/swift-nio-ssh-bbs`, changes listed in its
+  `PATCHES.md`), with swift-nio, swift-crypto, swift-atomics, swift-collections and swift-system
+  (Apache License 2.0).
 - The bundled samples are original, made by `Packaging/samples/generate.swift`.
 - FIGlet fonts: the 18 fonts of the [FIGlet 2.2.5](https://github.com/cmatsuoka/figlet) distribution,
   New BSD license (Glenn Chappell, Ian Chai, John Cowan, Christiaan Keet, Claudio Matsuoka); the

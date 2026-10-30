@@ -133,7 +133,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Transport | Status |
 |---|---|
 | Telnet, raw TCP | done (plan 7) |
-| SSH (password and key, host key trust on first use) | done (merged) (local NIO SSH test server: password, empty password, Ed25519 key with passphrase, first use and changed key). Limit: swift-nio-ssh has no DH key exchange, RSA host keys, CTR ciphers or keyboard interactive, so Synchronet, cryptlib and RSA-only ENiGMA boards cannot connect (measured by read only probes); needs owner decision |
+| SSH (password and key, host key trust on first use) | done (merged) (local NIO SSH test server: password, empty password, Ed25519 key with passphrase, first use and changed key). Classic BBS servers: done on branch ansiview-2.0-ssh-compat (vendored swift-nio-ssh with DH group1/14/16 and group exchange, RSA and DSA host keys, AES-CTR/CBC and 3DES with HMAC, keyboard-interactive, none first, legacy encryption note; every algorithm against OpenSSH 10.2 sshd, keyboard-interactive against the NIO test server, ZMODEM over legacy SSH, read only handshakes with Synchronet and ENiGMA boards up to the host key question; docs/BBS-COMPAT.md) |
 | WebSocket (ws and wss) | done (merged) (local server: binary and text frames, subprotocol, telnet inside, HTTP 404, self signed wss error) |
 | RLogin | done (merged) (local server: handshake bytes, refusal; no window size, see README) |
 | Byte clean channel for transfers | done: all 256 byte values measured end to end over SSH, WebSocket and RLogin |

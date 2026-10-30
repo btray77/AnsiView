@@ -1368,7 +1368,7 @@ final class UserAuthenticationStateMachineTests: XCTestCase {
             stateMachine.sendUserAuthFailure(failure)
         }
 
-        // A public-key probe (no signature) returns PK_OK — and still consumes the last unit of budget.
+        // A public-key probe (no signature) returns PK_OK, and still consumes the last unit of budget.
         let probeKey = NIOSSHPrivateKey(p256Key: .init()).publicKey
         let probe = SSHMessage.UserAuthRequestMessage(
             username: "foo",
@@ -1382,7 +1382,7 @@ final class UserAuthenticationStateMachineTests: XCTestCase {
         )
         stateMachine.sendUserAuthPKOK(.init(key: probeKey))
 
-        // Budget is now exhausted: the next request — even another probe — disconnects.
+        // Budget is now exhausted: the next request, even another probe, disconnects.
         let disconnect = SSHMessage.DisconnectMessage(
             reason: 11,
             description: "Too many authentication failures",
