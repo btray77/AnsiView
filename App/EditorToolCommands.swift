@@ -45,6 +45,21 @@ struct EditorToolCommands: Commands {
             Button("Full Screen Editing") { send(#selector(NSWindow.toggleFullScreen(_:))) }
             Button("Editor Shortcuts...") { ShortcutsWindowController.shared.showWindow(nil) }
             Divider()
+            // Animation (animation plan, ruling 10).
+            Button("Animation Timeline") { send(#selector(EditorCanvasView.toggleAnimationTimeline(_:))) }
+            Button("New Frame") { send(#selector(EditorCanvasView.newAnimationFrame(_:))) }
+                .keyboardShortcut("n", modifiers: [.control, .command])
+            Button("Duplicate Frame") { send(#selector(EditorCanvasView.duplicateAnimationFrame(_:))) }
+            Button("Delete Frame") { send(#selector(EditorCanvasView.deleteAnimationFrame(_:))) }
+            Button("Previous Frame") { send(#selector(EditorCanvasView.previousAnimationFrame(_:))) }
+                .keyboardShortcut("[", modifiers: [.control, .command])
+            Button("Next Frame") { send(#selector(EditorCanvasView.nextAnimationFrame(_:))) }
+                .keyboardShortcut("]", modifiers: [.control, .command])
+            Button("Onion Skin") { send(#selector(EditorCanvasView.toggleOnionSkin(_:))) }
+            Button("Play Animation") { send(#selector(EditorCanvasView.playAnimation(_:))) }
+            Button("Export Animation...") { send(#selector(EditorCanvasView.exportAnimation(_:))) }
+            Button("Import Animation...") { AnimationImportAction.chooseAndOpen() }
+            Divider()
             Button("Open Project...") { EditorWindowController.openProject() }
             Button("Save Project...") { send(#selector(EditorCanvasView.saveProject(_:))) }
         }

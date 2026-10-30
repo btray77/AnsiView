@@ -49,6 +49,7 @@ public final class CanvasEditor {
     public init(canvas: EditCanvas = EditCanvas()) {
         self.canvas = canvas
         layerStore = [CanvasLayer(name: "Background", canvas: canvas)]
+        frameStore = [AnimationFrame(layers: layerStore)]
         undoManager = UndoManager()
         // Groups are opened and closed by each command, so undo works without a run loop.
         undoManager.groupsByEvent = false
@@ -512,7 +513,30 @@ public final class CanvasEditor {
     /// The layer being edited (0 is the bottom). `canvas` is that layer's cells.
     public private(set) var activeLayer = 0
     /// Every layer; the active one's entry is refreshed from `canvas` when read.
-    private var layerStore: [CanvasLayer] = []
+    var layerStore: [CanvasLayer] = []
+
+    // MARK: Animation frames (animation plan, rulings 1 to 3; commands in CanvasEditorFrames.swift)
+
+    /// Every frame; the current one's layers and edit log live in `layerStore`, `canvas` and `liveEdits`.
+    var frameStore: [AnimationFrame] = []
+    /// The frame being edited (0 is the first).
+    public internal(set) var currentFrame = 0
+    /// The current frame's edit log.
+    var liveEdits: [CellEdit] = []
+    /// The flattened frame when the log last looked, to find what changed.
+    var lastLogged: EditCanvas?
+    /// Seconds on `clock` when recording began.
+    var recordStart = 0.0
+    /// Log the order cells change in (the animation timeline turns this on).
+    public var tracksEdits = false {
+        didSet { lastLogged = tracksEdits ? flattenedCanvas : nil }
+    }
+    /// Record mode: log entries carry the time since recording began.
+    public var recording = false {
+        didSet { if recording && !oldValue { recordStart = clock() } }
+    }
+    /// The time source for record mode (tests replace it).
+    public var clock: () -> Double = { ProcessInfo.processInfo.systemUptime }
 
     /// All layers, bottom first.
     public var layers: [CanvasLayer] {
@@ -527,23 +551,24 @@ public final class CanvasEditor {
     }
 
     /// The layers as a project file.
-    public var project: ArtProject { ArtProject(layers: layers, activeLayer: activeLayer) }
+    public var project: ArtProject { ArtProject(frames: frames, currentFrame: currentFrame) }
 
     public convenience init(project: ArtProject) {
-        self.init(canvas: project.layers[project.activeLayer].canvas)
-        layerStore = project.layers
-        activeLayer = project.activeLayer
+        self.init(frames: project.frames, current: project.currentFrame)
     }
 
     /// Applies a change to every layer (size, iCE and metadata changes).
     func forEachLayer(_ body: (inout EditCanvas) -> Void) {
         body(&canvas)
         for index in layerStore.indices where index != activeLayer { body(&layerStore[index].canvas) }
+        for frame in frameStore.indices where frame != currentFrame {
+            for index in frameStore[frame].layers.indices { body(&frameStore[frame].layers[index].canvas) }
+        }
     }
 
-    private func syncActiveLayer() { layerStore[activeLayer].canvas = canvas }
+    func syncActiveLayer() { layerStore[activeLayer].canvas = canvas }
 
-    private func activate(_ index: Int) {
+    func activate(_ index: Int) {
         activeLayer = min(layerStore.count - 1, max(0, index))
         canvas = layerStore[activeLayer].canvas
     }
@@ -644,13 +669,20 @@ public final class CanvasEditor {
         var layers: [CanvasLayer]
         var activeLayer: Int
         var revision: Int
+        var frames: [AnimationFrame]
+        var currentFrame: Int
+        var edits: [CellEdit]
 
         func sameContent(as other: Snapshot) -> Bool {
             canvas == other.canvas && activeLayer == other.activeLayer && layers == other.layers
+                && currentFrame == other.currentFrame && edits == other.edits && frames == other.frames
         }
     }
 
-    var snapshot: Snapshot { Snapshot(canvas: canvas, layers: layerStore, activeLayer: activeLayer, revision: revision) }
+    var snapshot: Snapshot {
+        Snapshot(canvas: canvas, layers: layerStore, activeLayer: activeLayer, revision: revision,
+                 frames: frameStore, currentFrame: currentFrame, edits: liveEdits)
+    }
 
     /// Runs one undoable change. Nothing is registered when nothing changed. Nothing
     /// runs while a paste floats: it is placed or cancelled first.
@@ -659,6 +691,7 @@ public final class CanvasEditor {
         let before = snapshot
         change(self)
         clampToCanvas()
+        logEdits()
         if !snapshot.sameContent(as: before) {
             revision = newRevision()
             registerUndo(restoring: before, name: name)
@@ -690,6 +723,10 @@ public final class CanvasEditor {
         layerStore = state.layers
         activeLayer = state.activeLayer
         revision = state.revision
+        frameStore = state.frames
+        currentFrame = state.currentFrame
+        liveEdits = state.edits
+        if tracksEdits { lastLogged = flattenedCanvas }
         undoManager.registerUndo(withTarget: self) { editor in
             editor.restore(redo, redo: state, name: name)
         }
@@ -736,7 +773,10 @@ public final class CanvasEditor {
         if let block = floating, block.x >= canvas.columns { floating?.x = canvas.columns - 1 }
     }
 
-    func changed() { onChange?() }
+    func changed() {
+        logEdits()
+        onChange?()
+    }
 
     // MARK: Cell data
 

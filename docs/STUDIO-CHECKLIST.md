@@ -93,12 +93,12 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 
 | Requirement | Status | Item / plan |
 |---|---|---|
-| Frame editor, copy previous frame, onion skin, timeline | planned | item 59 |
-| Record drawing sequences | planned | item 59 |
-| Playback speed, baud 300 to 28800 and more | done for playback | plan 2 |
-| Edit individual frames / commands | planned | item 59 |
-| Import existing animated ANSI into frames | planned | item 59 |
-| Export compatible sequences; timing via padding only, custom extensions labelled | planned | item 59 |
+| Frame editor, copy previous frame, onion skin, timeline | done (harness verified; live check needs owner), item 59 |
+| Record drawing sequences | done (record mode timestamps edits; As drawn export replays pauses), item 59 |
+| Playback speed, baud 300 to 28800 and more | done for playback (plan 2); animation preview and export at 300 to 115200 baud, item 59 |
+| Edit individual frames / commands | done: each frame is a full editor canvas with layers; per frame delay; the as drawn edit order is kept per frame, item 59 |
+| Import existing animated ANSI into frames | done: 15 of 15 animated corpus files split with exact replay, item 59 |
+| Export compatible sequences; timing via padding only, custom extensions labelled | done: diff export in 3 orders, CR padding delays, frame markers off by default and labelled; GIF and MP4 through the exporters, item 59 |
 
 ## 6. Formats
 

@@ -56,7 +56,7 @@ public struct AnsiAnalysis {
         var terminal = AnsiTerminal(file)
         terminal.runToEnd()
         finalScreen = terminal.screen()
-        isAnimated = terminal.clearsAfterDrawing > 0
+        isAnimated = terminal.clearsAfterDrawing > 0 || terminal.pauses > 0
             || terminal.overwrites > max(40, terminal.writes / 50)
         // Animations were made for a 25 line DOS screen.
         canvasRows = max(terminal.highestRow + 1, isAnimated ? 25 : 1)
@@ -87,6 +87,10 @@ public struct AnsiTerminal {
     public private(set) var clearsAfterDrawing = 0
     /// Counts every change to the cells: character writes, line erases and screen erases.
     public private(set) var edits = 0
+    /// Padding pauses: runs of `pauseLength` or more CRs after drawing (animation plan, ruling 8).
+    public private(set) var pauses = 0
+    public static let pauseLength = 8
+    private var carriageReturns = 0
     /// The row the cursor is on (0 based, canvas coordinates).
     public var cursorRow: Int { y }
 
@@ -130,6 +134,12 @@ public struct AnsiTerminal {
         var i = position
         while i < target {
             let b = bytes[i]
+            if b == 0x0D {
+                carriageReturns += 1
+                if carriageReturns == Self.pauseLength, writes > 0 { pauses += 1 }
+            } else {
+                carriageReturns = 0
+            }
             switch b {
             case 0x1B:
                 guard i + 1 < n, bytes[i + 1] == 0x5B else { i += 2; continue }

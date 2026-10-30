@@ -137,8 +137,9 @@ import Testing
 
     @Test func rejectsOtherFilesAndNewerVersions() {
         #expect(throws: ArtProject.ProjectError.self) { try ArtProject(data: Data("not json".utf8)) }
-        let newer = Data(#"{"format":"AnsiView project","version":2,"frames":[]}"#.utf8)
-        #expect(throws: ArtProject.ProjectError.newerVersion(2)) { try ArtProject(data: newer) }
+        // Version 2 is the animation format (animation plan, ruling 9); 3 is newer.
+        let newer = Data(#"{"format":"AnsiView project","version":3,"frames":[]}"#.utf8)
+        #expect(throws: ArtProject.ProjectError.newerVersion(3)) { try ArtProject(data: newer) }
         let other = Data(#"{"format":"Something else","version":1}"#.utf8)
         #expect(throws: ArtProject.ProjectError.notAProject) { try ArtProject(data: other) }
     }
