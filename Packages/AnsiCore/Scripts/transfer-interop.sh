@@ -160,17 +160,36 @@ t_zresume() {
 
 KERMIT="kermit -Y -q -B"
 
+# C-Kermit 9.0.302 (Homebrew, macOS 26) refuses to create a new file when receiving: its zchko()
+# check opens the not yet existing name and reports "Write access denied", also with another
+# C-Kermit as the sender. Workaround: give each expected file placeholder content (so a failed
+# transfer cannot pass) and let C-Kermit overwrite it (-w).
+placeholders() { local f; for f in $SIZES; do echo "placeholder, not transferred" > "$1/$f"; done; }
+
 t_kermit() {
     local out=$WORK/k f opts
-    for opts in "" "--check 1" "--check 2" "--packet 94" "--eighth-bit" "--kermit-window 8"; do
+    for opts in "" "--check 1" "--check 2" "--packet 94" "--eighth-bit" "--kermit-window 8" "--kermit-window 31 --packet 94"; do
         fresh "$out"
-        echo "+ ansixfer send kermit $opts <all sizes> --pty \"kermit -i -r\""
-        (cd "$F" && "$X" send kermit --quiet $opts $SIZES --pty "cd '$out' && $KERMIT -i -r 2>>'$WORK/kermit.log'") | tail -2
+        placeholders "$out"
+        echo "+ ansixfer send kermit $opts <all sizes> --pty \"kermit -i -w -r\""
+        (cd "$F" && "$X" send kermit $opts $SIZES --pty "cd '$out' && $KERMIT -i -w -r 2>>'$WORK/kermit.log'") 2>&1 | grep -E "negotiated|^result|^elapsed"
         for f in $SIZES; do check "kermit ours->ckermit $opts" "$F/$f" "$out/$f"; done
         fresh "$out"
-        echo "+ ansixfer receive kermit $opts --pty \"kermit -i -s <all sizes>\""
-        "$X" receive kermit --quiet $opts --dir "$out" --pty "cd '$F' && $KERMIT -i -s $SIZES 2>>'$WORK/kermit.log'" | tail -2
-        for f in $SIZES; do check "kermit ckermit->ours $opts" "$F/$f" "$out/$f"; done
+        echo "+ ansixfer receive kermit $opts --pty \"kermit -i -s <all sizes>\"   (C-Kermit sends names in upper case)"
+        "$X" receive kermit $opts --dir "$out" --pty "cd '$F' && $KERMIT -i -s $SIZES 2>>'$WORK/kermit.log'" 2>&1 | grep -E "negotiated|^result|^elapsed"
+        for f in $SIZES; do check "kermit ckermit->ours $opts" "$F/$f" "$out/$(echo "$f" | tr a-z A-Z)"; done
+    done
+    # C-Kermit's own window and packet settings (-v window slots, -e packet length).
+    for kopts in "-v 31 -e 9024" "-v 4 -e 1000" "-v 1 -e 94"; do
+        fresh "$out"
+        echo "+ ansixfer receive kermit --kermit-window 31 --packet 9024 --pty \"kermit $kopts -i -s r1048576.bin\""
+        "$X" receive kermit --kermit-window 31 --packet 9024 --dir "$out" --pty "cd '$F' && $KERMIT $kopts -i -s r1048576.bin 2>>'$WORK/kermit.log'" 2>&1 | grep -E "negotiated|^result|^elapsed"
+        check "kermit ckermit $kopts->ours" "$F/r1048576.bin" "$out/R1048576.BIN"
+        fresh "$out"
+        placeholders "$out"
+        echo "+ ansixfer send kermit --kermit-window 31 --packet 9024 r1048576.bin --pty \"kermit $kopts -i -w -r\""
+        (cd "$F" && "$X" send kermit --kermit-window 31 --packet 9024 r1048576.bin --pty "cd '$out' && $KERMIT $kopts -i -w -r 2>>'$WORK/kermit.log'") 2>&1 | grep -E "negotiated|^result|^elapsed"
+        check "kermit ours->ckermit $kopts" "$F/r1048576.bin" "$out/r1048576.bin"
     done
 }
 

@@ -201,7 +201,7 @@ public enum TransferEngineFactory {
         case .zmodem:
             return ZModemSender(files: files, clock: clock, options: options)
         case .kermit:
-            return UnavailableEngine(kind: kind, clock: clock, options: options)
+            return KermitSender(files: files, clock: clock, options: options)
         }
     }
 
@@ -213,17 +213,7 @@ public enum TransferEngineFactory {
         case .zmodem:
             return ZModemReceiver(sink: sink, clock: clock, options: options)
         case .kermit:
-            return UnavailableEngine(kind: kind, clock: clock, options: options)
+            return KermitReceiver(sink: sink, clock: clock, options: options)
         }
     }
-}
-
-final class UnavailableEngine: TransferEngine {
-    let kind: TransferProtocolKind
-    init(kind: TransferProtocolKind, clock: TransferClock, options: TransferOptions) {
-        self.kind = kind
-        super.init(clock: clock, options: options)
-    }
-
-    override func begin() { fail("\(kind.displayName) is not available", cancelRemote: false) }
 }
