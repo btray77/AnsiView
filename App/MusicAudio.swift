@@ -12,6 +12,7 @@ final class MusicAudioPlayer {
     private var generation = 0
     private(set) var isPaused = false
     private(set) var duration = 0.0
+    private var pausedTime = 0.0
 
     /// Called on the main queue when the music plays to its end.
     var onFinish: (() -> Void)?
@@ -21,6 +22,7 @@ final class MusicAudioPlayer {
 
     /// Seconds played since `play` (frozen while paused).
     var currentTime: Double {
+        if isPaused { return pausedTime }
         guard let renderTime = node.lastRenderTime, let playerTime = node.playerTime(forNodeTime: renderTime) else { return 0 }
         return max(0, min(duration, Double(playerTime.sampleTime) / playerTime.sampleRate))
     }
@@ -51,6 +53,8 @@ final class MusicAudioPlayer {
         node.scheduleBuffer(buffer, at: nil, options: [], completionCallbackType: .dataPlayedBack) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, self.generation == current else { return }
+                // Stop the node so isPlaying is false once the audio has ended.
+                self.node.stop()
                 self.isPaused = false
                 self.onFinish?()
             }
@@ -61,6 +65,7 @@ final class MusicAudioPlayer {
 
     func pause() {
         guard node.isPlaying else { return }
+        pausedTime = currentTime
         node.pause()
         isPaused = true
     }
