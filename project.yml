@@ -126,6 +126,9 @@ targets:
       - target: AnsiPreview
       - target: AnsiThumbnail
       - target: AnsiSpotlight
+      # Finder Quick Actions (plan 10 item 54): Convert to PNG and Convert to GIF.
+      - target: AnsiConvertPNG
+      - target: AnsiConvertGIF
       # Legacy Spotlight importer: macOS 26 does not run the Core Spotlight import extension
       # during indexing (see plan 3 ruling 9), so this is what fills the index.
       - target: AnsiImporter
@@ -222,6 +225,86 @@ targets:
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ImportExtension
           NSExtensionAttributes:
             CSSupportedContentTypes: [com.traynham.ansiview.ans, com.traynham.ansiview.asc]
+  AnsiConvertPNG:
+    type: app-extension
+    platform: macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.ConvertPNG
+    sources: [QuickAction, Shared, App/AnsiExport.swift, App/ArtActions.swift]
+    dependencies:
+      - package: AnsiCore
+      - package: libwebp
+    entitlements:
+      path: QuickAction/AnsiConvertPNG.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        # The files Finder hands the action.
+        com.apple.security.files.user-selected.read-only: true
+        # The sandbox does not let the action write beside the art, so results go to Downloads
+        # (plan 10 ruling 9). No network entitlement.
+        com.apple.security.files.downloads.read-write: true
+    info:
+      path: QuickAction/Info-PNG.plist
+      properties:
+        CFBundleDisplayName: Convert to PNG
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AnsiViewQuickActionFormat: png
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).QuickActionHandler
+          NSExtensionAttributes:
+            NSExtensionActivationRule: >-
+              SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $attachment,
+              ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.ans"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.asc"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.apple.macbinary-archive"
+              ).@count >= 1).@count >= 1
+            NSExtensionServiceAllowsFinderPreviewItem: true
+            NSExtensionServiceAllowsTouchBarItem: false
+            NSExtensionServiceFinderPreviewIconName: NSActionTemplate
+            NSExtensionServiceRoleType: NSExtensionServiceRoleTypeEditor
+  AnsiConvertGIF:
+    type: app-extension
+    platform: macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.ConvertGIF
+    sources: [QuickAction, Shared, App/AnsiExport.swift, App/ArtActions.swift]
+    dependencies:
+      - package: AnsiCore
+      - package: libwebp
+    entitlements:
+      path: QuickAction/AnsiConvertGIF.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        # The files Finder hands the action.
+        com.apple.security.files.user-selected.read-only: true
+        # The sandbox does not let the action write beside the art, so results go to Downloads
+        # (plan 10 ruling 9). No network entitlement.
+        com.apple.security.files.downloads.read-write: true
+    info:
+      path: QuickAction/Info-GIF.plist
+      properties:
+        CFBundleDisplayName: Convert to GIF
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AnsiViewQuickActionFormat: gif
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).QuickActionHandler
+          NSExtensionAttributes:
+            NSExtensionActivationRule: >-
+              SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $attachment,
+              ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.ans"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.asc"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.apple.macbinary-archive"
+              ).@count >= 1).@count >= 1
+            NSExtensionServiceAllowsFinderPreviewItem: true
+            NSExtensionServiceAllowsTouchBarItem: false
+            NSExtensionServiceFinderPreviewIconName: NSActionTemplate
+            NSExtensionServiceRoleType: NSExtensionServiceRoleTypeEditor
   AnsiImporter:
     type: bundle
     platform: macOS
