@@ -40,7 +40,7 @@ func sauceRecord(width: UInt16, flags: UInt8 = 0, fileSize: Int = 0) -> [UInt8] 
 
 @Test func boldGivesBrightForeground() {
     let s = parse(bytes("\u{1B}[1;31mX"))
-    #expect(s.rows[0][0].fg == 12)
+    #expect(s.rows[0][0].fg == Palette.vga[12])
 }
 
 @Test func cursorPositionIsOneBased() {

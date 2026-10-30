@@ -20,14 +20,6 @@ public enum AnsiRenderer {
     public static let cellWidth = 8
     public static let cellHeight = 16
 
-    /// Standard VGA text mode palette, RGB.
-    public static let palette: [(UInt8, UInt8, UInt8)] = [
-        (0x00, 0x00, 0x00), (0x00, 0x00, 0xAA), (0x00, 0xAA, 0x00), (0x00, 0xAA, 0xAA),
-        (0xAA, 0x00, 0x00), (0xAA, 0x00, 0xAA), (0xAA, 0x55, 0x00), (0xAA, 0xAA, 0xAA),
-        (0x55, 0x55, 0x55), (0x55, 0x55, 0xFF), (0x55, 0xFF, 0x55), (0x55, 0xFF, 0xFF),
-        (0xFF, 0x55, 0x55), (0xFF, 0x55, 0xFF), (0xFF, 0xFF, 0x55), (0xFF, 0xFF, 0xFF),
-    ]
-
     /// Scale used for a screen of this height: 2x normally, 1x for very tall files to bound memory.
     public static func preferredScale(rows: Int) -> Int {
         rows <= 250 ? 2 : 1
@@ -47,16 +39,15 @@ public enum AnsiRenderer {
         let width = screen.columns * cw
         let height = rowCount * ch
 
-        var pixels = [UInt32](repeating: packed(palette[0]), count: width * height)
-        let packedPalette = palette.map(packed)
+        var pixels = [UInt32](repeating: packed(Palette.vga[0]), count: width * height)
         pixels.withUnsafeMutableBufferPointer { out in
             for (rowIndex, row) in screen.rows.enumerated() {
                 for (colIndex, cell) in row.enumerated() where colIndex < screen.columns {
                     let mask = atlas.mask(for: cell.blink && !blinkVisible ? 0x20 : cell.code)
-                    let fg = palette[Int(cell.fg & 0x0F)]
-                    let bg = palette[Int(cell.bg & 0x0F)]
-                    let bgPacked = packedPalette[Int(cell.bg & 0x0F)]
-                    let fgPacked = packedPalette[Int(cell.fg & 0x0F)]
+                    let fg = cell.fg
+                    let bg = cell.bg
+                    let bgPacked = packed(bg)
+                    let fgPacked = packed(fg)
                     let originX = colIndex * cw
                     let originY = rowIndex * ch
                     for py in 0..<ch {
@@ -91,15 +82,15 @@ public enum AnsiRenderer {
     }
 
     // RGBX in memory order, which is little endian UInt32 0xXXBBGGRR.
-    private static func packed(_ c: (UInt8, UInt8, UInt8)) -> UInt32 {
-        UInt32(c.0) | UInt32(c.1) << 8 | UInt32(c.2) << 16 | 0xFF00_0000
+    private static func packed(_ c: RGB) -> UInt32 {
+        UInt32(c.r) | UInt32(c.g) << 8 | UInt32(c.b) << 16 | 0xFF00_0000
     }
 
-    private static func blend(_ bg: (UInt8, UInt8, UInt8), _ fg: (UInt8, UInt8, UInt8), _ a: UInt8) -> (UInt8, UInt8, UInt8) {
+    private static func blend(_ bg: RGB, _ fg: RGB, _ a: UInt8) -> RGB {
         func mix(_ b: UInt8, _ f: UInt8) -> UInt8 {
             UInt8((Int(b) * (255 - Int(a)) + Int(f) * Int(a)) / 255)
         }
-        return (mix(bg.0, fg.0), mix(bg.1, fg.1), mix(bg.2, fg.2))
+        return RGB(r: mix(bg.r, fg.r), g: mix(bg.g, fg.g), b: mix(bg.b, fg.b))
     }
 }
 
