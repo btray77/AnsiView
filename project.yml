@@ -129,6 +129,11 @@ targets:
       # Finder Quick Actions (plan 10 item 54): Convert to PNG and Convert to GIF.
       - target: AnsiConvertPNG
       - target: AnsiConvertGIF
+      # The screen saver (plan 10 item 48), kept in Resources for File > Install Screen Saver.
+      - target: AnsiSaver
+        embed: true
+        copy:
+          destination: resources
       # Legacy Spotlight importer: macOS 26 does not run the Core Spotlight import extension
       # during indexing (see plan 3 ruling 9), so this is what fills the index.
       - target: AnsiImporter
@@ -305,6 +310,32 @@ targets:
             NSExtensionServiceAllowsTouchBarItem: false
             NSExtensionServiceFinderPreviewIconName: NSActionTemplate
             NSExtensionServiceRoleType: NSExtensionServiceRoleTypeEditor
+  AnsiSaver:
+    type: bundle
+    platform: macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.Saver
+        PRODUCT_NAME: AnsiView
+        PRODUCT_MODULE_NAME: AnsiSaver
+        WRAPPER_EXTENSION: saver
+        SKIP_INSTALL: YES
+    sources:
+      - Saver
+      # The same original samples the app ships, played when no folder is chosen.
+      - path: Samples
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: AnsiCore
+    info:
+      path: Saver/Info.plist
+      properties:
+        CFBundleDisplayName: AnsiView
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSPrincipalClass: AnsiSaverView
+        NSHumanReadableCopyright: Copyright 2026 Brad Traynham
   AnsiImporter:
     type: bundle
     platform: macOS

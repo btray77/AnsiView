@@ -158,6 +158,8 @@ struct AnsiViewApp: App {
                         })
                 }
                 Button("Connect to BBS...") { DialingDirectoryWindowController.show() }
+                Button("Install Screen Saver...") { ScreenSaverInstall.run() }
+                    .help("Hands AnsiView's screen saver to macOS, which asks before adding it to System Settings > Screen Saver.")
                 Menu("Open Sample") {
                     ForEach(SampleArt.all(), id: \.url) { sample in
                         Button(sample.title) { SampleArt.open(sample) }
