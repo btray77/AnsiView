@@ -73,9 +73,6 @@ public enum AnsiParser {
 public struct AnsiTerminal {
     public static let maxRows = 1500
 
-    /// A color as set by escape codes: a classic ANSI index (0-7, brightened by bold) or an exact color.
-    private enum ColorSpec { case index(Int), rgb(RGB) }
-
     public let source: ArtFile
     public private(set) var position = 0
     public private(set) var highestRow = -1
@@ -96,13 +93,7 @@ public struct AnsiTerminal {
     private var savedX = 0
     private var savedY = 0
     private var pendingWrap = false
-    private var fg = ColorSpec.index(7)
-    private var bg = ColorSpec.index(0)
-    private var bold = false
-    private var blink = false
-    private var inverse = false
-    private var brightFG = false
-    private var brightBG = false
+    private var attributes = TextAttributes()
 
     private let bytes: [UInt8]
 
@@ -207,19 +198,7 @@ public struct AnsiTerminal {
 
     // MARK: Interpretation
 
-    private var currentColors: (fg: RGB, bg: RGB) {
-        var f: RGB, b: RGB
-        switch fg {
-        case .index(let i): f = Palette.vga[Palette.ansiToVGA[i] + (bold || brightFG ? 8 : 0)]
-        case .rgb(let color): f = color
-        }
-        switch bg {
-        case .index(let i): b = Palette.vga[Palette.ansiToVGA[i] + ((source.iceColors && blink) || brightBG ? 8 : 0)]
-        case .rgb(let color): b = color
-        }
-        if inverse { swap(&f, &b) }
-        return (f, b)
-    }
+    private var currentColors: (fg: RGB, bg: RGB) { attributes.colors(iceColors: source.iceColors) }
 
     private var blankCell: AnsiCell { AnsiCell(code: 0x20, fg: Palette.vga[7], bg: currentColors.bg) }
 
@@ -239,7 +218,7 @@ public struct AnsiTerminal {
         }
         if ensureRow(y) {
             let colors = currentColors
-            let cell = AnsiCell(code: code, fg: colors.fg, bg: colors.bg, blink: blink && !source.iceColors, scalar: scalar)
+            let cell = AnsiCell(code: code, fg: colors.fg, bg: colors.bg, blink: attributes.blink && !source.iceColors, scalar: scalar)
             let previous = rows[y][x]
             if previous.code != 0x20, previous.code != 0, previous != cell { overwrites += 1 }
             rows[y][x] = cell
@@ -294,47 +273,11 @@ public struct AnsiTerminal {
             x = savedX
             y = savedY
         case UInt8(ascii: "m"):
-            sgr(params.isEmpty ? [0] : params.map { $0 ?? 0 })
+            attributes.apply(params.isEmpty ? [0] : params.map { $0 ?? 0 })
         case UInt8(ascii: "t"):
-            // PabloDraw 24 bit color: ESC[0;r;g;bt sets the background, ESC[1;r;g;bt the foreground.
-            if params.count >= 4 {
-                let color = RGB(r: UInt8(min(255, p(1, 0))), g: UInt8(min(255, p(2, 0))), b: UInt8(min(255, p(3, 0))))
-                if p(0, 0) == 1 { fg = .rgb(color) } else if p(0, 0) == 0 { bg = .rgb(color) }
-            }
+            attributes.applyPabloDraw(params.map { $0 ?? 0 })
         default:
             break
-        }
-    }
-
-    private mutating func sgr(_ codes: [Int]) {
-        var i = 0
-        while i < codes.count {
-            let code = codes[i]
-            switch code {
-            case 0:
-                fg = .index(7); bg = .index(0)
-                bold = false; blink = false; inverse = false
-                brightFG = false; brightBG = false
-            case 1: bold = true
-            case 5, 6: blink = true
-            case 7: inverse = true
-            case 22: bold = false
-            case 25: blink = false
-            case 27: inverse = false
-            case 30...37: fg = .index(code - 30); brightFG = false
-            case 39: fg = .index(7); brightFG = false
-            case 40...47: bg = .index(code - 40); brightBG = false
-            case 49: bg = .index(0); brightBG = false
-            case 90...97: fg = .index(code - 90); brightFG = true
-            case 100...107: bg = .index(code - 100); brightBG = true
-            case 38, 48:
-                // 38;5;n or 38;2;r;g;b (48 for background). A malformed tail ends the sequence.
-                guard let (color, used) = Self.extendedColor(codes, from: i + 1) else { return }
-                if code == 38 { fg = .rgb(color) } else { bg = .rgb(color) }
-                i += used
-            default: break
-            }
-            i += 1
         }
     }
 
@@ -357,19 +300,5 @@ public struct AnsiTerminal {
         }
         guard let scalar = Unicode.Scalar(value) else { return nil }
         return (scalar, length)
-    }
-
-    /// Reads the parameters after 38 or 48. Returns the color and how many parameters it used.
-    private static func extendedColor(_ codes: [Int], from start: Int) -> (RGB, Int)? {
-        guard start < codes.count else { return nil }
-        switch codes[start] {
-        case 5 where start + 1 < codes.count:
-            return (Palette.xterm256[min(255, codes[start + 1])], 2)
-        case 2 where start + 3 < codes.count:
-            let c = codes[(start + 1)...(start + 3)].map { UInt8(min(255, $0)) }
-            return (RGB(r: c[0], g: c[1], b: c[2]), 4)
-        default:
-            return nil
-        }
     }
 }
