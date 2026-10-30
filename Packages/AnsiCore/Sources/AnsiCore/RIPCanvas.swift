@@ -76,8 +76,10 @@ public struct RIPCanvas {
     }
 
     mutating func erase(x0: Int, y0: Int, x1: Int, y1: Int) {
-        for y in max(0, y0)...max(0, min(height - 1, y1)) where y0 <= y1 {
-            for x in max(0, x0)...max(0, min(width - 1, x1)) where x0 <= x1 { pixels[y * width + x] = 0 }
+        let left = max(0, x0), right = min(width - 1, x1), top = max(0, y0), bottom = min(height - 1, y1)
+        guard left <= right, top <= bottom else { return }
+        for y in top...bottom {
+            for x in left...right { pixels[y * width + x] = 0 }
         }
         changeCount &+= 1
     }

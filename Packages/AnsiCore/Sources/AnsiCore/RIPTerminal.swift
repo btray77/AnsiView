@@ -244,7 +244,8 @@ public struct RIPTerminal: TerminalEngine {
             case "m": canvas.position = point()
             case "T": canvas.text(rest(), x: canvas.position.x, y: canvas.position.y)
             case "@": let (x, y) = point(); canvas.text(rest(), x: x, y: y)
-            case "Y": canvas.font = n(); canvas.direction = n(); canvas.size = max(1, n())
+            // Sizes past 10 are not in RIPscrip; capping keeps a hostile size from drawing for minutes.
+            case "Y": canvas.font = n(); canvas.direction = n(); canvas.size = max(1, min(10, n()))
             case "X": let (x, y) = point(); canvas.plot(x, y, canvas.color); graphicsChanges &+= 1
             case "L": let (a, b) = point(), (c, d) = point(); canvas.line(a, b, c, d)
             case "R": let (a, b) = point(), (c, d) = point(); canvas.rectangle(a, b, c, d)

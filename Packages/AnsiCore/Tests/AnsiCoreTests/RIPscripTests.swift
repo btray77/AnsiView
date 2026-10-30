@@ -119,6 +119,18 @@ private func rip(_ text: String) -> RIPTerminal {
     #expect(t.canvas.width == 640)
 }
 
+@Test func invertedViewportEraseDoesNotTrap() {
+    // v with x0 > x1 (and beyond the screen), then E erases the viewport.
+    let t = rip("!|vHR9P0A0A|E|B00000A0A\r\n")
+    #expect(t.canvas.width == 640)
+}
+
+@Test(.timeLimit(.minutes(1))) func hugeTextSizesAreCapped() {
+    // Font size ZZ (1295) would draw 1295x1295 blocks per pixel without a cap.
+    let t = rip("!|YZZ00ZZ00|@0000ABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n!|Y00ZZZZ00|@0000ABCDEFGHIJ\r\n")
+    #expect(t.canvas.width == 640)
+}
+
 @Test func engineFactoryMakesRIP() {
     let e = TerminalEngines.make(.ripscrip, columns: 80, rows: 25, encoding: .cp437, iceColors: false)
     #expect(e is RIPTerminal)
