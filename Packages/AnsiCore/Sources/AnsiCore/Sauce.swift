@@ -121,7 +121,8 @@ public struct Sauce: Equatable {
         if commentCount > 0, blockStart >= 0, Array(bytes[blockStart..<blockStart + 5]) == Array("COMNT".utf8) {
             for i in 0..<commentCount {
                 let lineStart = blockStart + 5 + i * commentLength
-                comments.append(cp437String(bytes[lineStart..<lineStart + commentLength]))
+                // Comment lines keep their indentation; only the padding at the end goes.
+                comments.append(cp437String(bytes[lineStart..<lineStart + commentLength], keepLeading: true))
             }
             contentEnd = blockStart
         }
@@ -150,6 +151,17 @@ public struct Sauce: Equatable {
 }
 
 /// Decodes CP437 bytes, dropping trailing spaces and NULs.
+func cp437String<S: Sequence>(_ bytes: S, keepLeading: Bool) -> String where S.Element == UInt8 {
+    var scalars = Array(bytes.map { $0 == 0 ? " " : CP437.unicode[Int($0)] })
+    while let last = scalars.last, last == " " || last == "\u{00A0}" { scalars.removeLast() }
+    if !keepLeading {
+        while let first = scalars.first, first == " " || first == "\u{00A0}" { scalars.removeFirst() }
+    }
+    var view = String.UnicodeScalarView()
+    view.append(contentsOf: scalars)
+    return String(view)
+}
+
 func cp437String<S: Sequence>(_ bytes: S) -> String where S.Element == UInt8 {
     var scalars = String.UnicodeScalarView()
     for byte in bytes {

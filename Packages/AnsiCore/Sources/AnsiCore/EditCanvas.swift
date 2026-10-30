@@ -80,6 +80,8 @@ public struct EditCanvas: Equatable {
     public var sauceFlags: UInt8 = 0
     /// SAUCE TInfo3 and TInfo4 of an opened file, written back by ANSI and XBin saves.
     public var sauceTInfo34: [UInt16] = [0, 0]
+    /// The SAUCE creation date of an opened file, kept on save (new art is dated when saved).
+    public var sauceDate: DateComponents?
 
     public var height: Int { rows.count }
     public var font: BitmapFont { BitmapFont.named(fontName) }
@@ -108,6 +110,8 @@ public struct EditCanvas: Equatable {
             comments = sauce.comments
             if !sauce.fontName.isEmpty { fontName = sauce.fontName }
             sauceFlags = sauce.flags & ~0x01
+            sauceTInfo34 = [sauce.tInfo.count > 2 ? sauce.tInfo[2] : 0, sauce.tInfo.count > 3 ? sauce.tInfo[3] : 0]
+            sauceDate = sauce.date
         } else if let screenTitle = screen.title {
             title = screenTitle
         }

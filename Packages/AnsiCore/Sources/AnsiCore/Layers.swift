@@ -94,6 +94,8 @@ public struct ArtProject: Equatable {
         var fontName: String
         var sauceFlags: Int
         var sauceTInfo34: [Int]
+        /// The SAUCE creation date as YYYYMMDD, when the art has one.
+        var sauceDate: String?
         var activeLayer: Int
         var frames: [Frame]
     }
@@ -115,7 +117,12 @@ public struct ArtProject: Equatable {
         let file = File(
             format: Self.formatName, version: Self.currentVersion, columns: base.columns, iceColors: base.iceColors,
             title: base.title, author: base.author, group: base.group, comments: base.comments, fontName: base.fontName,
-            sauceFlags: Int(base.sauceFlags), sauceTInfo34: base.sauceTInfo34.map(Int.init), activeLayer: activeLayer,
+            sauceFlags: Int(base.sauceFlags), sauceTInfo34: base.sauceTInfo34.map(Int.init),
+            sauceDate: base.sauceDate.flatMap { d in
+                guard let y = d.year, let m = d.month, let day = d.day else { return nil }
+                return String(format: "%04d%02d%02d", y, m, day)
+            },
+            activeLayer: activeLayer,
             frames: [Frame(layers: layers.map { layer in
                 let canvas = layer.canvas
                 var scalars: [[UInt32]] = []
@@ -162,6 +169,9 @@ public struct ArtProject: Equatable {
             canvas.fontName = file.fontName
             canvas.sauceFlags = UInt8(clamping: file.sauceFlags)
             canvas.sauceTInfo34 = file.sauceTInfo34.prefix(2).map { UInt16(clamping: $0) }
+            if let text = file.sauceDate, text.count == 8, let value = Int(text) {
+                canvas.sauceDate = DateComponents(year: value / 10000, month: value / 100 % 100, day: value % 100)
+            }
             result.append(CanvasLayer(name: layer.name, visible: layer.visible, canvas: canvas))
         }
         self.init(layers: result, activeLayer: file.activeLayer)

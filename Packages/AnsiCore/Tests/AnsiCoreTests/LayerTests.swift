@@ -109,7 +109,10 @@ import Testing
 
 @Suite struct ProjectFileTests {
     @Test func projectRoundTripKeepsLayers() throws {
-        let editor = CanvasEditor(canvas: EditCanvas(columns: 5, height: 2))
+        var start = EditCanvas(columns: 5, height: 2)
+        start.sauceDate = DateComponents(year: 1995, month: 1, day: 2)
+        start.sauceTInfo34 = [3, 4]
+        let editor = CanvasEditor(canvas: start)
         editor.setMetadata(title: "Proj", author: "Me", group: "Us")
         editor.type("Hi")
         editor.addLayer()
