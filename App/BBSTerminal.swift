@@ -213,9 +213,20 @@ final class TerminalViewController: NSViewController {
 
     // MARK: Connection
 
+    /// Starts a fresh session: the previous client is silenced and closed, and its unshown
+    /// backlog, parser state and screen are dropped so nothing leaks into the new session.
     func connect() {
         _ = view
-        client?.disconnect()
+        if let old = client {
+            old.onState = nil
+            old.onData = nil
+            old.disconnect()
+        }
+        pacer = LinePacer(baud: baud)
+        emulator = TerminalEmulator(columns: emulator.columns, rows: emulator.rows, encoding: entry.encoding)
+        scrollOffset = 0
+        shownBells = 0
+        terminalView.needsDisplay = true
         let client = BBSClient(host: entry.host, port: entry.port, mode: entry.mode,
                                columns: emulator.columns, rows: emulator.rows)
         client.onData = { [weak self] bytes in self?.receive(bytes) }
@@ -242,7 +253,8 @@ final class TerminalViewController: NSViewController {
             sound?.playbackStateChanged(.quiet)
             if let error {
                 stateText = error.message
-                if showsAlerts { showError(error) }
+                // A BBS hanging up after logoff is normal: the status line says so, no alert.
+                if showsAlerts, error != .closedByRemote { showError(error) }
             } else {
                 stateText = "Disconnected"
             }
@@ -252,12 +264,12 @@ final class TerminalViewController: NSViewController {
 
     private func showError(_ error: BBSConnectionError) {
         let alert = NSAlert()
-        alert.messageText = error == .closedByRemote ? "Disconnected" : "Could not connect to \(entry.name)"
+        alert.messageText = "Could not connect to \(entry.name)"
         alert.informativeText = error.message
-        alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Reconnect")
+        alert.addButton(withTitle: "Close")
         let handler: (NSApplication.ModalResponse) -> Void = { [weak self] response in
-            if response == .alertSecondButtonReturn { self?.reconnect() }
+            if response == .alertFirstButtonReturn { self?.reconnect() } else { self?.view.window?.performClose(nil) }
         }
         if let window = view.window, window.isVisible {
             alert.beginSheetModal(for: window, completionHandler: handler)
@@ -268,7 +280,9 @@ final class TerminalViewController: NSViewController {
 
     /// Bytes from the BBS (telnet already removed): captured as they arrive, shown at the line speed.
     func receive(_ bytes: [UInt8]) {
-        if let capture { try? capture.write(contentsOf: Data(bytes)) }
+        if let capture {
+            do { try capture.write(contentsOf: Data(bytes)) } catch { captureFailed(error) }
+        }
         pacer.push(bytes)
         if baud == 0 { tick(elapsed: 0) }
     }
@@ -445,6 +459,28 @@ final class TerminalViewController: NSViewController {
         captureName = url.lastPathComponent
         updateStatus()
     }
+
+    func startCapture(handle: FileHandle, name: String) {
+        stopCapture()
+        capture = handle
+        captureName = name
+        updateStatus()
+    }
+
+    private func captureFailed(_ error: Error) {
+        let name = captureName ?? "the capture file"
+        stopCapture()
+        stateText += ". Capture stopped: \(name) could not be written (\(error.localizedDescription))"
+        updateStatus()
+        if showsAlerts {
+            let alert = NSAlert()
+            alert.messageText = "Capture stopped"
+            alert.informativeText = "\(name) could not be written: \(error.localizedDescription)"
+            if let window = view.window, window.isVisible { alert.beginSheetModal(for: window) } else { alert.runModal() }
+        }
+    }
+
+    var pendingBytes: Int { pacer.pending }
 
     func stopCapture() {
         try? capture?.close()

@@ -297,3 +297,10 @@ extension TerminalEmulator {
     t.feed(Array("\u{1B}\\G".utf8))
     #expect(line(t.grid[0]) == "ABCDEFG")
 }
+
+/// Review: a bare LF after the last column must not skip a row (DEC resets the wrap flag on LF).
+@Test func bareLineFeedClearsPendingWrap() {
+    let t = term("ABCD\nX", columns: 4, rows: 4)
+    #expect(line(t.grid[0]) == "ABCD")
+    #expect(line(t.grid[1]) == "   X")
+}

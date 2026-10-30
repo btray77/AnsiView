@@ -166,7 +166,7 @@ public struct TerminalEmulator {
         switch byte {
         case 0x1B: state = .escape
         case 0x0D: column = 0; pendingWrap = false
-        case 0x0A, 0x0B: lineFeed()
+        case 0x0A, 0x0B: pendingWrap = false; lineFeed()
         case 0x0C: eraseDisplay(2)
         case 0x08:
             column = max(0, column - 1)
