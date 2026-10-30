@@ -61,6 +61,9 @@ public enum TerminalEngines {
             var a = AvatarTerminal(columns: columns, rows: rows, encoding: encoding)
             a.iceColors = iceColors
             return a
+        case .petscii64: return PETSCIITerminal(model: .c64, columns: columns, rows: rows)
+        case .petscii128: return PETSCIITerminal(model: .c128, columns: columns, rows: rows)
+        case .atascii: return ATASCIITerminal(columns: columns, rows: rows)
         default: break
         }
         var t = TerminalEmulator(columns: columns, rows: rows, encoding: encoding)
