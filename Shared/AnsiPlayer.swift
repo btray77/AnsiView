@@ -41,6 +41,8 @@ final class AnsiPlayerViewController: NSViewController {
 
     let analysis: AnsiAnalysis
     let source: ArtFile
+    /// Frame positions for the scrub bar and stepping; nil for static art, which has no bar.
+    let timeline: PlaybackTimeline?
     /// The frame currently on screen.
     private(set) var screen: AnsiScreen
     private let renderOptions: RenderOptions
@@ -53,6 +55,8 @@ final class AnsiPlayerViewController: NSViewController {
     private var hudTimer: Timer?
     private var lastFrameTime: TimeInterval = 0
     private var byteCredit: Double = 0
+    /// True while the finished art is on screen (before playback starts, or after it ends).
+    private var screenIsFinal = true
     private var shownBaud = PlaybackSpeed.current
     private var shownCRT = PlaybackSpeed.crtEffect
     private var defaultsObserver: NSObjectProtocol?
@@ -60,6 +64,7 @@ final class AnsiPlayerViewController: NSViewController {
     init(source: ArtFile) {
         self.source = source
         self.analysis = AnsiAnalysis(source)
+        self.timeline = analysis.isAnimated ? PlaybackTimeline(source) : nil
         var options = RenderOptions(for: analysis.finalScreen)
         options.scale = AnsiRenderer.preferredScale(rows: analysis.canvasRows)
         self.renderOptions = options
@@ -83,13 +88,24 @@ final class AnsiPlayerViewController: NSViewController {
                       height: (CGFloat(analysis.canvasRows * renderOptions.font.height) * aspect).rounded())
     }
 
+    /// The art plus the scrub bar, for hosts that size a window to fit.
+    var idealViewSize: CGSize {
+        CGSize(width: contentSize.width, height: contentSize.height + (timeline == nil ? 0 : Self.timelineBarHeight))
+    }
+
     var isPlaying: Bool { frameTimer != nil }
+    /// Bytes of the stream played so far.
+    var playbackPosition: Int { terminal.position }
     var isPaused: Bool { !isPlaying && terminal.position > 0 && !terminal.isFinished }
 
     /// Art taller than this many lines is a "scroller": it fits the window width and scrolls.
     static let scrollerRows = 50
 
     private let scroll = NSScrollView()
+    private let timelineBar = NSView()
+    private let slider = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let frameLabel = NSTextField(labelWithString: "")
+    static let timelineBarHeight: CGFloat = 26
 
     override func loadView() {
         let container = NSView()
@@ -124,10 +140,14 @@ final class AnsiPlayerViewController: NSViewController {
             scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: container.topAnchor),
-            scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             hud.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
-            hud.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
+            hud.bottomAnchor.constraint(equalTo: scroll.bottomAnchor, constant: -10),
         ])
+        if timeline != nil {
+            installTimelineBar(in: container)
+        } else {
+            scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor).isActive = true
+        }
         // No preferredContentSize here: AppKit turns it into priority 501 size constraints that
         // would stop the window from resizing. Hosts use contentSize as a sizing hint instead.
         view = container
@@ -138,6 +158,55 @@ final class AnsiPlayerViewController: NSViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.speedMayHaveChanged() }
         }
+    }
+
+    /// The scrub bar under the art: a slider over the byte stream and a frame counter.
+    private func installTimelineBar(in container: NSView) {
+        timelineBar.appearance = NSAppearance(named: .darkAqua)
+        timelineBar.wantsLayer = true
+        timelineBar.layer?.backgroundColor = NSColor(white: 0.1, alpha: 1).cgColor
+        timelineBar.translatesAutoresizingMaskIntoConstraints = false
+        slider.isContinuous = true
+        slider.controlSize = .small
+        slider.refusesFirstResponder = true
+        slider.target = self
+        slider.action = #selector(sliderMoved(_:))
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        slider.setAccessibilityLabel("Playback position")
+        frameLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        frameLabel.textColor = NSColor(white: 0.75, alpha: 1)
+        frameLabel.alignment = .right
+        frameLabel.translatesAutoresizingMaskIntoConstraints = false
+        frameLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        timelineBar.addSubview(slider)
+        timelineBar.addSubview(frameLabel)
+        container.addSubview(timelineBar)
+        NSLayoutConstraint.activate([
+            timelineBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            timelineBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            timelineBar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            timelineBar.topAnchor.constraint(equalTo: scroll.bottomAnchor),
+            timelineBar.heightAnchor.constraint(equalToConstant: Self.timelineBarHeight),
+            slider.leadingAnchor.constraint(equalTo: timelineBar.leadingAnchor, constant: 10),
+            slider.centerYAnchor.constraint(equalTo: timelineBar.centerYAnchor),
+            frameLabel.leadingAnchor.constraint(equalTo: slider.trailingAnchor, constant: 10),
+            frameLabel.trailingAnchor.constraint(equalTo: timelineBar.trailingAnchor, constant: -10),
+            frameLabel.centerYAnchor.constraint(equalTo: timelineBar.centerYAnchor),
+        ])
+        updateTimeline()
+    }
+
+    @objc private func sliderMoved(_ sender: NSSlider) {
+        guard let timeline else { return }
+        seek(to: timeline.position(atFraction: sender.doubleValue))
+    }
+
+    /// Moves the slider and frame counter to the terminal's position.
+    private func updateTimeline() {
+        guard let timeline else { return }
+        let position = screenIsFinal ? timeline.length : terminal.position
+        slider.doubleValue = timeline.fraction(at: position)
+        frameLabel.stringValue = "frame \(timeline.frameIndex(at: position)) / \(timeline.frameEnds.count)"
     }
 
     override func viewDidLayout() {
@@ -186,7 +255,9 @@ final class AnsiPlayerViewController: NSViewController {
             return
         }
         screen = terminal.screen(minimumRows: analysis.canvasRows)
+        screenIsFinal = false
         redraw()
+        updateTimeline()
         Logger(subsystem: "com.traynham.ansiview", category: "playback")
             .info("Playback started at \(PlaybackSpeed.current, privacy: .public) baud")
         showHUD("\(PlaybackSpeed.label(PlaybackSpeed.current))  \u{00B7}  click to skip")
@@ -197,7 +268,36 @@ final class AnsiPlayerViewController: NSViewController {
         stopPlayback()
         terminal.runToEnd()
         screen = analysis.finalScreen
+        screenIsFinal = true
         redraw()
+        updateTimeline()
+        updateBlinkTimer()
+    }
+
+    /// Pauses and shows the screen as it was after `position` bytes.
+    func seek(to position: Int) {
+        stopPlayback()
+        terminal.seek(to: position)
+        if terminal.isFinished {
+            skipToEnd()
+            return
+        }
+        showTerminal()
+    }
+
+    /// Pauses and moves one frame forward (+1) or back (-1).
+    func stepFrame(_ delta: Int) {
+        guard let timeline else { return }
+        let from = screenIsFinal ? timeline.length : terminal.position
+        seek(to: timeline.step(from: from, by: delta))
+    }
+
+    /// Draws the terminal's current screen mid playback.
+    private func showTerminal() {
+        screen = terminal.screen(minimumRows: analysis.canvasRows)
+        screenIsFinal = false
+        redraw()
+        updateTimeline()
         updateBlinkTimer()
     }
 
@@ -248,9 +348,7 @@ final class AnsiPlayerViewController: NSViewController {
         if terminal.isFinished {
             skipToEnd()
         } else {
-            screen = terminal.screen(minimumRows: analysis.canvasRows)
-            redraw()
-            updateBlinkTimer()
+            showTerminal()
         }
     }
 
@@ -362,8 +460,19 @@ final class AnsiCanvasView: NSView {
         onClick?()
     }
 
+    /// Left and Right arrows step frames (Quick Look has no menus to carry the shortcuts).
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 123: player?.stepFrame(-1)
+        case 124: player?.stepFrame(1)
+        default: super.keyDown(with: event)
+        }
+    }
+
     // Menu actions sent through the responder chain from the app's Playback menu.
     @objc func replayAnimation(_ sender: Any?) { player?.replay() }
     @objc func skipAnimation(_ sender: Any?) { player?.skipToEnd() }
     @objc func togglePausePlayback(_ sender: Any?) { player?.togglePause() }
+    @objc func previousFrame(_ sender: Any?) { player?.stepFrame(-1) }
+    @objc func nextFrame(_ sender: Any?) { player?.stepFrame(1) }
 }

@@ -82,6 +82,10 @@ public struct AnsiTerminal {
     public private(set) var writes = 0
     public private(set) var overwrites = 0
     public private(set) var clearsAfterDrawing = 0
+    /// Counts every change to the cells: character writes, line erases and screen erases.
+    public private(set) var edits = 0
+    /// The row the cursor is on (0 based, canvas coordinates).
+    public var cursorRow: Int { y }
 
     public var isFinished: Bool { position >= bytes.count }
 
@@ -109,6 +113,14 @@ public struct AnsiTerminal {
 
     public mutating func runToEnd() {
         advance(byteCount: bytes.count)
+    }
+
+    /// Moves playback to `position` (clamped to the stream). Moving back replays from the start.
+    /// Like `advance`, it finishes any escape sequence the position falls inside.
+    public mutating func seek(to position: Int) {
+        let target = min(bytes.count, max(0, position))
+        if target < self.position { self = AnsiTerminal(source) }
+        advance(byteCount: target - self.position)
     }
 
     /// Consumes at least `byteCount` bytes, finishing any escape sequence it starts.
@@ -232,6 +244,7 @@ public struct AnsiTerminal {
             if previous.code != 0x20, previous.code != 0, previous != cell { overwrites += 1 }
             rows[y][x] = cell
             writes += 1
+            edits += 1
             highestRow = max(highestRow, y)
         }
         if x == columns - 1 {
@@ -256,6 +269,7 @@ public struct AnsiTerminal {
             y = max(0, p(0, 1) - 1)
             x = min(columns - 1, max(0, p(1, 1) - 1))
         case UInt8(ascii: "J"):
+            edits += 1
             if p(0, 0) == 2 {
                 if writes > 0 { clearsAfterDrawing += 1 }
                 rows.removeAll()
@@ -268,6 +282,7 @@ public struct AnsiTerminal {
             }
         case UInt8(ascii: "K"):
             if ensureRow(y) {
+                edits += 1
                 let blank = blankCell
                 let range = p(0, 0) == 1 ? 0...x : (p(0, 0) == 2 ? 0...(columns - 1) : x...(columns - 1))
                 for col in range { rows[y][col] = blank }

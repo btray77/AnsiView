@@ -17,6 +17,6 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         player.view.frame = view.bounds
         player.view.autoresizingMask = [.width, .height]
         view.addSubview(player.view)
-        preferredContentSize = player.contentSize
+        preferredContentSize = player.idealViewSize
     }
 }

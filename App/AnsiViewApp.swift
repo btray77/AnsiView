@@ -66,6 +66,10 @@ struct AnsiViewApp: App {
                     .keyboardShortcut("r")
                 Button("Skip to End") { send(#selector(AnsiCanvasView.skipAnimation(_:))) }
                     .keyboardShortcut(".")
+                Button("Previous Frame") { send(#selector(AnsiCanvasView.previousFrame(_:))) }
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+                Button("Next Frame") { send(#selector(AnsiCanvasView.nextFrame(_:))) }
+                    .keyboardShortcut(.rightArrow, modifiers: [])
                 Divider()
                 Button("Faster") { baud = PlaybackSpeed.step(baud, by: 1) }
                     .keyboardShortcut("]")
@@ -93,7 +97,7 @@ struct AnsiPlayerView: NSViewControllerRepresentable {
     func sizeThatFits(
         _ proposal: ProposedViewSize, nsViewController: AnsiPlayerViewController, context: Context
     ) -> CGSize? {
-        let ideal = nsViewController.contentSize
+        let ideal = nsViewController.idealViewSize
         return CGSize(width: proposal.width ?? ideal.width,
                       height: proposal.height ?? min(ideal.height, 900))
     }
