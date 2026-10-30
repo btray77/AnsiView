@@ -1,0 +1,174 @@
+import Foundation
+
+/// The dialing directory's entry editor as a `TextForm` (ruling 14): every field with a hint,
+/// built from an entry and applied back to it. The password is a separate value because it
+/// lives in the Keychain, never in the entry.
+public enum EntryForm {
+    static let backspaceOptions = ["BS (8)", "DEL (127)"]
+
+    public static func make(entry e: BBSEntry, password: String, fonts: [String], speeds: [Int]) -> TextForm {
+        var fields: [FormField] = []
+        let connection = "Connection"
+        fields.append(.text("name", section: connection, label: "Name", hint: "Only a label for this BBS in the directory list. It is never sent to the BBS and need not match the host.", value: e.name, maxLength: 60))
+        fields.append(.text("host", section: connection, label: "Host", hint: "The BBS's internet address, such as bbs.example.com or an IP address. You may also type host:port here.", value: e.host, maxLength: 255))
+        fields.append(.number("port", section: connection, label: "Port", hint: "The TCP port the BBS listens on. Telnet BBSes usually use 23; some use 2323 or another number their sysop publishes.", value: e.port, range: 1...65535))
+        fields.append(.choice("mode", section: connection, label: "Protocol", hint: "Telnet negotiates screen size and terminal type, and nearly every BBS wants it. Raw TCP sends bytes unchanged, for servers that do not speak telnet.", options: ConnectionMode.allCases.map(\.label), index: ConnectionMode.allCases.firstIndex(of: e.mode) ?? 0))
+        fields.append(.text("tags", section: connection, label: "Tags", hint: "Groups for the directory's tag filter (press T there), separated by commas, for example: Favourites, Trade Wars games.", value: e.tags.joined(separator: ", "), maxLength: 200))
+        fields.append(.text("notes", section: connection, label: "Notes", hint: "Anything you want to remember about this BBS. It shows under the directory list and the / search looks in it.", value: e.notes, maxLength: 300))
+
+        let terminal = "Terminal"
+        var types = BBSEntry.standardTerminalTypes
+        if !types.contains(e.terminalType) { types.append(e.terminalType) }
+        fields.append(.choice("terminalType", section: terminal, label: "Terminal type", hint: "The name AnsiView gives first when the BBS asks what terminal you have. ANSI suits almost every BBS; the others are offered if it asks again.", options: types, index: types.firstIndex(of: e.terminalType) ?? 0))
+        fields.append(.number("columns", section: terminal, label: "Columns", hint: "Screen width in characters. BBSes expect 80, a few support 132. The BBS is told the size when it asks (telnet NAWS).", value: e.columns, range: TerminalEmulator.sizeRange))
+        fields.append(.number("rows", section: terminal, label: "Rows", hint: "Screen height in lines. 25 is the DOS standard; some BBSes use more lines when you offer them.", value: e.rows, range: TerminalEmulator.sizeRange))
+        var fontNames = fonts
+        if !fontNames.contains(e.fontName) { fontNames.append(e.fontName) }
+        fields.append(.choice("font", section: terminal, label: "Font", hint: "The bitmap font the screen is drawn with. IBM VGA is the classic DOS look; the Amiga fonts suit Amiga boards.", options: fontNames, index: fontNames.firstIndex(of: e.fontName) ?? 0))
+        fields.append(.choice("encoding", section: terminal, label: "Character set", hint: "CP437 is the DOS character set nearly every BBS uses for ANSI art. Choose UTF-8 only for a BBS that sends Unicode text.", options: TextEncoding.allCases.map(\.label), index: TextEncoding.allCases.firstIndex(of: e.encoding) ?? 0))
+        fields.append(.toggle("iceColors", section: terminal, label: "iCE colours", hint: "When on, the blink attribute shows as a bright background colour instead of blinking text, as iCE colour art expects.", isOn: e.iceColors))
+        var speedList = speeds
+        if !speedList.contains(e.baud) { speedList.append(e.baud) }
+        fields.append(.choice("baud", section: terminal, label: "Simulated speed", hint: "Shows incoming text at a modem speed, such as 2400 baud, for the classic feel. Unlimited shows it at once. Typing is never slowed.", options: speedList.map(speedLabel), index: speedList.firstIndex(of: e.baud) ?? 0))
+        fields.append(.choice("backspace", section: terminal, label: "Backspace sends", hint: "The code the Backspace key sends. Most BBSes want BS; choose DEL if Backspace prints odd characters instead of erasing.", options: backspaceOptions, index: e.backspaceSendsDelete ? 1 : 0))
+        fields.append(.choice("modemSound", section: terminal, label: "Modem sound", hint: "Plays the synthesized dial tones and handshake while connecting. The first choice follows Playback > Modem Sounds.", options: ModemSoundChoice.allCases.map(\.label), index: ModemSoundChoice.allCases.firstIndex(of: e.modemSound) ?? 0))
+
+        let login = "Login"
+        fields.append(.text("username", section: login, label: "Username", hint: "Your name or handle on this BBS. The login script and Terminal > Send Username type it.", value: e.username ?? "", maxLength: 80))
+        fields.append(.secret("password", section: login, label: "Password", hint: "Saved only in your Mac's Keychain, never in the directory or an export. Needs a username. Terminal > Send Password types it.", value: password, maxLength: 120))
+        fields.append(.toggle("showPassword", section: login, label: "Show password", hint: "Shows the password on screen while you check it. It is hidden again the next time the editor opens.", isOn: false, revealsSecrets: true))
+        fields.append(.toggle("autoLogin", section: login, label: "Log in automatically", hint: "Runs the login script below as soon as the BBS answers. Terminal > Log In runs it again at any time.", isOn: e.autoLogin))
+        fields.append(.text("busyText", section: login, label: "Busy text", hint: "Text that means the BBS is full, such as: all nodes are busy. Seen in the first 30 seconds, it hangs up and dials the next BBS. Separate choices with |.", value: e.busyText, maxLength: 200))
+
+        let script = "Login script (expect, then send)"
+        for (i, step) in e.loginScript.enumerated() {
+            let n = i + 1
+            fields.append(.text("step.\(i).expect", section: script, label: "Step \(n) waits for", hint: "The prompt to wait for, such as login: or name. Case, spaces and colour codes are ignored; separate choices with |. Empty sends at once.", value: step.expect, maxLength: 120))
+            fields.append(.choice("step.\(i).send", section: script, label: "Step \(n) sends", hint: "What to type when the prompt appears: your username or password (each followed by Return), the text below, or just Return.", options: LoginSend.allCases.map(\.label), index: LoginSend.allCases.firstIndex(of: step.send) ?? 0))
+            fields.append(.text("step.\(i).text", section: script, label: "Step \(n) text", hint: "Typed when the step sends Text. \\r is Return, \\e is Escape, \\t is Tab and \\xHH is any byte, for example Y\\r.", value: step.text, maxLength: 120))
+            fields.append(.number("step.\(i).timeout", section: script, label: "Step \(n) timeout", hint: "Seconds to wait for this prompt. If it never comes, the script stops and leaves the login to you.", value: Int(step.timeout), range: 1...600))
+        }
+        fields.append(.action("addStep", section: script, label: "Add a step", hint: "Adds an empty step at the end of the script. Fill in what it waits for and what it sends.", caption: "Add"))
+        fields.append(.action("removeStep", section: script, label: "Remove last step", hint: "Removes the last step of the script. A script with no steps does nothing.", caption: "Remove"))
+        fields.append(.action("resetScript", section: script, label: "Reset script", hint: "Puts back the default script, which answers the usual login and password prompts of common BBS packages.", caption: "Reset"))
+
+        let capture = "Capture"
+        fields.append(.toggle("captureOnConnect", section: capture, label: "Capture on connect", hint: "Saves everything the BBS sends to a .ans file in the folder below from the moment it answers, so you can replay it in AnsiView later.", isOn: e.captureOnConnect))
+        fields.append(.action("chooseFolder", section: capture, label: "Capture folder", hint: "The folder for automatic captures. Press Enter to choose one; AnsiView remembers your permission to write there.", caption: e.captureFolderName ?? "Choose..."))
+        fields.append(.action("clearFolder", section: capture, label: "Forget folder", hint: "Forgets the capture folder. Captures on connect stop until you choose another one.", caption: "Forget"))
+
+        let macros = "Macros (Option-1 to Option-0 in the terminal)"
+        for slot in 0..<MacroSet.slotCount {
+            let value = slot < e.macros.count ? e.macros[slot] : ""
+            fields.append(.text("macro.\(slot)", section: macros, label: MacroSet.label(slot: slot), hint: "Typed when you press \(MacroSet.label(slot: slot)) in this BBS's terminal. \\r is Return, for example /who\\r. Empty uses the global macro (G in the directory).", value: value, maxLength: 200))
+        }
+        let title = e.name.isEmpty ? "New BBS" : "Edit \(e.name)"
+        return TextForm(title: title, fields: fields, info: info(for: e))
+    }
+
+    /// The entry with the form's values, and the password typed.
+    public static func apply(_ form: TextForm, to entry: BBSEntry) -> (entry: BBSEntry, password: String) {
+        var e = entry
+        func text(_ id: String) -> String? { form.field(id)?.text }
+        func choice(_ id: String) -> FormField? { form.field(id) }
+        if let v = text("name") { e.name = v.trimmingCharacters(in: .whitespaces) }
+        if let v = text("host") { e.host = v.trimmingCharacters(in: .whitespaces) }
+        if let f = form.field("port") { e.port = f.number }
+        if let f = choice("mode") { e.mode = ConnectionMode.allCases[safe: f.index] ?? .telnet }
+        if let v = text("tags") { e.tags = v.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
+        if let v = text("notes") { e.notes = v }
+        if let f = choice("terminalType") { e.terminalType = f.choiceValue }
+        if let f = form.field("columns") { e.columns = f.number }
+        if let f = form.field("rows") { e.rows = f.number }
+        if let f = choice("font") { e.fontName = f.choiceValue }
+        if let f = choice("encoding") { e.encoding = TextEncoding.allCases[safe: f.index] ?? .cp437 }
+        if let f = form.field("iceColors") { e.iceColors = f.isOn }
+        if let f = choice("baud") { e.baud = speed(fromLabel: f.choiceValue) }
+        if let f = choice("backspace") { e.backspaceSendsDelete = f.index == 1 }
+        if let f = choice("modemSound") { e.modemSound = ModemSoundChoice.allCases[safe: f.index] ?? .playbackSetting }
+        if let v = text("username") {
+            let trimmed = v.trimmingCharacters(in: .whitespaces)
+            e.username = trimmed.isEmpty ? nil : trimmed
+        }
+        if let f = form.field("autoLogin") { e.autoLogin = f.isOn }
+        if let v = text("busyText") { e.busyText = v }
+        for i in e.loginScript.indices {
+            if let v = text("step.\(i).expect") { e.loginScript[i].expect = v }
+            if let f = choice("step.\(i).send") { e.loginScript[i].send = LoginSend.allCases[safe: f.index] ?? .returnKey }
+            if let v = text("step.\(i).text") { e.loginScript[i].text = v }
+            if let f = form.field("step.\(i).timeout") { e.loginScript[i].timeout = Double(f.number) }
+        }
+        if let f = form.field("captureOnConnect") { e.captureOnConnect = f.isOn }
+        for slot in 0..<MacroSet.slotCount {
+            guard let v = text("macro.\(slot)") else { continue }
+            while e.macros.count <= slot { e.macros.append("") }
+            e.macros[slot] = v
+        }
+        return (e, form.field("password")?.text ?? "")
+    }
+
+    /// Script and folder actions that change the entry's shape (the caller rebuilds the form).
+    public static func perform(_ action: String, on entry: BBSEntry) -> BBSEntry {
+        var e = entry
+        switch action {
+        case "addStep": e.loginScript.append(LoginStep(expect: "", send: .text))
+        case "removeStep": if !e.loginScript.isEmpty { e.loginScript.removeLast() }
+        case "resetScript": e.loginScript = LoginScript.defaultSteps
+        case "clearFolder":
+            e.captureFolderBookmark = nil
+            e.captureFolderName = nil
+        default: break
+        }
+        return e
+    }
+
+    public static func info(for entry: BBSEntry, timeZone: TimeZone = .current) -> String {
+        var last = "Never"
+        if let date = entry.lastCalled {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = timeZone
+            formatter.dateFormat = "yyyy-MM-dd HH:mm"
+            last = formatter.string(from: date)
+        }
+        return "Last called: \(last)    Times called: \(entry.totalCalls)"
+    }
+
+    static func speedLabel(_ baud: Int) -> String { baud == 0 ? "Unlimited" : "\(baud) baud" }
+
+    static func speed(fromLabel label: String) -> Int {
+        Int(label.split(separator: " ").first ?? "") ?? 0
+    }
+
+    /// The directory settings screen: global macros, redial and launch.
+    public static func settings(_ d: DialingDirectory) -> TextForm {
+        var fields: [FormField] = []
+        let dialing = "Dialing"
+        fields.append(.number("redialAttempts", section: dialing, label: "Redial passes", hint: "How many times the dialer goes through the queue of BBSes before it gives up.", value: d.redialAttempts, range: RedialQueue.passRange))
+        fields.append(.number("redialDelay", section: dialing, label: "Redial delay", hint: "Seconds to wait after a busy or failed call before dialing the next BBS. Dial Now skips the wait.", value: Int(d.redialDelay), range: Int(RedialQueue.delayRange.lowerBound)...Int(RedialQueue.delayRange.upperBound)))
+        fields.append(.toggle("showAtLaunch", section: dialing, label: "Show at launch", hint: "Opens this directory every time AnsiView starts, as a terminal program would.", isOn: d.showAtLaunch))
+        let macros = "Global macros (every BBS)"
+        for slot in 0..<MacroSet.slotCount {
+            let value = slot < d.globalMacros.count ? d.globalMacros[slot] : ""
+            fields.append(.text("macro.\(slot)", section: macros, label: MacroSet.label(slot: slot), hint: "Typed when you press \(MacroSet.label(slot: slot)) in any terminal, unless that BBS has its own macro for the key. \\r is Return.", value: value, maxLength: 200))
+        }
+        return TextForm(title: "Directory Settings", fields: fields, info: "\(d.entries.count) BBSes in the directory")
+    }
+
+    public static func applySettings(_ form: TextForm, to d: DialingDirectory) -> DialingDirectory {
+        var d = d
+        if let f = form.field("redialAttempts") { d.redialAttempts = f.number }
+        if let f = form.field("redialDelay") { d.redialDelay = Double(f.number) }
+        if let f = form.field("showAtLaunch") { d.showAtLaunch = f.isOn }
+        for slot in 0..<MacroSet.slotCount {
+            guard let v = form.field("macro.\(slot)")?.text else { continue }
+            while d.globalMacros.count <= slot { d.globalMacros.append("") }
+            d.globalMacros[slot] = v
+        }
+        return d
+    }
+}
+
+extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
+}

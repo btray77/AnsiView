@@ -38,6 +38,10 @@ private func send(_ action: Selector) {
 
 /// Asks about unsaved editor windows on Quit (they are not documents, so AppKit would not).
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        if DialingDirectoryStore.shared.directory.showAtLaunch { DialingDirectoryWindowController.show() }
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         EditorWindowController.canTerminate() ? .terminateNow : .terminateCancel
     }
@@ -108,8 +112,7 @@ struct AnsiViewApp: App {
                             }
                         })
                 }
-                Button("Connect to BBS...") { BBSConnectWindowController.show() }
-                    .keyboardShortcut("b", modifiers: [.command, .option])
+                Button("Connect to BBS...") { DialingDirectoryWindowController.show() }
                 Menu("Open Sample") {
                     ForEach(SampleArt.all(), id: \.url) { sample in
                         Button(sample.title) { SampleArt.open(sample) }
@@ -208,6 +211,9 @@ struct AnsiViewApp: App {
                 Button("Reconnect") { TerminalWindowController.focused?.reconnect() }
                     .keyboardShortcut("r", modifiers: [.command, .option])
                 Button("Send Username") { TerminalWindowController.focused?.sendUsername() }
+                Button("Send Password") { TerminalWindowController.focused?.sendPassword() }
+                Button("Log In") { TerminalWindowController.focused?.runLogin() }
+                    .keyboardShortcut("l", modifiers: [.command, .option])
                 Divider()
                 Menu("Speed") {
                     ForEach(PlaybackSpeed.choices, id: \.self) { choice in
@@ -228,6 +234,10 @@ struct AnsiViewApp: App {
                 Button("Capture Session...") { TerminalWindowController.focused?.startCapture() }
                 Button("Stop Capture") { TerminalWindowController.focused?.stopCapture() }
                 Button("Clear Scrollback") { TerminalWindowController.focused?.clearScrollback() }
+            }
+            CommandGroup(after: .windowArrangement) {
+                Button("Dialing Directory") { DialingDirectoryWindowController.show() }
+                    .keyboardShortcut("b", modifiers: [.command, .option])
             }
             CommandMenu("Slideshow") {
                 Button("Start Slideshow") { send(#selector(AnsiPlayerViewController.startSlideshow(_:))) }

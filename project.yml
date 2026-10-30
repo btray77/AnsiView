@@ -56,6 +56,11 @@ targets:
         # Outgoing connections only: File > Browse 16colo.rs (API and downloads), File > Connect
         # to BBS (telnet client) and Sparkle's update checks. The extensions do not get it.
         com.apple.security.network.client: true
+        # Dialing directory "Capture on connect": the capture folder the user chose is kept as an
+        # app scoped security bookmark so it can be written in later launches (Apple documents this
+        # entitlement as required for app scoped bookmarks). Passwords use the login Keychain,
+        # which needs no entitlement in the sandbox.
+        com.apple.security.files.bookmarks.app-scope: true
         # Sparkle's installer XPC service in a sandboxed app (Sparkle's sandboxing guide).
         com.apple.security.temporary-exception.mach-lookup.global-name:
           - $(PRODUCT_BUNDLE_IDENTIFIER)-spks

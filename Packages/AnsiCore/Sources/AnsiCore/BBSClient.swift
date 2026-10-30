@@ -127,13 +127,14 @@ public final class BBSClient {
     private var timeoutWork: DispatchWorkItem?
 
     public init(host: String, port: Int, mode: ConnectionMode, columns: Int, rows: Int,
-                connectTimeout: TimeInterval = 15, queue: DispatchQueue = .main) {
+                connectTimeout: TimeInterval = 15, queue: DispatchQueue = .main,
+                terminalTypes: [String] = ["ANSI", "ANSI-BBS", "VT100"]) {
         self.host = host
         self.port = port
         self.mode = mode
         self.connectTimeout = connectTimeout
         self.queue = queue
-        telnet = TelnetSession(columns: columns, rows: rows)
+        telnet = TelnetSession(columns: columns, rows: rows, terminalTypes: terminalTypes)
     }
 
     public func connect() {

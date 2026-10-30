@@ -167,9 +167,32 @@ final class TerminalViewController: NSViewController {
     private var stateText = "Not connected"
     private let statusLabel = NSTextField(labelWithString: "")
 
-    init(entry: BBSEntry) {
+    /// Option-1 ... Option-0 for every BBS (the entry's own macros win).
+    var globalMacros: [String]
+    /// Where Send Password and the login script read the password; nil sends none.
+    var passwords: PasswordStore?
+    /// Every connection state, for the dialer.
+    var onStateChange: ((BBSClientState) -> Void)?
+    /// The BBS showed its busy text soon after answering.
+    var onBusy: (() -> Void)?
+    /// Called on every successful connect (the directory counts the call).
+    var callRecorder: ((UUID) -> Void)?
+    /// Seconds after connecting during which the busy text counts.
+    static let busyWindow: TimeInterval = 30
+    private(set) var loginRunner: LoginScriptRunner?
+    private(set) var loginText: String?
+    /// Why capture on connect did not start (kept apart from the login status).
+    private(set) var captureProblem: String?
+    private var busyMatcher: PromptMatcher?
+    private var connectedAt: TimeInterval = 0
+    private var captureFolder: URL?
+
+    init(entry: BBSEntry, globalMacros: [String] = [], passwords: PasswordStore? = nil) {
         self.entry = entry
+        self.globalMacros = globalMacros
+        self.passwords = passwords
         emulator = TerminalEmulator(columns: entry.columns, rows: entry.rows, encoding: entry.encoding)
+        emulator.iceColors = entry.iceColors
         baud = entry.baud
         pacer = LinePacer(baud: entry.baud)
         super.init(nibName: nil, bundle: nil)
@@ -183,7 +206,19 @@ final class TerminalViewController: NSViewController {
         blinkTimer?.invalidate()
         client?.disconnect()
         try? capture?.close()
+        captureFolder?.stopAccessingSecurityScopedResource()
     }
+
+    /// The entry's modem sound choice, or Playback > Modem Sounds.
+    var playsModemSound: Bool {
+        switch entry.modemSound {
+        case .on: return true
+        case .off: return false
+        case .playbackSetting: return PlaybackSpeed.modemSounds
+        }
+    }
+
+    private func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 960, height: 622))
@@ -224,16 +259,118 @@ final class TerminalViewController: NSViewController {
         }
         pacer = LinePacer(baud: baud)
         emulator = TerminalEmulator(columns: emulator.columns, rows: emulator.rows, encoding: entry.encoding)
+        emulator.iceColors = entry.iceColors
         scrollOffset = 0
         shownBells = 0
+        loginRunner = nil
+        loginText = nil
+        captureProblem = nil
+        busyMatcher = nil
         terminalView.needsDisplay = true
         let client = BBSClient(host: entry.host, port: entry.port, mode: entry.mode,
-                               columns: emulator.columns, rows: emulator.rows)
+                               columns: emulator.columns, rows: emulator.rows, terminalTypes: entry.terminalTypes)
         client.onData = { [weak self] bytes in self?.receive(bytes) }
         client.onState = { [weak self] state in self?.clientChanged(state) }
         self.client = client
-        if PlaybackSpeed.modemSounds { sound?.playbackStateChanged(.connecting) }
+        if playsModemSound { sound?.playbackStateChanged(.connecting) }
         client.connect()
+    }
+
+    // MARK: Login, busy text and capture on connect
+
+    /// The BBS answered: count the call, watch for the busy text, start the capture and the login script.
+    private func answered() {
+        connectedAt = now()
+        callRecorder?(entry.id)
+        // Busy text matters only to the dialer, which hangs up and dials the next BBS.
+        let busy = LoginStep.patterns(in: entry.busyText)
+        busyMatcher = busy.isEmpty || onBusy == nil ? nil : PromptMatcher(patterns: busy, encoding: entry.encoding)
+        if entry.captureOnConnect { startCaptureOnConnect() }
+        if entry.autoLogin, let name = entry.username, !name.isEmpty { runLogin() }
+    }
+
+    /// Terminal > Log In: runs the entry's login script from its first step.
+    func runLogin() {
+        guard client?.state == .connected else { return }
+        let password = entry.credentialKey.flatMap { passwords?.password(for: $0) }
+        var runner = LoginScriptRunner(steps: entry.loginScript, username: entry.username, password: password,
+                                       encoding: entry.encoding)
+        loginText = "Logging in"
+        let actions = runner.start(now: now())
+        loginRunner = runner
+        perform(actions)
+        updateStatus()
+    }
+
+    private func perform(_ actions: [LoginAction]) {
+        for action in actions {
+            switch action {
+            case .send(let bytes): client?.send(bytes)
+            case .finished: loginText = "Login script done"
+            case .failed(let message): loginText = message
+            }
+        }
+        if !actions.isEmpty { updateStatus() }
+    }
+
+    private func watch(_ bytes: [UInt8]) {
+        // Busy first, so a full BBS is not sent the username.
+        if busyMatcher != nil {
+            if now() - connectedAt > Self.busyWindow {
+                busyMatcher = nil
+            } else if busyMatcher?.feed(bytes) == true {
+                busyMatcher = nil
+                loginRunner = nil
+                loginText = "The BBS is busy"
+                updateStatus()
+                onBusy?()
+                return
+            }
+        }
+        if var runner = loginRunner, runner.isRunning {
+            let actions = runner.feed(bytes, now: now())
+            loginRunner = runner
+            perform(actions)
+        }
+    }
+
+    private func startCaptureOnConnect() {
+        guard let bookmark = entry.captureFolderBookmark else {
+            captureProblem = "Capture on connect is on, but no capture folder is chosen"
+            return
+        }
+        var stale = false
+        guard let folder = try? URL(resolvingBookmarkData: bookmark, options: .withSecurityScope, relativeTo: nil,
+                                    bookmarkDataIsStale: &stale) else {
+            captureProblem = "The capture folder could not be found. Choose it again in the dialing directory"
+            return
+        }
+        if captureFolder != folder {
+            captureFolder?.stopAccessingSecurityScopedResource()
+            captureFolder = folder.startAccessingSecurityScopedResource() ? folder : nil
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HHmmss"
+        let safeName = entry.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        let url = folder.appendingPathComponent("\(safeName) \(formatter.string(from: Date())).ans")
+        guard FileManager.default.createFile(atPath: url.path, contents: nil),
+              let handle = try? FileHandle(forWritingTo: url) else {
+            captureProblem = "The capture folder \(folder.lastPathComponent) cannot be written, so this session is not captured"
+            return
+        }
+        startCapture(handle: handle, name: url.lastPathComponent)
+    }
+
+    /// Terminal > Send Password: the Keychain password and Return.
+    func sendPassword() {
+        guard let key = entry.credentialKey, let password = passwords?.password(for: key), !password.isEmpty else {
+            loginText = "No password is saved for this BBS. Add one in the dialing directory."
+            updateStatus()
+            NSSound.beep()
+            return
+        }
+        send(TerminalInput.text(password, encoding: entry.encoding) + [13])
     }
 
     func disconnect() {
@@ -248,9 +385,13 @@ final class TerminalViewController: NSViewController {
         switch state {
         case .idle: stateText = "Not connected"
         case .connecting: stateText = "Connecting..."
-        case .connected: stateText = "Connected"
+        case .connected:
+            stateText = "Connected"
+            answered()
         case .closed(let error):
             sound?.playbackStateChanged(.quiet)
+            loginRunner = nil
+            busyMatcher = nil
             if let error {
                 stateText = error.message
                 // A BBS hanging up after logoff is normal: the status line says so, no alert.
@@ -260,6 +401,7 @@ final class TerminalViewController: NSViewController {
             }
         }
         updateStatus()
+        onStateChange?(state)
     }
 
     private func showError(_ error: BBSConnectionError) {
@@ -283,6 +425,8 @@ final class TerminalViewController: NSViewController {
         if let capture {
             do { try capture.write(contentsOf: Data(bytes)) } catch { captureFailed(error) }
         }
+        // Prompts are matched as they arrive, not as the speed emulation shows them.
+        watch(bytes)
         pacer.push(bytes)
         if baud == 0 { tick(elapsed: 0) }
     }
@@ -303,6 +447,11 @@ final class TerminalViewController: NSViewController {
         if emulator.changeCount != shownChanges {
             shownChanges = emulator.changeCount
             terminalView.needsDisplay = true
+        }
+        if var runner = loginRunner, runner.isRunning {
+            let actions = runner.tick(now: now())
+            loginRunner = runner
+            perform(actions)
         }
     }
 
@@ -377,6 +526,10 @@ final class TerminalViewController: NSViewController {
         let scalar = ignoring.unicodeScalars.first.map { Int($0.value) } ?? 0
         if flags.contains(.shift), scalar == NSPageUpFunctionKey { scrollBack(by: emulator.rows - 1); return }
         if flags.contains(.shift), scalar == NSPageDownFunctionKey { scrollBack(by: -(emulator.rows - 1)); return }
+        if flags.contains(.option), !flags.contains(.control), let digit = ignoring.first,
+           let slot = MacroSet.slot(forDigit: digit), sendMacro(slot: slot) {
+            return
+        }
         let key: TerminalKey?
         switch event.keyCode {
         case 36, 76: key = .returnKey
@@ -415,6 +568,14 @@ final class TerminalViewController: NSViewController {
 
     func sendText(_ text: String) {
         send(TerminalInput.text(text, encoding: entry.encoding))
+    }
+
+    /// Types macro `slot` (Option-1 is 0); false when neither the entry nor the globals define it.
+    @discardableResult
+    func sendMacro(slot: Int) -> Bool {
+        guard let text = MacroSet.text(slot: slot, entry: entry, global: globalMacros) else { return false }
+        send(MacroText.bytes(text, encoding: entry.encoding))
+        return true
     }
 
     func sendUsername() {
@@ -499,6 +660,8 @@ final class TerminalViewController: NSViewController {
         if entry.mode == .raw { parts.append("Raw TCP") }
         if let captureName { parts.append("Capturing to \(captureName)") }
         if scrollOffset > 0 { parts.append("Scrollback -\(scrollOffset)") }
+        if let captureProblem { parts.append(captureProblem) }
+        if let loginText { parts.append(loginText) }
         statusText = parts.joined(separator: "  |  ")
         statusLabel.stringValue = statusText
         statusLabel.toolTip = statusText
@@ -510,14 +673,41 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
     private static var open: Set<TerminalWindowController> = []
     let terminal: TerminalViewController
 
+    /// Opens a window and connects. Saved entries (in `store`) get their call counted.
     @discardableResult
-    static func open(entry: BBSEntry) -> TerminalWindowController {
-        let controller = TerminalWindowController(entry: entry)
-        open.insert(controller)
-        controller.showWindow(nil)
-        controller.window?.makeFirstResponder(controller.terminal.terminalView)
+    static func open(entry: BBSEntry, store: DialingDirectoryStore = .shared) -> TerminalWindowController {
+        let controller = make(entry: entry, store: store)
+        controller.present()
         controller.terminal.connect()
         return controller
+    }
+
+    /// A window for `entry`, not shown and not connected (the dialer shows it when the BBS answers).
+    static func make(entry: BBSEntry, store: DialingDirectoryStore = .shared) -> TerminalWindowController {
+        let controller = TerminalWindowController(entry: entry)
+        controller.terminal.globalMacros = store.directory.globalMacros
+        controller.terminal.passwords = store.passwords
+        if store.directory.entries.contains(where: { $0.id == entry.id }) {
+            controller.terminal.callRecorder = { [weak store] id in store?.recordCall(id) }
+        }
+        open.insert(controller)
+        return controller
+    }
+
+    func present() {
+        showWindow(nil)
+        window?.makeFirstResponder(terminal.terminalView)
+    }
+
+    /// Ends the session and closes the window (shown or not).
+    func dismiss() {
+        terminal.onStateChange = nil
+        terminal.onBusy = nil
+        terminal.stopCapture()
+        terminal.disconnect()
+        window?.orderOut(nil)
+        Self.open.remove(self)
+        window?.close()
     }
 
     /// The terminal in the key (or main) window, for the Terminal menu.
