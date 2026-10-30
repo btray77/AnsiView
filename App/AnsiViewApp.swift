@@ -226,6 +226,9 @@ struct AnsiViewApp: App {
                 Button("Auto Scroll") { send(#selector(AnsiCanvasView.toggleAutoScroll(_:))) }
                     .keyboardShortcut("a", modifiers: [.command, .shift])
                     .help("Scrolls tall art smoothly down the window. While it runs: + and - change speed, Space pauses, Escape stops.")
+                Button("Show or Hide Pack Info") { send(#selector(GalleryContainerViewController.togglePackInfo(_:))) }
+                    .keyboardShortcut("i", modifiers: [.command, .option])
+                    .help("In a gallery: the pack's FILE_ID.DIZ and NFO files beside the pieces.")
                 Toggle("Show Minimap", isOn: $showMinimap)
                     .help("A strip at the right of tall art showing the whole piece; click or drag in it to jump.")
                 Menu("Palette") {

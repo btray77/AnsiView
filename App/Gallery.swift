@@ -2,36 +2,69 @@ import AnsiCore
 import AppKit
 import UniformTypeIdentifiers
 
-/// A grid of thumbnails for a folder or art pack. Thumbnails render on background threads and
-/// fill in as they finish. Double click (or Return) opens a piece.
-final class GalleryViewController: NSViewController, NSCollectionViewDataSource {
+/// A grid of thumbnails for a folder or art pack. Thumbnails render on background threads, the
+/// pieces on screen first (plan 9 ruling 11), and come from the disk cache when it has them.
+/// A search field filters the pieces by the text inside them. Double click (or Return) opens a piece.
+final class GalleryViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegate, NSSearchFieldDelegate {
     static let itemSize = NSSize(width: 200, height: 172)
     /// Thumbnails are rendered at twice the point size for Retina screens.
-    static let thumbnailPixels = CGSize(width: 384, height: 288)
+    static let thumbnailPixels = ThumbnailStore.pixels
+    /// For checks: new galleries wait for `resumeRendering()` before drawing thumbnails.
+    static var startsPaused = false
 
     let collection: ArtCollection
+    private let store: ThumbnailStore
     private var thumbnails: [Int: NSImage] = [:]
+    /// Each piece's searchable text, once read.
+    private var haystacks: [Int: SearchHaystack] = [:]
     private let grid = GalleryCollectionView()
+    private let searchField = NSSearchField()
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let compareButton = NSButton(title: "Compare", target: nil, action: nil)
     private let queue: OperationQueue = {
         let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = ProcessInfo.processInfo.activeProcessorCount
         queue.qualityOfService = .userInitiated
         return queue
     }()
+    private var order: WorkOrder
+    private var inFlight = 0
+    private let workers = max(2, ProcessInfo.processInfo.activeProcessorCount)
+    private var paused: Bool
+    private var observers: [NSObjectProtocol] = []
     /// For checks: each render reports whether it ran on the main thread; the last one finishing
     /// calls `onAllRendered`.
     var onRendered: ((_ index: Int, _ onMainThread: Bool) -> Void)?
     var onAllRendered: (() -> Void)?
+    /// Thumbnails finished, and how many came from the disk cache or from reading the art.
+    private(set) var renderedCount = 0
+    private(set) var renderedFromCache = 0
+    private(set) var renderedFromFile = 0
+    /// The first pieces whose thumbnails were started, in order (for checks).
+    private(set) var startedOrder: [Int] = []
 
-    init(collection: ArtCollection) {
+    /// Collection indexes on show, in order (all of them unless a search is filtering).
+    private(set) var shownIndexes: [Int]
+    private var query: [String] = []
+    private(set) var isSearching = false
+    private(set) var searchStatus = ""
+    private var searchGeneration = 0
+
+    init(collection: ArtCollection, thumbnails: ThumbnailStore = .shared) {
         self.collection = collection
+        self.store = thumbnails
+        order = WorkOrder(count: collection.items.count)
+        shownIndexes = Array(collection.items.indices)
+        paused = Self.startsPaused
         super.init(nibName: nil, bundle: nil)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    deinit { queue.cancelAllOperations() }
+    deinit {
+        queue.cancelAllOperations()
+        observers.forEach(NotificationCenter.default.removeObserver)
+    }
 
     /// Where the grid / list choice is remembered for gallery windows.
     static let layoutKey = "galleryLayout"
@@ -82,19 +115,61 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource 
     override func loadView() {
         grid.collectionViewLayout = Self.makeLayout(layout)
         grid.dataSource = self
+        grid.delegate = self
         grid.isSelectable = true
         grid.allowsMultipleSelection = true
         grid.backgroundColors = [NSColor(white: 0.08, alpha: 1)]
         grid.register(GalleryItem.self, forItemWithIdentifier: GalleryItem.identifier)
         grid.register(GalleryListItem.self, forItemWithIdentifier: GalleryListItem.identifier)
         grid.toolTip = "Double click a piece (or press Return) to open it."
-        grid.onOpen = { [weak self] index in self?.open(index) }
+        grid.onOpen = { [weak self] index in self?.openShown(index) }
         let scroll = NSScrollView()
         scroll.documentView = grid
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
-        view = scroll
-        renderThumbnails()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+
+        searchField.placeholderString = "Search text in these pieces"
+        searchField.toolTip = "Finds pieces whose words, file name or SAUCE (title, author, group, comments) contain every word you type. Cmd-F comes here."
+        searchField.sendsSearchStringImmediately = false
+        searchField.target = self
+        searchField.action = #selector(searchChanged(_:))
+        searchField.delegate = self
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.font = .systemFont(ofSize: 11)
+        statusLabel.lineBreakMode = .byTruncatingTail
+        compareButton.bezelStyle = .rounded
+        compareButton.controlSize = .small
+        compareButton.target = self
+        compareButton.action = #selector(compareSelected(_:))
+        compareButton.toolTip = "Select two pieces, then Compare shows them side by side with the cells that differ tinted red."
+        compareButton.isEnabled = false
+        let bar = NSStackView(views: [searchField, statusLabel, NSView(), compareButton])
+        bar.spacing = 10
+        bar.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        searchField.widthAnchor.constraint(equalToConstant: 260).isActive = true
+
+        let container = NSView()
+        container.addSubview(bar)
+        container.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            bar.topAnchor.constraint(equalTo: container.topAnchor),
+            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        view = container
+        scroll.contentView.postsBoundsChangedNotifications = true
+        observers.append(NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification,
+                                                                object: scroll.contentView, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.visibleChanged() }
+        })
+        if collection.items.isEmpty { onAllRendered?() }
+        DispatchQueue.main.async { [weak self] in self?.visibleChanged() }
     }
 
     override func viewDidAppear() {
@@ -102,38 +177,181 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource 
         view.window?.makeFirstResponder(grid)
     }
 
-    private func renderThumbnails() {
-        var remaining = collection.items.count
-        if remaining == 0 { onAllRendered?() }
-        for index in collection.items.indices {
-            queue.addOperation { [collection, weak self] in
-                let image = Thumbnail.render(collection.artFile(at: index), maximum: Self.thumbnailPixels)
+    // MARK: Thumbnails (visible first, disk cache)
+
+    /// For checks: starts rendering in a gallery made while `startsPaused` was on.
+    func resumeRendering() {
+        paused = false
+        visibleChanged()
+    }
+
+    /// The pieces on screen go to the front of the work.
+    private func visibleChanged() {
+        let visible = grid.indexPathsForVisibleItems().map(\.item).sorted()
+            .compactMap { shownIndexes.indices.contains($0) ? shownIndexes[$0] : nil }
+        order.prioritize(visible)
+        pumpThumbnails()
+    }
+
+    private func pumpThumbnails() {
+        guard !paused else { return }
+        while inFlight < workers, let index = order.next() {
+            inFlight += 1
+            if startedOrder.count < 64 { startedOrder.append(index) }
+            let wantsText = !query.isEmpty
+            queue.addOperation { [collection, store, weak self] in
+                let result = Self.thumbnail(for: index, in: collection, store: store, wantsText: wantsText)
                 let onMain = Thread.isMainThread
+                DispatchQueue.main.async { self?.finished(index, result, onMain: onMain) }
+            }
+        }
+    }
+
+    private struct Rendered {
+        let image: CGImage?
+        let fromCache: Bool
+        let haystack: SearchHaystack?
+    }
+
+    /// The cached thumbnail, or the art read, drawn and cached (with its text kept for searching).
+    private static func thumbnail(for index: Int, in collection: ArtCollection, store: ThumbnailStore,
+                                  wantsText: Bool) -> Rendered {
+        let key = collection.thumbnailKey(at: index)
+        if !wantsText, let key, let image = store.image(for: key) {
+            return Rendered(image: image, fromCache: true, haystack: nil)
+        }
+        let file = collection.artFile(at: index)
+        let screen = AnsiAnalysis(file).finalScreen
+        let cached = key.flatMap { store.image(for: $0) }
+        let image = cached ?? Thumbnail.render(file, screen: screen, maximum: thumbnailPixels)
+        if cached == nil, let image, let key { store.store(image, for: key) }
+        return Rendered(image: image, fromCache: cached != nil, haystack: haystack(collection.items[index].name, file, screen))
+    }
+
+    static func haystack(_ name: String, _ file: ArtFile, _ screen: AnsiScreen) -> SearchHaystack {
+        let sauce = file.sauce
+        return SearchHaystack(name: name, title: sauce?.title ?? "", author: sauce?.author ?? "", group: sauce?.group ?? "",
+                              comments: sauce?.comments.joined(separator: "\n") ?? "", text: ArtText.plainText(screen))
+    }
+
+    private func finished(_ index: Int, _ result: Rendered, onMain: Bool) {
+        inFlight -= 1
+        if let image = result.image, thumbnails[index] == nil {
+            thumbnails[index] = NSImage(cgImage: image, size: NSSize(width: image.width / 2, height: image.height / 2))
+            renderedCount += 1
+            if result.fromCache { renderedFromCache += 1 } else { renderedFromFile += 1 }
+            onRendered?(index, onMain)
+            if let shown = shownIndexes.firstIndex(of: index) {
+                let path = IndexPath(item: shown, section: 0)
+                if let item = grid.item(at: path) as? GalleryItem { item.thumbnail = thumbnails[index] }
+                if let item = grid.item(at: path) as? GalleryListItem { item.thumbnail = thumbnails[index] }
+            }
+            if renderedCount == collection.items.count { onAllRendered?() }
+        }
+        if let haystack = result.haystack { haystacks[index] = haystack }
+        pumpThumbnails()
+    }
+
+    // MARK: Search (plan 9 item 38: a folder or pack)
+
+    @objc private func searchChanged(_ sender: NSSearchField) { search(sender.stringValue) }
+
+    func focusSearch() { view.window?.makeFirstResponder(searchField) }
+
+    /// Shows only the pieces whose name, SAUCE or art text contains every word of `text`. Pieces
+    /// not read yet are read in the background; the grid fills in as they are.
+    func search(_ text: String) {
+        if searchField.stringValue != text { searchField.stringValue = text }
+        query = ArtSearch.words(text)
+        searchGeneration += 1
+        guard !query.isEmpty else {
+            isSearching = false
+            searchStatus = ""
+            statusLabel.stringValue = ""
+            applyFilter()
+            return
+        }
+        let missing = collection.items.indices.filter { haystacks[$0] == nil }
+        guard !missing.isEmpty else { finishSearch(); return }
+        isSearching = true
+        let generation = searchGeneration
+        var remaining = missing.count
+        statusLabel.stringValue = "Reading \(missing.count) pieces..."
+        for index in missing {
+            queue.addOperation { [collection, weak self] in
+                let file = collection.artFile(at: index)
+                let hay = Self.haystack(collection.items[index].name, file, AnsiAnalysis(file).finalScreen)
                 DispatchQueue.main.async {
                     guard let self else { return }
-                    if let image {
-                        self.thumbnails[index] = NSImage(cgImage: image, size: NSSize(width: image.width / 2,
-                                                                                      height: image.height / 2))
-                    }
-                    self.onRendered?(index, onMain)
-                    let path = IndexPath(item: index, section: 0)
-                    if let item = self.grid.item(at: path) as? GalleryItem { item.thumbnail = self.thumbnails[index] }
-                    if let item = self.grid.item(at: path) as? GalleryListItem { item.thumbnail = self.thumbnails[index] }
+                    self.haystacks[index] = hay
                     remaining -= 1
-                    if remaining == 0 { self.onAllRendered?() }
+                    guard generation == self.searchGeneration else { return }
+                    if remaining == 0 { self.finishSearch() }
+                    else if remaining % 200 == 0 { self.statusLabel.stringValue = "Reading \(remaining) more pieces..." }
                 }
             }
         }
     }
 
-    var selectedIndex: Int? { grid.selectionIndexPaths.map(\.item).min() }
+    private func finishSearch() {
+        isSearching = false
+        applyFilter()
+        let total = collection.items.count
+        searchStatus = shownIndexes.isEmpty ? "No piece matches" : "\(shownIndexes.count) of \(total) pieces match"
+        statusLabel.stringValue = searchStatus
+    }
 
-    /// The selected pieces in gallery order (for File > Batch Export).
-    var selectedIndexes: [Int] { grid.selectionIndexPaths.map(\.item).sorted() }
+    private func applyFilter() {
+        let selected = selectedIndexes
+        shownIndexes = query.isEmpty ? Array(collection.items.indices)
+            : collection.items.indices.filter { haystacks[$0]?.matches(words: query) == true }
+        grid.reloadData()
+        select(selected.compactMap { shownIndexes.firstIndex(of: $0) })
+        updateCompareButton()
+        visibleChanged()
+    }
 
-    /// Selects pieces (for checks).
+    func controlTextDidChange(_ note: Notification) {
+        // Clearing the field (the x button or deleting everything) shows every piece at once.
+        if searchField.stringValue.isEmpty, !query.isEmpty { search("") }
+    }
+
+    // MARK: Selection
+
+    /// The first selected piece's collection index.
+    var selectedIndex: Int? { selectedIndexes.first }
+
+    /// The selected pieces' collection indexes in gallery order (for File > Batch Export).
+    var selectedIndexes: [Int] {
+        grid.selectionIndexPaths.map(\.item).sorted().compactMap { shownIndexes.indices.contains($0) ? shownIndexes[$0] : nil }
+    }
+
+    /// Selects pieces by their place on screen (for checks).
     func select(_ indexes: [Int]) {
         grid.selectionIndexPaths = Set(indexes.map { IndexPath(item: $0, section: 0) })
+        updateCompareButton()
+    }
+
+    /// The two selected pieces, ready to compare; nil unless exactly two are selected.
+    var piecesToCompare: [ComparePiece]? {
+        let chosen = selectedIndexes
+        guard chosen.count == 2 else { return nil }
+        return chosen.map { ComparePiece(name: collection.items[$0].name, file: collection.artFile(at: $0)) }
+    }
+
+    @objc func compareSelected(_ sender: Any?) {
+        guard let pieces = piecesToCompare else { NSSound.beep(); return }
+        CompareWindowController.open(left: pieces[0], right: pieces[1])
+    }
+
+    private func updateCompareButton() { compareButton.isEnabled = selectedIndexes.count == 2 }
+
+    func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) { updateCompareButton() }
+    func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) { updateCompareButton() }
+
+    private func openShown(_ shown: Int) {
+        guard shownIndexes.indices.contains(shown) else { return }
+        open(shownIndexes[shown])
     }
 
     /// Opens a piece: files as documents, art pack entries in a slideshow at that piece.
@@ -154,25 +372,29 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource 
         SlideshowWindowController.open(collection: collection, index: selectedIndex ?? 0)
     }
 
+    // Edit > Find in a gallery: the search field.
+    @objc func showArtFind(_ sender: Any?) { focusSearch() }
+
     // MARK: Data source
 
     func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
-        collection.items.count
+        shownIndexes.count
     }
 
     func collectionView(_ collectionView: NSCollectionView,
                         itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
         let id = layout == .grid ? GalleryItem.identifier : GalleryListItem.identifier
         let item = collectionView.makeItem(withIdentifier: id, for: indexPath)
-        let name = collection.items[indexPath.item].name
+        let index = shownIndexes[indexPath.item]
+        let name = collection.items[index].name
         if let item = item as? GalleryItem {
             item.name = name
-            item.thumbnail = thumbnails[indexPath.item]
+            item.thumbnail = thumbnails[index]
         }
         if let item = item as? GalleryListItem {
             item.name = name
             item.detail = Self.kind(of: name)
-            item.thumbnail = thumbnails[indexPath.item]
+            item.thumbnail = thumbnails[index]
         }
         return item
     }
@@ -342,6 +564,7 @@ final class GalleryItem: NSCollectionViewItem {
 
 final class GalleryWindowController: NSWindowController, NSWindowDelegate {
     private static var open: Set<GalleryWindowController> = []
+    let content: GalleryContainerViewController
     let gallery: GalleryViewController
 
     @discardableResult
@@ -369,7 +592,8 @@ final class GalleryWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private init(collection: ArtCollection) {
-        gallery = GalleryViewController(collection: collection)
+        content = GalleryContainerViewController(collection: collection)
+        gallery = content.gallery
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
@@ -381,8 +605,8 @@ final class GalleryWindowController: NSWindowController, NSWindowDelegate {
         window.subtitle = subtitle
         super.init(window: window)
         window.delegate = self
-        window.contentViewController = gallery
-        window.setContentSize(NSSize(width: 900, height: 620))
+        window.contentViewController = content
+        window.setContentSize(NSSize(width: content.packInfo == nil ? 900 : 1180, height: 620))
         window.center()
         // Grid / list toggle at the right of the title bar.
         let toggle = BrowseLayout.makeToggle(selected: gallery.layout, target: gallery,
