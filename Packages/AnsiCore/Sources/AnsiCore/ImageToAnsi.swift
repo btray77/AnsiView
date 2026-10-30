@@ -2,9 +2,12 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
-/// Converts a picture to block character ANSI art (plan 6 ruling 13).
+/// Converts a picture to block character ANSI art (plan 6 ruling 13, rebuilt by the image
+/// import plan: OKLab matching, linear light mixing, glyph search, more dithering).
 public enum ImageToAnsi {
-    public enum Mode: String, CaseIterable {
+    public enum Mode: String, CaseIterable, Codable {
+        /// For each cell, the best of several characters and colour pairs (ruling 6).
+        case glyphs = "glyph"
         /// Two pixels per cell with the upper and lower half blocks.
         case halfBlocks = "half"
         /// One full block per cell.
@@ -14,6 +17,7 @@ public enum ImageToAnsi {
 
         public var label: String {
             switch self {
+            case .glyphs: return "Best character per cell"
             case .halfBlocks: return "Half blocks (2 pixels per cell)"
             case .fullBlocks: return "Full blocks"
             case .shades: return "Shades (extra tones)"
@@ -21,35 +25,61 @@ public enum ImageToAnsi {
         }
     }
 
-    public enum PaletteChoice: String, CaseIterable {
+    public enum PaletteChoice: String, CaseIterable, Codable {
         case vga16 = "vga"
+        /// 16 colours fitted to the picture (ruling 7), saved as XBin, which carries a palette.
+        case imagePalette = "xbin"
         case trueColor = "truecolor"
 
-        public var label: String { self == .vga16 ? "16 VGA colours" : "24 bit truecolor" }
+        public var label: String {
+            switch self {
+            case .vga16: return "16 VGA colours (.ans)"
+            case .imagePalette: return "16 colours fitted to the image (.xb)"
+            case .trueColor: return "24 bit truecolor (.ans)"
+            }
+        }
+
+        /// The format a conversion with this palette saves in.
+        public var saveFormat: SaveFormat { self == .imagePalette ? .xbin : .ansi }
     }
 
-    public enum Dither: String, CaseIterable {
+    public enum Dither: String, CaseIterable, Codable {
         case none
         case floydSteinberg = "fs"
+        case serpentine
+        case atkinson
+        case sierraLite = "sierra"
         case ordered
 
         public var label: String {
             switch self {
             case .none: return "None"
             case .floydSteinberg: return "Floyd-Steinberg"
-            case .ordered: return "Ordered"
+            case .serpentine: return "Floyd-Steinberg, serpentine"
+            case .atkinson: return "Atkinson"
+            case .sierraLite: return "Sierra Lite"
+            case .ordered: return "Ordered (Bayer 4x4)"
             }
         }
     }
 
-    public struct Options: Equatable {
+    public struct Options: Equatable, Codable {
         public var columns = 80
-        public var mode = Mode.halfBlocks
+        public var mode = Mode.glyphs
         public var palette = PaletteChoice.vga16
-        public var dither = Dither.floydSteinberg
+        public var dither = Dither.serpentine
+        /// 0 to 1: how much of the error dithering spreads (or how strong the ordered pattern is).
+        public var ditherStrength: Float = 1
         public var iceColors = true
         /// Compensates for the 8x16 character cell so the picture keeps its proportions.
         public var aspectCorrection = true
+        /// Glyph search also tries line, box and dot characters.
+        public var extendedGlyphs = false
+        /// Sample without smoothing (pixel art).
+        public var nearestNeighbour = false
+        public var adjustments = ImageAdjustments()
+        /// Part of the image to convert, in image pixels with a top left origin; nil for all of it.
+        public var crop: CGRect?
 
         public init() {}
     }
@@ -65,6 +95,16 @@ public enum ImageToAnsi {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               CGImageSourceGetCount(source) > 0,
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw ImportError.unreadable }
+        // A photo taken in portrait is stored sideways with an EXIF orientation: draw it upright.
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        if let orientation = properties?[kCGImagePropertyOrientation] as? Int, orientation != 1,
+           let upright = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+               kCGImageSourceCreateThumbnailFromImageAlways: true,
+               kCGImageSourceCreateThumbnailWithTransform: true,
+               kCGImageSourceThumbnailMaxPixelSize: max(image.width, image.height),
+           ] as CFDictionary) {
+            return upright
+        }
         return image
     }
 
@@ -75,184 +115,238 @@ public enum ImageToAnsi {
     }
 
     public static func convert(_ image: CGImage, options: Options) -> EditCanvas {
+        convert(image, options: options, cancel: { false })!
+    }
+
+    /// The canvas size for an image: columns and cell rows.
+    public static func size(imageWidth: Int, imageHeight: Int, options: Options) -> (columns: Int, rows: Int) {
+        let g = geometry(imageWidth: imageWidth, imageHeight: imageHeight, options: options)
+        return (g.columns, g.cellRows)
+    }
+
+    struct Geometry {
+        let columns: Int
+        let cellRows: Int
+        /// Half blocks: sample rows (two per cell, the last cell may have one).
+        let sampleRows: Int
+    }
+
+    static func geometry(imageWidth: Int, imageHeight: Int, options: Options) -> Geometry {
+        let crop = normalizedCrop(options.crop, width: imageWidth, height: imageHeight)
+        let width = crop.map { Int($0.width) } ?? imageWidth
+        let height = crop.map { Int($0.height) } ?? imageHeight
         let columns = min(EditCanvas.maxColumns, max(1, options.columns))
         let half = options.mode == .halfBlocks
         let factor = (half ? 1.0 : 0.5) * (options.aspectCorrection ? 1 : 2)
         let maxSamples = AnsiTerminal.maxRows * (half ? 2 : 1)
-        let ratio = Double(max(1, image.height)) / Double(max(1, image.width))
+        let ratio = Double(max(1, height)) / Double(max(1, width))
         let sampleRows = min(maxSamples, max(1, Int((ratio * Double(columns) * factor).rounded())))
-        var pixels = samples(image, width: columns, height: sampleRows)
-        let cellRows = half ? (sampleRows + 1) / 2 : sampleRows
+        return Geometry(columns: columns, cellRows: half ? (sampleRows + 1) / 2 : sampleRows, sampleRows: sampleRows)
+    }
 
-        var canvas = EditCanvas(columns: columns, height: cellRows)
+    /// Converts `image`; nil when `cancel` returned true (checked once per row).
+    public static func convert(_ image: CGImage, options: Options, cancel: () -> Bool) -> EditCanvas? {
+        let g = geometry(imageWidth: image.width, imageHeight: image.height, options: options)
+        var canvas = EditCanvas(columns: g.columns, height: g.cellRows)
         canvas.setIceColors(options.iceColors)
-        let black = Palette.vga[0]
+        let strength = min(1, max(0, options.ditherStrength))
+        let kernel = strength > 0 ? DitherKernel.kernel(for: options.dither) : nil
+        var palette = Palette.vga
+        let backgrounds = options.iceColors ? 0...15 : 0...7
+
+        // Glyph search samples each cell at block resolution; huge canvases use bigger blocks.
+        let cells = g.columns * g.cellRows
+        let block = cells > 500_000 ? 8 : cells > 125_000 ? 4 : 2
+        var search: GlyphSearch? = options.mode == .glyphs
+            ? GlyphSearch(font: canvas.font,
+                          glyphs: options.palette == .trueColor ? GlyphSearch.trueColorGlyphs
+                              : GlyphSearch.basicGlyphs + (options.extendedGlyphs ? GlyphSearch.extendedGlyphs : []),
+                          palette: palette, allowedBackgrounds: backgrounds, block: block)
+            : nil
+        let (gridWidth, gridHeight): (Int, Int)
+        switch options.mode {
+        case .glyphs: (gridWidth, gridHeight) = (g.columns * search!.subWidth, g.cellRows * search!.subHeight)
+        case .halfBlocks: (gridWidth, gridHeight) = (g.columns, g.sampleRows)
+        case .fullBlocks, .shades: (gridWidth, gridHeight) = (g.columns, g.cellRows)
+        }
+        var grid = PixelGrid.sample(image, width: gridWidth, height: gridHeight, crop: options.crop,
+                                    nearest: options.nearestNeighbour)
+        grid.apply(options.adjustments)
+        if cancel() { return nil }
+        if options.palette == .imagePalette {
+            palette = PaletteOptimizer.palette(linear: grid.linear, count: 16)
+            canvas.palette = palette
+            search = search.map { GlyphSearch(font: canvas.font, glyphs: $0.glyphCodes, palette: palette,
+                                              allowedBackgrounds: backgrounds, block: block) }
+            if cancel() { return nil }
+        }
+
         if options.palette == .trueColor {
-            for y in 0..<cellRows {
-                for x in 0..<columns {
+            return trueColor(grid: grid, canvas: canvas, geometry: g, mode: options.mode, search: search, cancel: cancel)
+        }
+        if options.dither == .ordered {
+            // Glyph search sees whole cells, so the threshold pattern steps per cell there.
+            if let search { applyOrdered(&grid, strength: strength, cellWidth: search.subWidth, cellHeight: search.subHeight) }
+            else { applyOrdered(&grid, strength: strength) }
+        }
+        var values = grid.linear
+        let paletteLinear = palette.map { OKLab.linear($0) }
+        let paletteLab = palette.map { OKLab.match(linear: OKLab.linear($0)) }
+        let one = SIMD3<Float>(repeating: 1)
+
+        switch options.mode {
+        case .glyphs:
+            let search = search!
+            let sw = search.subWidth, sh = search.subHeight
+            // Error diffusion runs on cells: each cell's mean error moves to its neighbours.
+            var carry = [SIMD3<Float>](repeating: .zero, count: cells)
+            let diffusion = kernel ?? DitherKernel(taps: [], serpentine: false)
+            var pixels = [SIMD3<Float>](repeating: .zero, count: sw * sh)
+            let finished = diffusion.run(width: g.columns, height: g.cellRows, values: &carry, cancel: cancel) { index, offset in
+                let cx = index % g.columns, cy = index / g.columns
+                var mean = SIMD3<Float>.zero
+                for sy in 0..<sh {
+                    let row = (cy * sh + sy) * gridWidth + cx * sw
+                    for sx in 0..<sw {
+                        let v = (values[row + sx] + offset).clamped(lowerBound: .zero, upperBound: one)
+                        pixels[sy * sw + sx] = v
+                        mean += v
+                    }
+                }
+                let match = search.best(cell: pixels)
+                canvas.set(AnsiCell(code: match.code, fg: palette[match.fg], bg: palette[match.bg]), x: cx, y: cy)
+                return kernel == nil ? .zero : (mean / Float(sw * sh) - match.rendered) * strength
+            }
+            return finished ? canvas : nil
+
+        case .halfBlocks, .fullBlocks:
+            let half = options.mode == .halfBlocks
+            var chosen = [Int](repeating: 0, count: gridWidth * gridHeight)
+            let diffusion = kernel ?? DitherKernel(taps: [], serpentine: false)
+            let finished = diffusion.run(width: gridWidth, height: gridHeight, values: &values, cancel: cancel) { index, value in
+                let target = value.clamped(lowerBound: .zero, upperBound: one)
+                let x = index % gridWidth, y = index / gridWidth
+                var allowed = 0...15
+                // Without iCE a cell holds one bright colour (the foreground): a lower half under
+                // a bright upper half must be dark or the same colour.
+                var sameAs: Int?
+                if half, !options.iceColors, y % 2 == 1, chosen[index - gridWidth] >= 8 {
+                    allowed = 0...7
+                    sameAs = chosen[index - gridWidth]
+                }
+                let lab = OKLab.match(linear: target)
+                var pick = OKLab.nearest(lab, in: paletteLab, allowed: allowed)
+                if let sameAs {
+                    let a = lab - paletteLab[pick], b = lab - paletteLab[sameAs]
+                    if (b * b).sum() < (a * a).sum() { pick = sameAs }
+                }
+                chosen[index] = pick
+                return kernel == nil ? .zero : (target - paletteLinear[pick]) * strength
+            }
+            guard finished else { return nil }
+            for y in 0..<g.cellRows {
+                for x in 0..<g.columns {
                     if half {
-                        let top = pixels.color(x, y * 2)
-                        let bottom = y * 2 + 1 < sampleRows ? pixels.color(x, y * 2 + 1) : black
-                        canvas.set(AnsiCell(code: EditCanvas.blockUpper, fg: top, bg: bottom), x: x, y: y)
+                        let top = chosen[y * 2 * gridWidth + x]
+                        let bottom = y * 2 + 1 < gridHeight ? chosen[(y * 2 + 1) * gridWidth + x] : 0
+                        canvas.set(halves(top: top, bottom: bottom, palette: palette, ice: options.iceColors), x: x, y: y)
                     } else {
-                        canvas.set(AnsiCell(code: EditCanvas.blockFull, fg: pixels.color(x, y), bg: black), x: x, y: y)
+                        canvas.set(AnsiCell(code: EditCanvas.blockFull, fg: palette[chosen[y * gridWidth + x]], bg: palette[0]),
+                                   x: x, y: y)
                     }
                 }
             }
             return canvas
-        }
 
-        let ice = options.iceColors
-        let backgrounds = ice ? 0...15 : 0...7
-        let shadeChoices = options.mode == .shades ? shadeCandidates(backgrounds: backgrounds) : []
-        let shadeMixes = shadeChoices.map(\.mix)
-        var chosen = [Int](repeating: 0, count: columns * sampleRows)
-        for y in 0..<sampleRows {
-            for x in 0..<columns {
-                var target = pixels.value(x, y)
-                if options.dither == .ordered {
-                    let bias = (Float(bayer[y % 4][x % 4]) / 16 - 0.5) * 64
-                    target = (target.0 + bias, target.1 + bias, target.2 + bias)
-                }
-                let result: (index: Int, color: (Float, Float, Float))
-                if options.mode == .shades {
-                    let best = nearest(target, in: shadeMixes)
-                    result = (best, shadeChoices[best].mix)
-                } else {
-                    // Without iCE a cell can hold only one bright colour (the foreground), so a lower
-                    // half under a bright upper half is limited to dark colours or the same colour.
-                    var allowed = allIndexes
-                    if half, !ice, y % 2 == 1, chosen[(y - 1) * columns + x] >= 8 {
-                        allowed = darkPlus[chosen[(y - 1) * columns + x] - 8]
-                    }
-                    let best = nearest(target, in: allowed.candidates)
-                    result = (allowed.indexes[best], allowed.candidates[best])
-                }
-                chosen[y * columns + x] = result.index
-                if options.dither == .floydSteinberg {
-                    let original = pixels.value(x, y)
-                    let error = (original.0 - result.color.0, original.1 - result.color.1, original.2 - result.color.2)
-                    pixels.spread(error, x: x + 1, y: y, weight: 7 / 16)
-                    pixels.spread(error, x: x - 1, y: y + 1, weight: 3 / 16)
-                    pixels.spread(error, x: x, y: y + 1, weight: 5 / 16)
-                    pixels.spread(error, x: x + 1, y: y + 1, weight: 1 / 16)
+        case .shades:
+            let choices = shadeCandidates(palette: palette, backgrounds: backgrounds)
+            let choiceLab = choices.map(\.lab)
+            var chosen = [Int](repeating: 0, count: gridWidth * gridHeight)
+            let diffusion = kernel ?? DitherKernel(taps: [], serpentine: false)
+            let finished = diffusion.run(width: gridWidth, height: gridHeight, values: &values, cancel: cancel) { index, value in
+                let target = value.clamped(lowerBound: .zero, upperBound: one)
+                let pick = OKLab.nearest(OKLab.match(linear: target), in: choiceLab, allowed: 0...(choices.count - 1))
+                chosen[index] = pick
+                return kernel == nil ? .zero : (target - choices[pick].linear) * strength
+            }
+            guard finished else { return nil }
+            for y in 0..<g.cellRows {
+                for x in 0..<g.columns {
+                    let shade = choices[chosen[y * gridWidth + x]]
+                    canvas.set(AnsiCell(code: shade.code, fg: palette[shade.fg], bg: palette[shade.bg]), x: x, y: y)
                 }
             }
+            return canvas
         }
+    }
 
-        for y in 0..<cellRows {
-            for x in 0..<columns {
-                switch options.mode {
+    // MARK: Helpers
+
+    /// A half block cell for palette indexes `top` over `bottom` (plan 6 ruling 8).
+    static func halves(top: Int, bottom: Int, palette: [RGB], ice: Bool) -> AnsiCell {
+        if top == bottom { return AnsiCell(code: EditCanvas.blockFull, fg: palette[top], bg: palette[0]) }
+        if ice || bottom < 8 { return AnsiCell(code: EditCanvas.blockUpper, fg: palette[top], bg: palette[bottom]) }
+        if top < 8 { return AnsiCell(code: EditCanvas.blockLower, fg: palette[bottom], bg: palette[top]) }
+        return AnsiCell(code: EditCanvas.blockUpper, fg: palette[top], bg: palette[bottom - 8])
+    }
+
+    private static func trueColor(grid: PixelGrid, canvas: EditCanvas, geometry g: Geometry, mode: Mode,
+                                  search: GlyphSearch?, cancel: () -> Bool) -> EditCanvas? {
+        var canvas = canvas
+        let black = Palette.vga[0]
+        func rgb(_ v: SIMD3<Float>) -> RGB { RGB(r: OKLab.byte(srgb: v.x), g: OKLab.byte(srgb: v.y), b: OKLab.byte(srgb: v.z)) }
+        let linear = mode == .glyphs ? grid.linear : []
+        for y in 0..<g.cellRows {
+            if cancel() { return nil }
+            for x in 0..<g.columns {
+                switch mode {
+                case .glyphs:
+                    let search = search!
+                    let sw = search.subWidth, sh = search.subHeight
+                    var pixels: [SIMD3<Float>] = []
+                    pixels.reserveCapacity(sw * sh)
+                    for sy in 0..<sh { for sx in 0..<sw { pixels.append(linear[(y * sh + sy) * grid.width + x * sw + sx]) } }
+                    let match = search.bestTrueColor(cell: pixels)
+                    canvas.set(AnsiCell(code: match.code, fg: OKLab.rgb(linear: match.fg),
+                                        bg: match.code == EditCanvas.blockFull ? black : OKLab.rgb(linear: match.bg)), x: x, y: y)
                 case .halfBlocks:
-                    let top = Palette.vga[chosen[y * 2 * columns + x]]
-                    let bottom = y * 2 + 1 < sampleRows ? Palette.vga[chosen[(y * 2 + 1) * columns + x]] : black
-                    canvas.set(canvas.encodeHalves(top: top, bottom: bottom, keepingBackground: black), x: x, y: y)
-                case .fullBlocks:
-                    canvas.set(AnsiCell(code: EditCanvas.blockFull, fg: Palette.vga[chosen[y * columns + x]], bg: black), x: x, y: y)
-                case .shades:
-                    let shade = shadeChoices[chosen[y * columns + x]]
-                    canvas.set(AnsiCell(code: shade.code, fg: Palette.vga[shade.fg], bg: Palette.vga[shade.bg]), x: x, y: y)
+                    let top = rgb(grid.srgb[y * 2 * grid.width + x])
+                    let bottom = y * 2 + 1 < grid.height ? rgb(grid.srgb[(y * 2 + 1) * grid.width + x]) : black
+                    canvas.set(AnsiCell(code: EditCanvas.blockUpper, fg: top, bg: bottom), x: x, y: y)
+                case .fullBlocks, .shades:
+                    canvas.set(AnsiCell(code: EditCanvas.blockFull, fg: rgb(grid.srgb[y * grid.width + x]), bg: black), x: x, y: y)
                 }
             }
         }
         return canvas
     }
 
-    // MARK: Helpers
-
-    private typealias Choices = (indexes: [Int], candidates: [(Float, Float, Float)])
-    private static let allIndexes: Choices = (Array(0...15), vgaFloat)
-    /// For each bright colour 8 to 15: the dark colours plus that colour.
-    private static let darkPlus: [Choices] = (8...15).map { bright in
-        let indexes = Array(0...7) + [bright]
-        return (indexes, indexes.map { vgaFloat[$0] })
-    }
-
-    private static let bayer: [[Int]] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
-
-    private static let vgaFloat: [(Float, Float, Float)] = Palette.vga.map { (Float($0.r), Float($0.g), Float($0.b)) }
-
     /// A character and colour pair for shade mode, with the colour it shows from a distance.
     struct Shade {
         let code: UInt8
         let fg: Int
         let bg: Int
-        let mix: (Float, Float, Float)
+        let linear: SIMD3<Float>
+        let lab: SIMD3<Float>
     }
 
-    /// Space (background only), the three shades and the full block, over every allowed pair.
-    static func shadeCandidates(backgrounds: ClosedRange<Int>) -> [Shade] {
+    /// Space (background only), the three shades and the full block, over every allowed pair;
+    /// a shade shows the linear light mix of its colours by coverage.
+    static func shadeCandidates(palette: [RGB], backgrounds: ClosedRange<Int>) -> [Shade] {
+        let linear = palette.map { OKLab.linear($0) }
         var out: [Shade] = []
-        for bg in backgrounds { out.append(Shade(code: 0x20, fg: 7, bg: bg, mix: vgaFloat[bg])) }
-        for fg in 0...15 { out.append(Shade(code: EditCanvas.blockFull, fg: fg, bg: 0, mix: vgaFloat[fg])) }
-        let shades: [(UInt8, Float)] = [(176, 0.25), (177, 0.5), (178, 0.75)]
-        for (code, coverage) in shades {
-            for fg in 0...15 {
+        func add(_ code: UInt8, _ fg: Int, _ bg: Int, _ mix: SIMD3<Float>) {
+            out.append(Shade(code: code, fg: fg, bg: bg, linear: mix, lab: OKLab.match(linear: mix)))
+        }
+        for bg in backgrounds { add(0x20, 7, bg, linear[bg]) }
+        for fg in palette.indices { add(EditCanvas.blockFull, fg, 0, linear[fg]) }
+        for (code, coverage) in [(UInt8(176), Float(0.25)), (177, 0.5), (178, 0.75)] {
+            for fg in palette.indices {
                 for bg in backgrounds where bg != fg {
-                    let f = vgaFloat[fg], b = vgaFloat[bg]
-                    out.append(Shade(code: code, fg: fg, bg: bg,
-                                     mix: (f.0 * coverage + b.0 * (1 - coverage), f.1 * coverage + b.1 * (1 - coverage),
-                                           f.2 * coverage + b.2 * (1 - coverage))))
+                    add(code, fg, bg, linear[fg] * coverage + linear[bg] * (1 - coverage))
                 }
             }
         }
         return out
-    }
-
-    private static func nearest(_ c: (Float, Float, Float), in candidates: [(Float, Float, Float)]) -> Int {
-        var best = 0
-        var bestDistance = Float.greatestFiniteMagnitude
-        for (index, k) in candidates.enumerated() {
-            let dr = c.0 - k.0, dg = c.1 - k.1, db = c.2 - k.2
-            let distance = dr * dr + dg * dg + db * db
-            if distance < bestDistance { best = index; bestDistance = distance }
-        }
-        return best
-    }
-
-    /// RGB samples as floats, the image drawn on black at the sample size.
-    struct Samples {
-        let width: Int
-        let height: Int
-        var values: [Float]
-
-        func value(_ x: Int, _ y: Int) -> (Float, Float, Float) {
-            let o = (y * width + x) * 3
-            return (values[o], values[o + 1], values[o + 2])
-        }
-
-        func color(_ x: Int, _ y: Int) -> RGB {
-            let v = value(x, y)
-            func byte(_ f: Float) -> UInt8 { UInt8(min(255, max(0, f.rounded()))) }
-            return RGB(r: byte(v.0), g: byte(v.1), b: byte(v.2))
-        }
-
-        mutating func spread(_ error: (Float, Float, Float), x: Int, y: Int, weight: Float) {
-            guard x >= 0, x < width, y < height else { return }
-            let o = (y * width + x) * 3
-            values[o] += error.0 * weight
-            values[o + 1] += error.1 * weight
-            values[o + 2] += error.2 * weight
-        }
-    }
-
-    static func samples(_ image: CGImage, width: Int, height: Int) -> Samples {
-        var bytes = [UInt8](repeating: 0, count: width * height * 4)
-        bytes.withUnsafeMutableBytes { raw in
-            guard let context = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
-                                          bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
-            context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
-            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-            context.interpolationQuality = .high
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        }
-        var values = [Float](repeating: 0, count: width * height * 3)
-        for i in 0..<(width * height) {
-            values[i * 3] = Float(bytes[i * 4])
-            values[i * 3 + 1] = Float(bytes[i * 4 + 1])
-            values[i * 3 + 2] = Float(bytes[i * 4 + 2])
-        }
-        return Samples(width: width, height: height, values: values)
     }
 }

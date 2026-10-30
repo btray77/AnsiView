@@ -34,6 +34,7 @@ final class EditorCanvasView: NSView {
     init(editor: CanvasEditor) {
         self.editor = editor
         super.init(frame: .zero)
+        registerForDraggedTypes([.fileURL])  // image drops open the import window (App/ImageImport.swift)
         refresh()
     }
 
@@ -383,12 +384,17 @@ final class EditorCanvasView: NSView {
     /// A picture becomes block art with the last Import Image options (ruling 7): as wide as the
     /// selection (and floated at its corner), else the image's pixel width up to the canvas width.
     private func pasteImage(_ image: CGImage, at cell: (x: Int, y: Int)?) {
-        var options = ImageImportOptionsView.remembered
         let selection = editor.selection
+        var options = ImageImportSettings.preset.options(base: ImageImportSettings.options,
+                                                         imageWidth: image.width, imageHeight: image.height)
         options.columns = CellClipboard.imageColumns(imageWidth: image.width, selectionWidth: selection?.width,
                                                      canvasColumns: editor.canvas.columns)
         options.iceColors = editor.canvas.iceColors
-        let converted = ImageToAnsi.convert(image, options: options)
+        // A fitted palette only exists in XBin files; pasted cells use the canvas's VGA colours.
+        if options.palette == .imagePalette { options.palette = .vga16 }
+        let best = ImageImportSettings.preset == .auto
+            ? ImageToAnsi.autoCandidates(image, base: options, cancel: { false })?.first : nil
+        let converted = best?.canvas ?? ImageToAnsi.convert(image, options: options)
         let region = converted.region(CellRect(x: 0, y: 0, width: converted.columns, height: converted.height))
         editor.beginFloating(region, x: cell?.x ?? selection?.x, y: cell?.y ?? selection?.y)
     }
@@ -741,34 +747,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
              suggestedFormat: SaveFormat.suggested(for: player.source.format))
     }
 
-    /// File > Import Image...: converts a picture to block characters and opens it for touching up.
+    /// File > Import Image...: the import window with a live preview (App/ImageImport.swift).
     static func importImage() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
-        panel.message = "Choose an image to convert to ANSI art."
-        panel.prompt = "Import"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        let alert = NSAlert()
-        alert.messageText = "Import \(url.lastPathComponent)"
-        alert.informativeText = "The image becomes block characters in a new editor window."
-        alert.addButton(withTitle: "Import")
-        alert.addButton(withTitle: "Cancel")
-        let optionsView = ImageImportOptionsView()
-        alert.accessoryView = optionsView
-        while true {
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-            if optionsView.options != nil { break }
-            NSSound.beep()
-        }
-        guard let options = optionsView.options else { return }
-        ImageImportOptionsView.remember(options)
-        do {
-            let name = url.deletingPathExtension().lastPathComponent
-            let canvas = try ImageToAnsi.convert(data: try Data(contentsOf: url), options: options, title: name)
-            open(canvas: canvas, name: "\(name) (imported)")
-        } catch {
-            NSAlert(error: error).runModal()
-        }
+        ImageImportWindowController.chooseAndOpen()
     }
 
     private static func focusedPlayer() -> AnsiPlayerViewController? {

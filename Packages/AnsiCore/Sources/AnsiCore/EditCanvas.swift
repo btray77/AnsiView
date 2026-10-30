@@ -78,6 +78,9 @@ public struct EditCanvas: Equatable {
     public var fontName = "IBM VGA"
     /// SAUCE flags other than iCE (letter spacing, aspect ratio) kept from an opened file.
     public var sauceFlags: UInt8 = 0
+    /// A 16 colour palette other than VGA (an image import's fitted palette). XBin saves it;
+    /// ANSI writes those colours as truecolor.
+    public var palette: [RGB]?
 
     public var height: Int { rows.count }
     public var font: BitmapFont { BitmapFont.named(fontName) }
@@ -99,6 +102,7 @@ public struct EditCanvas: Equatable {
         }
         if rows.isEmpty { rows = [Array(repeating: AnsiCell(), count: width)] }
         self.iceColors = iceColors || rows.contains { $0.contains { Self.isBrightVGA($0.bg) } }
+        if let palette = screen.palette, palette.count == 16 { self.palette = palette }
         if let sauce = screen.sauce {
             title = sauce.title
             author = sauce.author

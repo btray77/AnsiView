@@ -15,8 +15,8 @@ import UniformTypeIdentifiers
 // ansirender --batch <format> [options] [--overwrite] <output-folder> <input>...
 //   inputs are art files, folders or .zip art packs; exits 1 if any piece failed
 // ansirender --roundtrip <input>...   (checks that ANSI conversion reads back as the same cells)
-// ansirender --from-image <image> [--width N] [--mode half|full|shade] [--palette vga|truecolor]
-//   [--dither none|fs|ordered] [--ice|--no-ice] [--no-aspect] [-o out.ans]   (stdout without -o, or -o -)
+// ansirender --from-image <image|folder|->... [options] [-o file|folder]   (options: ImageCommand.usage;
+//   one image goes to stdout without -o; several images or a folder need -o <folder>)
 // ansirender --version
 let args = CommandLine.arguments
 func fail(_ message: String, _ code: Int32) -> Never {
@@ -73,58 +73,80 @@ if args[1] == "--convert", args.count >= 4, let format = TextFormat(rawValue: ar
 }
 
 if args[1] == "--from-image" {
-    let usage = "usage: ansirender --from-image <image> [--width N] [--mode half|full|shade] [--palette vga|truecolor] "
-        + "[--dither none|fs|ordered] [--ice|--no-ice] [--no-aspect] [-o out.ans]"
-    var options = ImageToAnsi.Options()
-    var input: String?
-    var output: String?
-    var rest = Array(args.dropFirst(2))
-    func value(_ name: String) -> String {
-        guard !rest.isEmpty else { fail("\(name) needs a value", 2) }
-        return rest.removeFirst()
+    let command: ImageCommand
+    do { command = try ImageCommand.parse(Array(args.dropFirst(2))) } catch { fail(error.localizedDescription, 2) }
+
+    /// Converts one image; the Auto preset picks the best scoring method and says which.
+    func convertImage(_ data: Data, name: String) throws -> (EditCanvas, ImageToAnsi.Options) {
+        let image = try ImageToAnsi.load(data)
+        var options = command.options(imageWidth: image.width, imageHeight: image.height)
+        var canvas: EditCanvas
+        if command.preset == .auto, let best = ImageToAnsi.autoCandidates(image, base: options, cancel: { false })?.first {
+            FileHandle.standardError.write("\(name): Auto chose \(best.name) (\(best.score))\n".data(using: .utf8)!)
+            options = best.options
+            canvas = best.canvas
+        } else {
+            canvas = ImageToAnsi.convert(image, options: options)
+        }
+        canvas.title = String(((name as NSString).deletingPathExtension).prefix(35))
+        return (canvas, options)
     }
-    while !rest.isEmpty {
-        let argument = rest.removeFirst()
-        switch argument {
-        case "--width":
-            guard let n = Int(value(argument)), (1...EditCanvas.maxColumns).contains(n) else { fail("--width takes 1 to \(EditCanvas.maxColumns)", 2) }
-            options.columns = n
-        case "--mode":
-            guard let mode = ImageToAnsi.Mode(rawValue: value(argument)) else { fail("--mode takes half, full or shade", 2) }
-            options.mode = mode
-        case "--palette":
-            guard let palette = ImageToAnsi.PaletteChoice(rawValue: value(argument)) else { fail("--palette takes vga or truecolor", 2) }
-            options.palette = palette
-        case "--dither":
-            guard let dither = ImageToAnsi.Dither(rawValue: value(argument)) else { fail("--dither takes none, fs or ordered", 2) }
-            options.dither = dither
-        case "--ice": options.iceColors = true
-        case "--no-ice": options.iceColors = false
-        case "--no-aspect": options.aspectCorrection = false
-        case "-o", "--output": output = value(argument)
-        default:
-            if argument.hasPrefix("-") || input != nil { fail(usage, 2) }
-            input = argument
+
+    var inputIsFolder: ObjCBool = false
+    let firstExists = FileManager.default.fileExists(atPath: command.inputs[0], isDirectory: &inputIsFolder)
+    if command.inputs.count == 1, !(firstExists && inputIsFolder.boolValue) {
+        let input = command.inputs[0]
+        let data: Data
+        if input == "-" {
+            data = FileHandle.standardInput.readDataToEndOfFile()
+        } else {
+            guard let d = try? Data(contentsOf: URL(fileURLWithPath: input)) else { fail("could not read \(input)", 1) }
+            data = d
+        }
+        let name = input == "-" ? "stdin" : URL(fileURLWithPath: input).lastPathComponent
+        let canvas: EditCanvas, options: ImageToAnsi.Options
+        do { (canvas, options) = try convertImage(data, name: name) } catch { fail("\(input): \(error.localizedDescription)", 1) }
+        let out: Data
+        do { out = try ArtWriter.data(canvas, format: options.palette.saveFormat) } catch { fail(error.localizedDescription, 1) }
+        if let output = command.output, output != "-" {
+            do { try out.write(to: URL(fileURLWithPath: output)) } catch { fail("could not write \(output)", 1) }
+            print("wrote \(output): \(canvas.columns)x\(canvas.screen(trimmed: true).rows.count) cells, \(out.count) bytes")
+        } else {
+            FileHandle.standardOutput.write(out)
+        }
+        exit(0)
+    }
+
+    // Several images or a folder: -o names a folder.
+    guard let outputPath = command.output, outputPath != "-" else {
+        fail("several images (or a folder) need -o <folder>\n" + ImageCommand.usage, 2)
+    }
+    if command.inputs.contains("-") { fail("- (stdin) converts one image only", 2) }
+    let folder = URL(fileURLWithPath: outputPath)
+    do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) } catch {
+        fail("could not create \(outputPath)", 1)
+    }
+    let expanded = ImageBatch.expand(command.inputs.map { URL(fileURLWithPath: $0) })
+    for skipped in expanded.skipped {
+        FileHandle.standardError.write("skipped \(skipped.path): not an image\n".data(using: .utf8)!)
+    }
+    if expanded.images.isEmpty { fail("no images found", 1) }
+    var naming = BatchNaming(existing: Set((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []))
+    var failures = 0
+    for source in expanded.images {
+        do {
+            let (canvas, options) = try convertImage(try Data(contentsOf: source), name: source.lastPathComponent)
+            let format = options.palette.saveFormat
+            let url = folder.appendingPathComponent(naming.name(for: source.lastPathComponent, fileExtension: format.fileExtension))
+            let out = try ArtWriter.data(canvas, format: format)
+            try out.write(to: url)
+            print("wrote \(url.path): \(canvas.columns)x\(canvas.screen(trimmed: true).rows.count) cells, \(out.count) bytes")
+        } catch {
+            failures += 1
+            FileHandle.standardError.write("\(source.path): \(error.localizedDescription)\n".data(using: .utf8)!)
         }
     }
-    guard let input else { fail(usage, 2) }
-    let url = URL(fileURLWithPath: input)
-    guard let imageData = try? Data(contentsOf: url) else { fail("could not read \(input)", 1) }
-    let canvas: EditCanvas
-    do {
-        canvas = try ImageToAnsi.convert(data: imageData, options: options, title: url.deletingPathExtension().lastPathComponent)
-    } catch {
-        fail("\(input): \(error.localizedDescription)", 1)
-    }
-    let data: Data
-    do { data = try ArtWriter.data(canvas, format: .ansi) } catch { fail(error.localizedDescription, 1) }
-    if output == nil || output == "-" {
-        FileHandle.standardOutput.write(data)
-    } else {
-        do { try data.write(to: URL(fileURLWithPath: output!)) } catch { fail("could not write \(output!)", 1) }
-        print("wrote \(output!): \(canvas.columns)x\(canvas.screen(trimmed: true).rows.count) cells, \(data.count) bytes")
-    }
-    exit(0)
+    exit(failures > 0 ? 1 : 0)
 }
 
 /// Export options and the positional arguments left after them.

@@ -63,8 +63,12 @@ public enum ArtWriter {
         case .xbin:
             var header = Array("XBIN".utf8) + [0x1A]
             header += le16(canvas.columns) + le16(canvas.height)
-            header += [16, canvas.iceColors ? 0x08 : 0x00]
-            body = header + pairs(canvas, columns: canvas.columns)
+            let palette = canvas.palette.flatMap { $0.count == 16 ? $0 : nil }
+            header += [16, (canvas.iceColors ? 0x08 : 0x00) | (palette != nil ? 0x01 : 0x00)]
+            if let palette {
+                for c in palette { header += [c.r, c.g, c.b].map { UInt8((Int($0) * 63 + 127) / 255) } }
+            }
+            body = header + pairs(canvas, columns: canvas.columns, palette: palette)
             sauce.dataType = 6
             sauce.fileType = 0
             sauce.tInfo = [UInt16(canvas.columns), UInt16(canvas.height), 0, 0]
@@ -107,22 +111,31 @@ public enum ArtWriter {
     }
 
     /// Character and attribute pairs for every row, `columns` wide (extra columns blank).
-    private static func pairs(_ canvas: EditCanvas, columns: Int) -> [UInt8] {
+    private static func pairs(_ canvas: EditCanvas, columns: Int, palette: [RGB]? = nil) -> [UInt8] {
         var out: [UInt8] = []
         out.reserveCapacity(columns * canvas.height * 2)
         for y in 0..<canvas.height {
             for x in 0..<columns {
                 let cell = canvas[x, y]
-                out += [cell.code, attribute(cell, ice: canvas.iceColors)]
+                out += [cell.code, attribute(cell, ice: canvas.iceColors, palette: palette)]
             }
         }
         return out
     }
 
     /// VGA attribute byte; colours outside the palette become the nearest VGA colour.
-    static func attribute(_ cell: AnsiCell, ice: Bool) -> UInt8 {
-        let fg = Palette.nearestVGA(cell.fg)
-        let bg = Palette.nearestVGA(cell.bg, allowed: ice ? 0...15 : 0...7)
+    /// With a custom palette the colours are looked up in it (nearest in OKLab when not exact).
+    static func attribute(_ cell: AnsiCell, ice: Bool, palette: [RGB]? = nil) -> UInt8 {
+        let fg: Int, bg: Int
+        if let palette {
+            let labs = palette.map { OKLab.lab($0) }
+            fg = palette.firstIndex(of: cell.fg) ?? OKLab.nearest(OKLab.lab(cell.fg), in: labs, allowed: 0...15)
+            let exact = palette.firstIndex(of: cell.bg).flatMap { ice || $0 < 8 ? $0 : nil }
+            bg = exact ?? OKLab.nearest(OKLab.lab(cell.bg), in: labs, allowed: ice ? 0...15 : 0...7)
+        } else {
+            fg = Palette.nearestVGA(cell.fg)
+            bg = Palette.nearestVGA(cell.bg, allowed: ice ? 0...15 : 0...7)
+        }
         let high = (ice && bg >= 8) || (!ice && cell.blink)
         return UInt8(fg) | UInt8(bg & 7) << 4 | (high ? 0x80 : 0)
     }

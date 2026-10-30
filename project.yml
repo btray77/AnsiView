@@ -16,7 +16,7 @@ packages:
 settings:
   base:
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "68"
+    CURRENT_PROJECT_VERSION: "69"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -101,6 +101,11 @@ targets:
             CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate
             LSItemContentTypes: [com.apple.macbinary-archive, com.amiga.adf-archive]
+          # Images open the image import window (File > Open, Dock drops, Open With).
+          - CFBundleTypeName: Image
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [public.image]
     postBuildScripts:
       - name: Sign Sparkle helpers
         path: Packaging/sparkle/sign-sparkle.sh

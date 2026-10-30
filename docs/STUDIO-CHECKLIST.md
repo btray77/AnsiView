@@ -17,7 +17,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Renderer | `AnsiRenderer.swift` | 8/9 px, aspect, iCE, blink, budgeted memory |
 | Formats | `ArtFile.swift`, `BinaryFormats.swift`, `BBSCodes.swift`, `Sauce.swift`, `ArtWriter.swift` | .ans .asc .txt .nfo .diz .ice .bin .xb .adf .idf, PCBoard/Wildcat/Avatar, SAUCE read and write |
 | Editor (basic) | `EditCanvas.swift`, `CanvasEditor.swift`, `App/AnsiEditor.swift` | typing, F-key block sets, half-block mouse paint, select, fill, undo, iCE, save .ans/.bin/.xb |
-| Image to ANSI | `ImageToAnsi.swift` | v1; v2 running |
+| Image to ANSI | `ImageToAnsi.swift`, `App/ImageImport*.swift` | v2 merged (item 61): live preview, OKLab, best character per cell, presets, Auto top 3, XBin fitted palette, batch, image drops |
 | Telnet client | `Telnet.swift`, `BBSClient.swift`, `App/BBSTerminal.swift` | negotiation, NAWS, TTYPE, raw TCP |
 | Playback speed / baud | `Playback.swift` | 300 to 115200 and unlimited |
 | Export | PNG, JPEG, WebP, GIF, APNG, MP4, HTML, text, modern ANSI | |
@@ -147,6 +147,5 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 ## Running right now
 
 - Editor v2: TheDraw-class tools (`ansiview-2.0-editor-tools`)
-- Image import v2 with live preview (`ansiview-2.0-image-import`)
 - File transfer protocol engines (`ansiview-2.0-transfers-core`)
 - ANSI music engine (`ansiview-2.0-music-core`)
