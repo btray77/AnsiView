@@ -58,6 +58,22 @@ public struct TelnetSession {
         return [Self.IAC, Self.DO, 3, Self.IAC, Self.WILL, 24, Self.IAC, Self.WILL, 31]
     }
 
+    /// Asks for BINARY in both directions (`IAC WILL BINARY`, `IAC DO BINARY`), as a file transfer
+    /// needs. Options already on or already asked for are not asked again.
+    public mutating func requestBinary() -> [UInt8] {
+        var out: [UInt8] = []
+        let option = TelnetOption.binary.rawValue
+        if !(local[option]?.enabled ?? false), !(local[option]?.asked ?? false) {
+            local[option, default: OptionState()].asked = true
+            out += [Self.IAC, Self.WILL, option]
+        }
+        if !(remote[option]?.enabled ?? false), !(remote[option]?.asked ?? false) {
+            remote[option, default: OptionState()].asked = true
+            out += [Self.IAC, Self.DO, option]
+        }
+        return out
+    }
+
     /// Decodes bytes from the server. The state carries over, so a command may be split anywhere.
     public mutating func receive(_ bytes: [UInt8]) -> (data: [UInt8], reply: [UInt8]) {
         var data: [UInt8] = []

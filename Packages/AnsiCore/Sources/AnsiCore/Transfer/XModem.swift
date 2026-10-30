@@ -80,6 +80,7 @@ public final class XModemSender: TransferEngine {
     private var cancelCount = 0
     private var fileHash = ""
     private var sentEndOfBatch = false
+    private var announced = false
 
     public override var protocolName: String { kind.displayName }
 
@@ -143,6 +144,11 @@ public final class XModemSender: TransferEngine {
             crc = byte != XModemByte.NAK
             gMode = byte == XModemByte.wantG
             retries = 0
+            if !announced {
+                announced = true
+                emit(.negotiated("receiver asked with \(byte == XModemByte.NAK ? "NAK: checksum" : byte == XModemByte.wantG ? "G: CRC-16, streaming" : "C: CRC-16")"
+                                 + ", \(usesBigBlocks(kind) ? "1024" : "128") byte blocks"))
+            }
             if batch { sendHeader() } else { startData() }
         case .waitHeaderAck:
             if byte == XModemByte.ACK {
@@ -357,6 +363,9 @@ public final class XModemReceiver: TransferEngine {
     /// A block start arrived, even a damaged one: the sender answered our C, so no fallback to
     /// checksum (switching then would misframe every later block).
     private var heardBlockStart = false
+    private var announced = false
+    private var smallBlocks = 0
+    private var bigBlocks = 0
 
     public override var protocolName: String { kind.displayName }
 
@@ -482,6 +491,11 @@ public final class XModemReceiver: TransferEngine {
             return
         }
         if number == expectedBlock {
+            if !announced {
+                announced = true
+                emit(.negotiated(crc ? "CRC-16" : "checksum"))
+            }
+            if dataLength == 1024 { bigBlocks += 1 } else { smallBlocks += 1 }
             accept(data)
         } else if number == expectedBlock &- 1 {
             emit(.recovered("duplicate block \(number)"))
@@ -606,6 +620,9 @@ public final class XModemReceiver: TransferEngine {
 
     private func finishFile() {
         guard openXModemFileIfNeeded() else { return }
+        emit(.log("received \(smallBlocks) blocks of 128 bytes and \(bigBlocks) of 1024 (\(crc ? "CRC-16" : "checksum"))"))
+        smallBlocks = 0
+        bigBlocks = 0
         if var last = held {
             if options.xmodemPadding == .stripTrailingSUB {
                 while last.last == XModemByte.SUB { last.removeLast() }
