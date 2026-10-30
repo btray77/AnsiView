@@ -48,6 +48,8 @@ public struct TransportSettings: Equatable {
     public var username = ""
     public var webSocketPath = "/"
     public var webSocketSecure = false
+    /// Telnet over TLS.
+    public var telnetSecure = false
     public var webSocketSubprotocols: [String] = []
     public var webSocketTelnet = false
     public var rloginClientUser = ""
@@ -68,6 +70,7 @@ public struct TransportSettings: Equatable {
         username = entry.username ?? ""
         webSocketPath = entry.webSocketPath
         webSocketSecure = entry.webSocketSecure
+        telnetSecure = entry.mode == .telnet && entry.telnetSecure
         webSocketSubprotocols = Self.subprotocols(entry.webSocketSubprotocols)
         webSocketTelnet = entry.webSocketTelnet
         rloginClientUser = entry.rloginClientUser

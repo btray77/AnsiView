@@ -18,7 +18,8 @@ public enum ConnectionMode: String, Codable, CaseIterable {
     /// The usual port: 23 telnet and raw, 22 SSH, 80 WebSocket (443 with TLS), 513 RLogin.
     public func defaultPort(secure: Bool = false) -> Int {
         switch self {
-        case .telnet, .raw: return 23
+        case .telnet: return secure ? 992 : 23
+        case .raw: return 23
         case .ssh: return 22
         case .webSocket: return secure ? 443 : 80
         case .rlogin: return 513
@@ -112,6 +113,10 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     public var downloadFolderName: String?
     /// ZMODEM downloads the BBS starts begin without asking (the ask bar is skipped).
     public var zmodemAutoAccept: Bool
+    /// The kind of terminal the BBS expects (ANSI-BBS, PETSCII, Viewdata, ...).
+    public var emulation: TerminalEmulation
+    /// Telnet: the connection is wrapped in TLS ("telnets", usually port 992).
+    public var telnetSecure: Bool
 
     public static let standardTerminalTypes = ["ANSI", "ANSI-BBS", "VT100"]
 
@@ -163,6 +168,17 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         downloadFolderBookmark = nil
         downloadFolderName = nil
         zmodemAutoAccept = false
+        emulation = .ansiBBS
+        telnetSecure = false
+    }
+
+    /// The protocol's secure variant is on (wss or telnets).
+    public var isSecure: Bool {
+        switch mode {
+        case .webSocket: return webSocketSecure
+        case .telnet: return telnetSecure
+        default: return false
+        }
     }
 
     public var address: String {
@@ -189,6 +205,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         case webSocketTelnet, rloginClientUser, rloginServerUser, rloginClientIsPassword
         case musicMode
         case transferProtocol, downloadFolderBookmark, downloadFolderName, zmodemAutoAccept
+        case emulation, telnetSecure
     }
 
     /// Missing or out of range fields fall back to the defaults, so older (plan 7) or hand edited books load.
@@ -236,6 +253,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         downloadFolderBookmark = try? c.decode(Data.self, forKey: .downloadFolderBookmark)
         downloadFolderName = try? c.decode(String.self, forKey: .downloadFolderName)
         if let value = try? c.decode(Bool.self, forKey: .zmodemAutoAccept) { zmodemAutoAccept = value }
+        if let value = try? c.decode(TerminalEmulation.self, forKey: .emulation) { emulation = value }
+        if let value = try? c.decode(Bool.self, forKey: .telnetSecure) { telnetSecure = value }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -281,6 +300,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         try c.encodeIfPresent(downloadFolderBookmark, forKey: .downloadFolderBookmark)
         try c.encodeIfPresent(downloadFolderName, forKey: .downloadFolderName)
         try c.encode(zmodemAutoAccept, forKey: .zmodemAutoAccept)
+        try c.encode(emulation, forKey: .emulation)
+        try c.encode(telnetSecure, forKey: .telnetSecure)
     }
 
     private static func clampSize(_ value: Int) -> Int {
