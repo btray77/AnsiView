@@ -493,6 +493,15 @@ public struct TerminalEmulator {
             lineFeed()
         }
         var code = code, scalar = scalar
+        var glyph: UInt16?
+        if profile == .amiga, scalar == nil {
+            // ISO 8859-1: the Topaz font is indexed by the byte; the cell keeps CP437 for copying.
+            glyph = UInt16(code)
+            if code >= 0x80 {
+                let latin = Unicode.Scalar(code)
+                code = CP437.code(for: latin) ?? 0x3F
+            }
+        }
         if profile.isDEC, scalar == nil {
             switch charsets[shiftedOut ? 1 : 0] {
             case .ascii: break
@@ -508,6 +517,7 @@ public struct TerminalEmulator {
         let colors = attributes.colors(iceColors: iceColors)
         grid[row][column] = AnsiCell(code: code, fg: colors.fg, bg: colors.bg, blink: attributes.blink && !iceColors,
                                      scalar: scalar)
+        if let glyph { grid[row][column].glyph = glyph }
         if column == columns - 1 {
             if autowrap { pendingWrap = true }
         } else {

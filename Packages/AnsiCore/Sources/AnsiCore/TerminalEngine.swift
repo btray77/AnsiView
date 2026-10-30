@@ -50,6 +50,8 @@ public extension TerminalEngine {
 
 extension TerminalEmulator: TerminalEngine {
     public var scrollbackCount: Int { scrollback.count }
+    /// Amiga boards draw with the Topaz style font; the others use the entry's font.
+    public var font: BitmapFont? { profile == .amiga ? PlatformFonts.topaz : nil }
 }
 
 public enum TerminalEngines {
@@ -64,6 +66,7 @@ public enum TerminalEngines {
         case .petscii64: return PETSCIITerminal(model: .c64, columns: columns, rows: rows)
         case .petscii128: return PETSCIITerminal(model: .c128, columns: columns, rows: rows)
         case .atascii: return ATASCIITerminal(columns: columns, rows: rows)
+        case .appleII: return AppleIITerminal(columns: columns, rows: rows)
         case .viewdata: return TeletextTerminal(flavour: .viewdata, columns: columns, rows: rows)
         case .mode7: return TeletextTerminal(flavour: .mode7, columns: columns, rows: rows)
         default: break
@@ -73,6 +76,7 @@ public enum TerminalEngines {
         switch emulation {
         case .vt100: t.profile = .vt100
         case .vt220: t.profile = .vt220
+        case .amiga: t.profile = .amiga
         default: break
         }
         return t
