@@ -191,5 +191,19 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | FILE_ID.DIZ and NFO shown when a pack opens (item 46) | done on branch for galleries (harness); 16colo.rs browser FILE_ID preview built, not exercised against the network |
 | Background indexing and thumbnailing of very large folders and packs (item 47) | done on branch (10,000 piece measurement in plan 9) |
 
+## Output, system integration and formats (plan 10, items 48 to 58)
+
+| Requirement | Status |
+|---|---|
+| Screen saver playing a folder of art, animation included (item 48) | done on branch `ansiview-2.0-plan-10` (core tests; built .saver loaded and stepped in a harness, PNGs; not run by the real screen saver host, needs owner) |
+| Wallpaper at a display's exact pixel size, centred or tiled (item 49) | done on branch (core tests; 2880x1800 and 1920x1080 PNGs measured; Set as Desktop Picture not run) |
+| Copy As Discord ANSI and Slack (item 50) | done on branch (core tests, harness pasteboard; not pasted into Discord, needs owner) |
+| MP4 with the modem sound in step (item 51) | done on branch (ffprobe and decoded audio measured: art starts at 6.39 s, noise ends within one frame of the last change) |
+| Shortcuts and AppleScript render and convert (item 53) | done on branch (App Intents metadata in the built app, intents and script logic run in a harness; not run from Shortcuts or Script Editor, needs owner) |
+| Finder Quick Actions Convert to PNG / GIF (item 54) | done on branch (harness conversion; extensions registered with pluginkit; not clicked in Finder, needs owner) |
+| Menu bar art of the day, optional 16colo.rs (item 55) | done on branch (core tests, harness PNGs, live 16colo.rs: 4 requests) |
+| Localization infrastructure, String Catalogs (item 56) | done on branch (catalogs synced from compiler extraction, pseudolanguage harness PNGs); many AppKit labels still plain strings |
+| Sixel and kitty output from ansirender (item 58) | done on branch (core tests; sixel decoded by an independent decoder, identical pixels; not shown in a real terminal) |
+
 ## Running right now
 
