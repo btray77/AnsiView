@@ -44,8 +44,9 @@ private func options(_ columns: Int, _ mode: ImageToAnsi.Mode = .halfBlocks, pal
 @Suite struct ImageToAnsiTests {
     @Test func defaults() {
         let o = ImageToAnsi.Options()
-        #expect(o.columns == 80 && o.mode == .halfBlocks && o.palette == .vga16 && o.dither == .floydSteinberg)
-        #expect(o.iceColors && o.aspectCorrection)
+        #expect(o.columns == 80 && o.mode == .glyphs && o.palette == .vga16 && o.dither == .serpentine)
+        #expect(o.iceColors && o.aspectCorrection && !o.extendedGlyphs && !o.nearestNeighbour && o.crop == nil)
+        #expect(o.ditherStrength == 0.7 && o.adjustments == ImageAdjustments())
     }
 
     @Test func halfBlocksExactColours() {
@@ -81,8 +82,9 @@ private func options(_ columns: Int, _ mode: ImageToAnsi.Mode = .halfBlocks, pal
         #expect(cell == AnsiCell(code: 219, fg: Palette.vga[2], bg: Palette.vga[0]))
     }
 
+    /// Light mixes in linear RGB: half blue (0, 0, 170) and half black shows as (0, 0, 124).
     @Test func shadesFindMix() {
-        let image = makeImage(4, 8) { _, _ in RGB(r: 0, g: 0, b: 85) }
+        let image = makeImage(4, 8) { _, _ in RGB(r: 0, g: 0, b: 124) }
         let canvas = ImageToAnsi.convert(image, options: options(4, .shades))
         let cell = canvas[1, 1]
         #expect(cell.code == 177)
@@ -102,8 +104,8 @@ private func options(_ columns: Int, _ mode: ImageToAnsi.Mode = .halfBlocks, pal
         var seed: UInt64 = 42
         func next() -> UInt8 { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return UInt8(seed >> 56) }
         let noise = makeImage(40, 40) { _, _ in RGB(r: next(), g: next(), b: next()) }
-        for mode in [ImageToAnsi.Mode.halfBlocks, .fullBlocks, .shades] {
-            for dither in [ImageToAnsi.Dither.none, .floydSteinberg, .ordered] {
+        for mode in ImageToAnsi.Mode.allCases {
+            for dither in ImageToAnsi.Dither.allCases {
                 let canvas = ImageToAnsi.convert(noise, options: options(40, mode, dither: dither, ice: false))
                 #expect(!canvas.iceColors)
                 let bright = canvas.rows.flatMap { $0 }.filter { (Palette.vgaIndex(of: $0.bg) ?? 99) >= 8 }
@@ -146,8 +148,9 @@ private func options(_ columns: Int, _ mode: ImageToAnsi.Mode = .halfBlocks, pal
         let wide = makeImage(1000, 1) { _, _ in Palette.vga[3] }
         let clear = makeImage(10, 10) { _, _ in nil }
         for image in [tall, wide, clear] {
-            for columns in [1, 80] {
-                for mode in [ImageToAnsi.Mode.halfBlocks, .fullBlocks, .shades] {
+            for columns in [1, 16, 80] {
+                // Glyph search and shades are slow in a debug build; 16 columns already reaches the row limit.
+                for mode in ImageToAnsi.Mode.allCases where columns < 80 || mode == .halfBlocks || mode == .fullBlocks {
                     let canvas = ImageToAnsi.convert(image, options: options(columns, mode))
                     #expect(canvas.height >= 1 && canvas.columns == columns)
                     #expect(canvas.height <= AnsiTerminal.maxRows)
