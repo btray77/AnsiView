@@ -66,6 +66,9 @@ solid block and shade characters, and box drawing that lines up without gaps.
   the original, presets (Auto, Photo, Logo, Pixel art, Line art), perceptual colour matching,
   a best character per cell search, five dithering methods and picture adjustments. File >
   Convert Images to ANSI... and `ansirender --from-image` convert whole folders.
+- **ANSI music.** Window > ANSI Music Editor composes BBS "ANSI music" (BASIC PLAY strings
+  sent after `ESC[M`, `ESC[N` or `ESC[|`) with a piano roll and plays it like a PC speaker. The
+  viewer no longer prints the PLAY text of music in art files. See [ANSI music](#ansi-music).
 - **Open in an editor.** File > Open in Moebius and Open in PabloDraw hand the current file to
   [Moebius](https://github.com/blocktronics/moebius) or [PabloDraw](https://github.com/cwensley/pablodraw)
   when it is installed (AnsiView offers the download page when it is not).
@@ -346,6 +349,41 @@ cat photo.png | ansirender --from-image - > photo.ans          # - reads standar
 # --ice|--no-ice  --no-aspect  --nearest  --levels  --brightness/--contrast/--saturation -100-100
 # --gamma 0.2-5  --sharpen 0-200  --remove-background [0-50]  --crop x,y,w,h
 ```
+
+### ANSI music
+
+BBS terminals such as Qmodem, Telix and TeleMate played music sent as an escape sequence: `ESC [ M`,
+a BASIC `PLAY` string, then Ctrl-N (0x0E). BananaCom added `ESC [ N` and SyncTERM `ESC [ |`
+because `ESC [ M` is also Delete Line. AnsiView follows the GW-BASIC `PLAY` language (notes A to G
+with `#`, `+`, `-`, lengths and dots; `O`, `<`, `>`, `L`, `N`, `P`, `T`; `MN`, `ML`, `MS`; `MF`, `MB`)
+and SyncTERM's handling of the escape sequences (its four modes, `ESC[=Ps M`, the rule that
+`ESC[MF` means foreground). Octave 4 C is 1046.5 Hz and a quarter note lasts 60/T seconds,
+as in GW-BASIC. The sources and every compatibility decision are in
+`docs/superpowers/plans/2026-10-30-ansiview-2.0-music-core.md`.
+
+Window > ANSI Music Editor (Shift-Command-M):
+
+- A piano roll over the 7 octaves of `PLAY`: click to add a note, click a note to select it or move
+  it, drag its right edge to change its length, Delete to remove it. Keys A W S E D F T G Y H U J K
+  play C to C, Z and X change octave, 1 to 7 pick the length, period adds a dot, Space a rest.
+- The `PLAY` string beside it, in sync both ways; tempo, articulation, MF/MB and sound controls;
+  play, pause and stop with a playhead. Every control has a tooltip and (?) buttons explain the jargon.
+- A library of named snippets (kept in AnsiView's container, Application Support), demo tunes
+  (public domain melodies and original pieces), import from an `.ans` file, and export: copy the
+  escape sequence, save it as an `.ans` snippet, embed it into a copy of an `.ans` file (at the
+  start, the end of the art, or after a line; SAUCE is kept), WAV, and MIDI as an extra.
+
+On the command line:
+
+```sh
+ansirender --music art.ans                    # sequences with byte offsets and durations
+ansirender --music-wav art.ans music.wav      # --soft for a gentler tone, --mode off|pipe|bananacom|all
+ansirender --music-midi art.ans music.mid
+ansirender --music-wav --play "T120 O3 L8 C D E F G4" tune.wav
+```
+
+Playing music while a file draws at modem speed, and in the BBS terminal, is the next step: the
+engine reports each sequence's byte offset for that (see the plan's integration section).
 
 ## Build from source
 

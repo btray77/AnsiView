@@ -225,51 +225,59 @@ struct AnsiViewApp: App {
                 Toggle("Hold Final Frame", isOn: $holdFinalFrame)
                 Toggle("Modem Sounds", isOn: $modemSounds)
             }
-            CommandMenu("Terminal") {
-                Button("Disconnect") { TerminalWindowController.focused?.disconnect() }
-                Button("Reconnect") { TerminalWindowController.focused?.reconnect() }
-                    .keyboardShortcut("r", modifiers: [.command, .option])
-                Button("Send Username") { TerminalWindowController.focused?.sendUsername() }
-                Button("Send Password") { TerminalWindowController.focused?.sendPassword() }
-                Button("Log In") { TerminalWindowController.focused?.runLogin() }
-                    .keyboardShortcut("l", modifiers: [.command, .option])
-                Divider()
-                Menu("Speed") {
-                    ForEach(PlaybackSpeed.choices, id: \.self) { choice in
-                        Button(choice == 0 ? "Unlimited" : "\(choice) baud") {
-                            TerminalWindowController.focused?.setBaud(choice)
+            // SwiftUI takes at most ten entries per builder, so the later menus share a Group.
+            Group {
+                CommandGroup(before: .windowList) {
+                    Button("ANSI Music Editor") { MusicEditorWindowController.show() }
+                        .keyboardShortcut("m", modifiers: [.command, .shift])
+                    Divider()
+                }
+                CommandMenu("Terminal") {
+                    Button("Disconnect") { TerminalWindowController.focused?.disconnect() }
+                    Button("Reconnect") { TerminalWindowController.focused?.reconnect() }
+                        .keyboardShortcut("r", modifiers: [.command, .option])
+                    Button("Send Username") { TerminalWindowController.focused?.sendUsername() }
+                    Button("Send Password") { TerminalWindowController.focused?.sendPassword() }
+                    Button("Log In") { TerminalWindowController.focused?.runLogin() }
+                        .keyboardShortcut("l", modifiers: [.command, .option])
+                    Divider()
+                    Menu("Speed") {
+                        ForEach(PlaybackSpeed.choices, id: \.self) { choice in
+                            Button(choice == 0 ? "Unlimited" : "\(choice) baud") {
+                                TerminalWindowController.focused?.setBaud(choice)
+                            }
                         }
                     }
-                }
-                Menu("Size") {
-                    ForEach(TerminalViewController.sizes.indices, id: \.self) { index in
-                        let size = TerminalViewController.sizes[index]
-                        Button("\(size.columns) x \(size.rows)") {
-                            TerminalWindowController.focused?.setSize(columns: size.columns, rows: size.rows)
+                    Menu("Size") {
+                        ForEach(TerminalViewController.sizes.indices, id: \.self) { index in
+                            let size = TerminalViewController.sizes[index]
+                            Button("\(size.columns) x \(size.rows)") {
+                                TerminalWindowController.focused?.setSize(columns: size.columns, rows: size.rows)
+                            }
                         }
                     }
+                    Divider()
+                    Button("Capture Session...") { TerminalWindowController.focused?.startCapture() }
+                    Button("Stop Capture") { TerminalWindowController.focused?.stopCapture() }
+                    Button("Clear Scrollback") { TerminalWindowController.focused?.clearScrollback() }
                 }
-                Divider()
-                Button("Capture Session...") { TerminalWindowController.focused?.startCapture() }
-                Button("Stop Capture") { TerminalWindowController.focused?.stopCapture() }
-                Button("Clear Scrollback") { TerminalWindowController.focused?.clearScrollback() }
-            }
-            CommandGroup(after: .windowArrangement) {
-                Button("Dialing Directory") { DialingDirectoryWindowController.show() }
-                    .keyboardShortcut("b", modifiers: [.command, .option])
-            }
-            CommandMenu("Slideshow") {
-                Button("Start Slideshow") { send(#selector(AnsiPlayerViewController.startSlideshow(_:))) }
-                    .keyboardShortcut("s", modifiers: [.command, .option])
-                Button("Next Art") { send(#selector(SlideshowViewController.nextSlide(_:))) }
-                    .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
-                Button("Previous Art") { send(#selector(SlideshowViewController.previousSlide(_:))) }
-                    .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
-                Divider()
-                Toggle("Auto Advance", isOn: $autoAdvance)
-                Picker("Dwell Time", selection: $dwell) {
-                    ForEach(SlideshowSettings.dwellChoices, id: \.self) { seconds in
-                        Text("\(seconds) seconds").tag(seconds)
+                CommandGroup(after: .windowArrangement) {
+                    Button("Dialing Directory") { DialingDirectoryWindowController.show() }
+                        .keyboardShortcut("b", modifiers: [.command, .option])
+                }
+                CommandMenu("Slideshow") {
+                    Button("Start Slideshow") { send(#selector(AnsiPlayerViewController.startSlideshow(_:))) }
+                        .keyboardShortcut("s", modifiers: [.command, .option])
+                    Button("Next Art") { send(#selector(SlideshowViewController.nextSlide(_:))) }
+                        .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                    Button("Previous Art") { send(#selector(SlideshowViewController.previousSlide(_:))) }
+                        .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                    Divider()
+                    Toggle("Auto Advance", isOn: $autoAdvance)
+                    Picker("Dwell Time", selection: $dwell) {
+                        ForEach(SlideshowSettings.dwellChoices, id: \.self) { seconds in
+                            Text("\(seconds) seconds").tag(seconds)
+                        }
                     }
                 }
             }

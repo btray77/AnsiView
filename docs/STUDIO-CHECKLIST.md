@@ -22,7 +22,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Playback speed / baud | `Playback.swift` | 300 to 115200 and unlimited |
 | Export | PNG, JPEG, WebP, GIF, APNG, MP4, HTML, text, modern ANSI | |
 | File transfers | none | |
-| ANSI music | none (sequences are currently ignored by the parser) | |
+| ANSI music | `AnsiMusic.swift`, `PlayString.swift`, synth, `App/Music*` | merged; viewer playback integration pending |
 | TDF fonts | none | |
 | Screen designer / templates | none | |
 
@@ -55,14 +55,14 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 
 | Requirement | Status | Item / plan |
 |---|---|---|
-| Research historical syntax (BASIC PLAY strings after `ESC[M`, `ESC[MF`/`MB`, `ESC[N`, SyncTERM `ESC[\|`, terminated by 0x0E) | planned | music |
-| Parser and playback (square-wave PC speaker style synth) | planned | music |
-| Playback during viewing and in the terminal | planned | music |
-| Visual piano roll / timeline editor, keyboard entry | planned | music |
-| Text command editing, two-way conversion | planned | music |
-| Import from and embed into ANSI files, extract | planned | music |
-| Reusable sequence library | planned | music |
-| MIDI export as an extra (not a replacement) | planned | music |
+| Research historical syntax (BASIC PLAY strings after `ESC[M`, `ESC[MF`/`MB`, `ESC[N`, SyncTERM `ESC[\|`, terminated by 0x0E) | done (harness; live sound check needs owner) | music core |
+| Parser and playback (square-wave PC speaker style synth) | done (harness; live sound check needs owner) | music core |
+| Playback during viewing and in the terminal | planned (viewer now hides PLAY text; sound integration next) | music integration |
+| Visual piano roll / timeline editor, keyboard entry | done (harness; live sound check needs owner) | music core |
+| Text command editing, two-way conversion | done (harness; live sound check needs owner) | music core |
+| Import from and embed into ANSI files, extract | done (harness; live sound check needs owner) | music core |
+| Reusable sequence library | done (harness; live sound check needs owner) | music core |
+| MIDI export as an extra (not a replacement) | done (harness; live sound check needs owner) | music core |
 
 ## 3. File transfers
 
@@ -148,4 +148,3 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 
 - Editor v2: TheDraw-class tools (`ansiview-2.0-editor-tools`)
 - File transfer protocol engines (`ansiview-2.0-transfers-core`)
-- ANSI music engine (`ansiview-2.0-music-core`)
