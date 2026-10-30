@@ -285,14 +285,19 @@ final class SixteenColorsClient {
     }
 }
 
-/// File > Browse 16colo.rs: years, then a year's packs, then a pack's files. Open Pack downloads
-/// the ZIP and shows it in a gallery; Open File downloads one file and opens it.
+/// File > Browse 16colo.rs: years, then a year's packs, then a pack's files, and a preview of the
+/// selected file. Open Pack downloads the ZIP and shows it in a gallery; Open downloads one file
+/// and opens it.
 @MainActor
 final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+    static let hint = "Choose a year, then a pack. Selecting a file previews it on the right; double click or Open opens it in its own window."
+
     let client: SixteenColorsClient
     /// The app opens downloads: a pack's ZIP in a gallery (with the pack's name), a file as a document.
     var onOpenPack: ((URL, String) -> Void)?
     var onOpenFile: ((URL) -> Void)?
+    /// The app opens a downloaded file in the editor.
+    var onEditFile: ((URL) -> Void)?
 
     private(set) var years: [SixteenColors.Year] = []
     private(set) var packs: [SixteenColors.Pack] = []
@@ -302,19 +307,25 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     private let yearTable = NSTableView()
     private let packTable = NSTableView()
     private let fileTable = NSTableView()
+    let preview = SixteenColorsPreview()
     private let status = NSTextField(labelWithString: "")
     private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
     private let openPackButton = NSButton(title: "Open Pack", target: nil, action: nil)
-    private let openFileButton = NSButton(title: "Open File", target: nil, action: nil)
     private let spinner = NSProgressIndicator()
     /// What Retry does: the last thing that failed.
     private var retry: (() async -> Void)?
     /// Bumped on each selection so a slow answer for an old selection is dropped.
     private var generation = 0
+    /// Bumped on each file selection (the preview's own guard).
+    private var previewGeneration = 0
     /// True while the code (not the user) changes a table's selection.
     private var selectingInCode = false
     /// The listing for the current selection; a new selection cancels it, so stale requests never go out.
     private var listing: Task<Void, Never>?
+    /// The preview for the selected file; a new selection cancels it the same way.
+    private var previewTask: Task<Void, Never>?
+    /// The file the preview shows (or is loading).
+    private(set) var selectedFileIndex: Int?
 
     var statusText: String { status.stringValue }
     var retryVisible: Bool { !retryButton.isHidden }
@@ -328,7 +339,7 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     override func loadView() {
-        func column(_ table: NSTableView, _ id: String, _ title: String, width: CGFloat) -> NSScrollView {
+        func column(_ table: NSTableView, _ id: String, _ title: String, width: CGFloat, tip: String) -> NSScrollView {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
             column.title = title
             column.width = width
@@ -342,22 +353,33 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
             table.target = self
             table.doubleAction = #selector(doubleClicked(_:))
             table.setAccessibilityLabel(title)
+            table.toolTip = tip
             let scroll = NSScrollView()
             scroll.documentView = table
             scroll.hasVerticalScroller = true
             scroll.borderType = .bezelBorder
             return scroll
         }
-        let yearScroll = column(yearTable, "year", "Year", width: 150)
-        let packScroll = column(packTable, "pack", "Pack", width: 300)
-        let fileScroll = column(fileTable, "file", "File", width: 420)
+        let yearScroll = column(yearTable, "year", "Year", width: 120,
+                                tip: "Years of the 16colo.rs archive, with how many packs each has.")
+        let packScroll = column(packTable, "pack", "Pack", width: 260,
+                                tip: "The year's art packs. Double click (or Open Pack) to download one and see it in a gallery.")
+        let fileScroll = column(fileTable, "file", "File", width: 320,
+                                tip: "The pack's files. Select one to preview it; double click to open it.")
+        addChild(preview)
+        preview.onOpen = { [weak self] in self?.openSelectedFile() }
+        preview.onEdit = { [weak self] in self?.editSelectedFile() }
+        preview.onSave = { [weak self] in self?.chooseSaveLocation() }
+        preview.onShowArt = { [weak self] in self?.keepKeyboardInList() }
         let split = NSSplitView()
         split.isVertical = true
         split.dividerStyle = .thin
         split.addArrangedSubview(yearScroll)
         split.addArrangedSubview(packScroll)
         split.addArrangedSubview(fileScroll)
+        split.addArrangedSubview(preview.view)
         split.setHoldingPriority(.defaultLow + 1, forSubviewAt: 0)
+        split.setHoldingPriority(.defaultLow + 2, forSubviewAt: 1)
         split.translatesAutoresizingMaskIntoConstraints = false
 
         status.lineBreakMode = .byTruncatingTail
@@ -370,26 +392,32 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         openPackButton.target = self
         openPackButton.action = #selector(openPackPressed(_:))
         openPackButton.isEnabled = false
-        openFileButton.target = self
-        openFileButton.action = #selector(openFilePressed(_:))
-        openFileButton.isEnabled = false
-        openFileButton.keyEquivalent = "\r"
+        openPackButton.toolTip = "Download the whole pack (its ZIP) and show it in a gallery."
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
+        let hint = NSTextField(labelWithString: Self.hint)
+        hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        hint.textColor = .secondaryLabelColor
+        hint.lineBreakMode = .byTruncatingTail
+        hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let credit = NSTextField(labelWithString: "Art from 16colo.rs. Each piece remains the property of its artist.")
         credit.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         credit.textColor = .tertiaryLabelColor
-        let bar = NSStackView(views: [spinner, status, retryButton, NSView(), openPackButton, openFileButton])
+        credit.setContentHuggingPriority(.required, for: .horizontal)
+        let bar = NSStackView(views: [spinner, status, retryButton, NSView(), openPackButton])
         bar.orientation = .horizontal
         bar.spacing = 8
         bar.translatesAutoresizingMaskIntoConstraints = false
-        credit.translatesAutoresizingMaskIntoConstraints = false
+        let footer = NSStackView(views: [hint, NSView(), credit])
+        footer.orientation = .horizontal
+        footer.spacing = 8
+        footer.translatesAutoresizingMaskIntoConstraints = false
 
         let container = NSView()
         container.addSubview(split)
         container.addSubview(bar)
-        container.addSubview(credit)
+        container.addSubview(footer)
         NSLayoutConstraint.activate([
             split.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
             split.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
@@ -397,19 +425,21 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
             bar.topAnchor.constraint(equalTo: split.bottomAnchor, constant: 10),
             bar.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
             bar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            credit.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 6),
-            credit.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            credit.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
-            yearScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
-            packScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
-            fileScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
-            split.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
+            footer.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 6),
+            footer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            footer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            footer.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
+            yearScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
+            packScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
+            fileScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
+            split.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
         ])
         view = container
-        // Starting widths: years narrow, files widest.
+        // Starting widths: years narrow, then packs, files, and the preview takes the rest.
         DispatchQueue.main.async { [split] in
-            split.setPosition(170, ofDividerAt: 0)
-            split.setPosition(500, ofDividerAt: 1)
+            split.setPosition(130, ofDividerAt: 0)
+            split.setPosition(430, ofDividerAt: 1)
+            split.setPosition(820, ofDividerAt: 2)
         }
     }
 
@@ -422,16 +452,20 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     }
 
     private func finish(_ text: String) {
-        status.stringValue = text
+        status.stringValue = client.isOffline ? "Offline: showing what was saved earlier. " + text : text
         spinner.stopAnimation(nil)
     }
 
     private func failed(_ error: Error, retry: @escaping () async -> Void) {
-        if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+        if Self.isCancellation(error) { return }
         spinner.stopAnimation(nil)
         status.stringValue = SixteenColorsClient.describe(error).message
         self.retry = retry
         retryButton.isHidden = false
+    }
+
+    static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
     func loadYears() async {
@@ -453,10 +487,8 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         select(index, in: yearTable)
         let year = years[index].year
         packs = []
-        detail = nil
+        showPack(nil)
         packTable.reloadData()
-        fileTable.reloadData()
-        updateButtons()
         begin("Loading packs from \(year)...")
         do {
             let loaded = try await client.packs(year: year)
@@ -476,16 +508,12 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         let mine = generation
         select(index, in: packTable)
         let pack = packs[index]
-        detail = nil
-        fileTable.reloadData()
-        updateButtons()
+        showPack(nil)
         begin("Loading \(pack.name)...")
         do {
             let loaded = try await client.pack(named: pack.name)
             guard mine == generation else { return }
-            detail = loaded
-            fileTable.reloadData()
-            updateButtons()
+            showPack(loaded)
             let groups = pack.groups.isEmpty ? "" : " by \(pack.groups.joined(separator: ", "))"
             finish("\(pack.name)\(groups): \(loaded.files.count) files.")
         } catch {
@@ -494,10 +522,22 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         }
     }
 
+    /// Shows a pack's files (nil: none), and clears the preview.
+    private func showPack(_ loaded: SixteenColors.PackDetail?) {
+        detail = loaded
+        previewTask?.cancel()
+        previewGeneration += 1
+        selectedFileIndex = nil
+        fileTable.reloadData()
+        preview.show(.empty(loaded == nil ? SixteenColorsPreview.emptyHint : "Select a file of \(loaded!.name) to preview it here."))
+        updateButtons()
+    }
+
     private func select(_ row: Int, in table: NSTableView) {
         guard table.selectedRow != row else { return }
         selectingInCode = true
         table.selectRowIndexes([row], byExtendingSelection: false)
+        table.scrollRowToVisible(row)
         selectingInCode = false
     }
 
@@ -530,7 +570,127 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
 
     private func updateButtons() {
         openPackButton.isEnabled = detail?.download != nil
-        openFileButton.isEnabled = canOpenFile(fileTable.selectedRow)
+    }
+
+    // MARK: Preview
+
+    /// The user picked a file (also for checks): previews it, replacing any preview still loading.
+    @discardableResult
+    func chooseFile(_ row: Int) -> Task<Void, Never>? {
+        guard files.indices.contains(row) else { return nil }
+        select(row, in: fileTable)
+        previewTask?.cancel()
+        previewTask = Task { [weak self] in await self?.previewFile(row) }
+        return previewTask
+    }
+
+    /// Shows the file in the preview pane: its thumbnail at once when it is on disk, then the art
+    /// itself (downloaded once, then cached), or 16colo.rs's full size picture for files AnsiView
+    /// does not render.
+    func previewFile(_ index: Int) async {
+        guard files.indices.contains(index), let detail else { return }
+        previewGeneration += 1
+        let mine = previewGeneration
+        selectedFileIndex = index
+        let file = files[index]
+        let thumbnail = file.thumbnail.flatMap(client.cachedImage)
+        if let thumbnail {
+            preview.show(.picture(thumbnail, note: "Loading \(file.name)..."))
+        } else {
+            preview.show(.empty("Loading \(file.name)..."))
+        }
+        preview.setButtons(open: false, save: false)
+        var problem: Error?
+        if file.isViewable {
+            do {
+                let url = try await client.downloadFile(file, in: detail.name)
+                guard mine == previewGeneration else { return }
+                let art = ArtFile(data: try Data(contentsOf: url), fileExtension: url.pathExtension)
+                preview.show(.art(art, name: file.name, url: url))
+                return
+            } catch {
+                if Self.isCancellation(error) || mine != previewGeneration { return }
+                problem = error
+            }
+        }
+        // Not art AnsiView renders (or it could not be fetched): 16colo.rs's own picture of it.
+        if let full = file.fullImage ?? SixteenColors.fullImageURL(pack: detail.name, file: file.name) {
+            do {
+                let image = try await client.image(full, priority: .user)
+                guard mine == previewGeneration else { return }
+                preview.show(.picture(image, note: "\(file.name)  \u{00B7}  picture rendered by 16colo.rs"))
+                preview.setButtons(open: false, save: problem == nil)
+                return
+            } catch {
+                if Self.isCancellation(error) || mine != previewGeneration { return }
+                problem = problem ?? error
+            }
+        }
+        let text = problem.map { SixteenColorsClient.describe($0).message } ?? "No preview for \(file.name)."
+        if let thumbnail {
+            preview.show(.picture(thumbnail, note: "Saved thumbnail. " + text))
+        } else {
+            preview.show(.empty(text))
+        }
+    }
+
+    private func openSelectedFile() {
+        guard let index = selectedFileIndex else { return }
+        Task { await openFile(index) }
+    }
+
+    private func editSelectedFile() {
+        guard let index = selectedFileIndex, canOpenFile(index), let detail else { return }
+        let file = files[index]
+        Task {
+            do {
+                let url = try await client.downloadFile(file, in: detail.name)
+                onEditFile?(url)
+            } catch {
+                failed(error) { [weak self] in self?.editSelectedFile() }
+            }
+        }
+    }
+
+    /// Copies a file of the pack (downloading it first when needed) to `destination`.
+    func saveFile(_ index: Int, to destination: URL) async throws {
+        guard files.indices.contains(index), let detail else { return }
+        let source = try await client.downloadFile(files[index], in: detail.name)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: source, to: destination)
+    }
+
+    /// Save to...: a save panel starting in Downloads, with the file's own name.
+    private func chooseSaveLocation() {
+        guard let index = selectedFileIndex, files.indices.contains(index), let window = view.window else { return }
+        let name = (files[index].name as NSString).lastPathComponent
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = name
+        panel.message = "Save \(name) from 16colo.rs."
+        if let home = getpwuid(getuid())?.pointee.pw_dir {
+            panel.directoryURL = URL(fileURLWithPath: String(cString: home)).appendingPathComponent("Downloads")
+        }
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            Task {
+                do {
+                    try await self.saveFile(index, to: url)
+                    self.finish("Saved \(url.lastPathComponent).")
+                } catch {
+                    self.failed(error) { [weak self] in self?.chooseSaveLocation() }
+                }
+            }
+        }
+    }
+
+    /// The art view takes the keyboard when it appears; arrows belong to the file list.
+    private func keepKeyboardInList() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.view.window else { return }
+            window.makeFirstResponder(self.fileTable)
+        }
     }
 
     // MARK: Actions
@@ -542,11 +702,6 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
 
     @objc private func openPackPressed(_ sender: Any?) { Task { await openPack() } }
 
-    @objc private func openFilePressed(_ sender: Any?) {
-        let row = fileTable.selectedRow
-        Task { await openFile(row) }
-    }
-
     /// The user picked a year (also for checks): replaces any listing still waiting or loading.
     @discardableResult
     func chooseYear(_ row: Int) -> Task<Void, Never>? {
@@ -554,8 +709,19 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         return listing
     }
 
-    /// Stops a listing in progress (the window is closing).
-    func cancelListing() { listing?.cancel() }
+    /// The user picked a pack (also for checks).
+    @discardableResult
+    func choosePack(_ row: Int) -> Task<Void, Never>? {
+        startListing { await $0.selectPack(row) }
+        return listing
+    }
+
+    /// Stops a listing or preview in progress (the window is closing).
+    func cancelListing() {
+        listing?.cancel()
+        previewTask?.cancel()
+        preview.show(.empty(SixteenColorsPreview.emptyHint))
+    }
 
     /// Cancels the listing for the previous selection and starts this one.
     private func startListing(_ work: @escaping (SixteenColorsBrowser) async -> Void) {
@@ -622,9 +788,9 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         case yearTable:
             if years.indices.contains(row) { chooseYear(row) }
         case packTable:
-            if packs.indices.contains(row) { startListing { await $0.selectPack(row) } }
+            if packs.indices.contains(row) { choosePack(row) }
         default:
-            updateButtons()
+            if files.indices.contains(row) { chooseFile(row) }
         }
     }
 }
@@ -634,7 +800,8 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
 final class SixteenColorsWindowController: NSWindowController, NSWindowDelegate {
     private static var current: SixteenColorsWindowController?
 
-    static func show(openPack: @escaping (URL, String) -> Void, openFile: @escaping (URL) -> Void) {
+    static func show(openPack: @escaping (URL, String) -> Void, openFile: @escaping (URL) -> Void,
+                     editFile: @escaping (URL) -> Void) {
         if let current {
             current.showWindow(nil)
             return
@@ -642,15 +809,16 @@ final class SixteenColorsWindowController: NSWindowController, NSWindowDelegate 
         let browser = SixteenColorsBrowser(client: .shared)
         browser.onOpenPack = openPack
         browser.onOpenFile = openFile
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 620),
+        browser.onEditFile = editFile
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 760),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "16colo.rs"
-        window.minSize = NSSize(width: 640, height: 360)
+        window.minSize = NSSize(width: 900, height: 440)
         let controller = SixteenColorsWindowController(window: window)
         window.delegate = controller
         window.contentViewController = browser
-        window.setContentSize(NSSize(width: 980, height: 620))
+        window.setContentSize(NSSize(width: 1320, height: 760))
         window.center()
         current = controller
         controller.showWindow(nil)
