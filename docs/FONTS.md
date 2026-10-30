@@ -27,9 +27,42 @@ Code page suffixes in SAUCE names ("IBM VGA 437") are accepted. Any other name r
 | Faces | Candidate | License found | Why not bundled |
 | --- | --- | --- | --- |
 | Amiga Topaz 1, Topaz 1+, Topaz 2, Topaz 2+, P0T-NOoDLE, MicroKnight, MicroKnight+, mO'sOul | github.com/rewtnull/amigafonts (dMG/t!s^dS!) | GPL with font exception; README states "Topaz is (c) AmigaInc." | GPL is outside the accepted set (CC BY, CC BY-SA, OFL, public domain) and conflicts with App Store terms |
-| C64 PETSCII shifted and unshifted, Atari ATASCII | Kreative Software PetMe / Atari fonts (kreativekorp.com) | Not verified: the license page could not be read during sourcing | License unverified |
+| C64 PETSCII shifted and unshifted, Atari ATASCII | Kreative Software PetMe / Atari fonts (kreativekorp.com) | Kreative "Free Use License": redistribution allowed free of charge with the licence included, no modification, no selling copies, Kreative may change it at any time; whether a paid app bundle counts as selling is not stated | Unclear for a paid app; replaced by original fonts (below) |
 
 Until a decision is made these SAUCE names render with IBM VGA.
+
+## Terminal platform fonts (original, bundled)
+
+The BBS terminal's home computer types draw with fonts made for AnsiView in code
+(`PlatformFonts.swift`, `GlyphsBase.swift`): an original 5x8 alphabet drawn for AnsiView, placed in
+8x8 cells (strokes doubled for the thick looks), with block, line and card suit graphics built from
+geometry. No ROM dump or third party font was copied or traced. MIT like the rest of AnsiView.
+
+| Font | Coverage | Used by |
+|---|---|---|
+| AnsiView PETSCII | 256 glyphs: C64 screen codes 0-127 of the upper case/graphics set and of the lower/upper case set (reverse video is drawn by swapping colours) | PETSCII (C64), PETSCII (C128 80 col) |
+| AnsiView ATASCII | 128 glyphs: ATASCII 0-127 with its graphics (inverse by colour swap) | ATASCII |
+| AnsiView Teletext | 672 glyphs in 12x20 cells: the UK teletext set as 5x9 characters doubled with SAA5050 style diagonal rounding (an algorithm, implemented here), 64 contiguous and 64 separated mosaics, and top and bottom halves of every glyph for double height | Viewdata, Mode 7 |
+| AnsiView Apple II | 128 glyphs, single stroke | Apple II, RIPscrip font 0 |
+| AnsiView Topaz | 256 glyphs, ISO 8859-1 with generated accents | Amiga ANSI |
+
+### Candidates researched for the terminal (2026-10-30) and why none was bundled
+
+| Candidate | Licence found | Decision |
+|---|---|---|
+| Kreative Pet Me family, Candy Antics (Atari), Print Char 21 / PR Number 3 (Apple II) | Kreative Free Use License (summary above; full text could not be fetched verbatim, HTTP 406) | not bundled: no modification, may change any time, paid bundle unclear |
+| Style64 C64 Pro / C64 Pro Mono | "MAY include ... as part of a software package but ONLY if said software package is freely provided"; no selling; commercial licence negotiable (https://style64.org/c64-truetype/license) | not bundled: AnsiView may be sold |
+| Atari Classic (Mark Simonson) | copyrighted freeware, not to be bundled with paid software without permission | not bundled |
+| EightBit-Atari-Fonts (Steve Boswell) | SIL OFL 1.1, but "generated from original bitmaps from Atari 8-Bit computers" | not bundled: a ROM derived bitmap (owner rule: never copy ROM dumps) |
+| Bedstead (Ben Harris) | CC0 1.0 (SPDX header on bjh21.me.uk/bedstead); includes the SAA5050 designs | not bundled: clearly redistributable, but it reproduces the SAA5050 character shapes; an original 5x9 set was drawn instead. A good owner option if exact SAA5050 shapes are wanted |
+| MODE7GX (galax.xyz) | free for non-commercial use only | not bundled |
+| Trueschool Topaz (dMG) | GPL with font exception; "Topaz is (c) AmigaInc." | not bundled (earlier owner ruling) |
+| Topaz Unicode (Screwtape) | ISC per Debian and Arch packaging; upstream LICENSE not read | not bundled: unconfirmed and a Topaz reproduction |
+| BESCII, sadiec64ex | CC0 / 0BSD per search results, repositories not read | not bundled: unverified |
+
+Character ROMs: Cloanto states the Commodore 8-bit and Amiga ROMs are copyrighted and licensed
+(https://www.c64forever.com/kb/13-122); US regulation does not protect "typeface as typeface"
+(37 CFR 202.1), but the owner's rule is to copy no ROM bitmaps, so none was used.
 
 # Text art fonts
 

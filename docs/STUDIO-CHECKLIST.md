@@ -137,6 +137,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | WebSocket (ws and wss) | done (merged) (local server: binary and text frames, subprotocol, telnet inside, HTTP 404, self signed wss error) |
 | RLogin | done (merged) (local server: handshake bytes, refusal; no window size, see README) |
 | Byte clean channel for transfers | done: all 256 byte values measured end to end over SSH, WebSocket and RLogin |
+| Telnet over TLS (telnets, port 992) | done on branch `ansiview-2.0-terminal-compat` (local OpenSSL 3 s_server: self signed first use asks, same certificate silent, changed refused); no live TLS board answered (the two listed refused or timed out) |
 
 ## Terminal dialing directory
 
@@ -144,7 +145,27 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 |---|---|
 | Retro phonebook (list, tags, search, sort, notes, call stats), per-BBS settings, Keychain passwords, expect/send auto-login, dial queue with redial and busy detection, macros, JSON and SyncTERM import/export | done (local test server; real-BBS logins need owner), merged item 63 |
 | SSH keys, RLogin users, WebSocket fields, per protocol hints, SyncTERM SSH/RLogin import | done (merged) |
-| IEMSI, Sixel, iTerm2 images, TLS client certificates | planned |
+| IEMSI | done on branch `ansiview-2.0-terminal-compat`, opt in per entry (unit tested handshake; a live AmiExpress board was seen sending `**EMSI_IRQ8E08`; not run against a real login) |
+| Sixel, iTerm2 images, TLS client certificates | planned (not in the terminal compatibility pass) |
+
+## Terminal emulations (branch `ansiview-2.0-terminal-compat`, docs/BBS-COMPAT.md "Terminal")
+
+| Family | Status |
+|---|---|
+| ANSI-BBS with SyncTERM/CTerm extensions (iCE mode, status reports, DoorWay, DECRQM, speed requests) | done; plan 7 behaviour pinned byte identical (seeded streams and TWSUPP corpus digests) |
+| VT100 / VT220 | done (harness) |
+| Avatar AVT/0+ | done (harness) |
+| PETSCII C64 | done (harness, live Synchronet port 64 and a Color 64 / Image BBS board) |
+| PETSCII C128 80 column | partial (live Synchronet port 128; no underline or C128 escapes) |
+| ATASCII | done (harness; live boards wait for Return before art) |
+| Viewdata / Prestel | done (harness, live Telstar and NXtel) |
+| BBC Mode 7 | done (harness; live board showed only a bot check) |
+| Apple II | done (harness, live GBBS Pro and Warp Six) |
+| Amiga ANSI | partial (Topaz style font, ISO 8859-1, live AmiExpress; Amiga palettes not done) |
+| RIPscrip 1.54 | partial (vector drawing, fills, text, buttons and mouse fields in harness; icons, scenes, stroke fonts not done; no RIP seen live before login) |
+| First bytes detection (suggest only) | done (harness) |
+| Original platform fonts (PETSCII, ATASCII, teletext, Apple II, Topaz style) | done, MIT, docs/FONTS.md |
+| VT52, Sixel, iTerm2 images | not done |
 
 ## 16colo.rs browsing
 

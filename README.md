@@ -310,11 +310,42 @@ to the next, Left and Right (or Space) change a choice or a switch, typing edits
 saves and goes back (Cancel discards). The line under the form explains the selected field. The
 sections: Connection (name, host, port, protocol, tags, notes; then the chosen protocol's own
 fields, see Connections below), Terminal
-(terminal type, ANSI by default; columns and rows; font; CP437 or UTF-8; iCE colours, which show
-blinking as bright backgrounds; simulated modem speed; what Backspace sends; modem sound on, off
-or as Playback > Modem Sounds), Login (username, password, show password, log in automatically,
-busy text), the login script, Capture (capture on connect and its folder) and the ten macros.
+(terminal type, see below; the name sent when the BBS asks for the terminal type; columns and
+rows; font; CP437 or UTF-8; iCE colours, which show blinking as bright backgrounds; simulated modem
+speed; what Backspace sends; modem sound on, off or as Playback > Modem Sounds), Login (username,
+password, show password, IEMSI login, log in automatically, busy text), the login script, Capture
+(capture on connect and its folder) and the ten macros. Telnet entries also have Secure (TLS).
 The bottom line shows when you last called and how many times.
+
+**Terminal types.** Each BBS can use the terminal its software was written for:
+
+| Type | For | Screen | Keys |
+|---|---|---|---|
+| ANSI-BBS (default) | PC boards: Synchronet, Mystic, WWIV, PCBoard, Renegade | 80x25, CP437 fonts | SyncTERM style, with DoorWay mode when the BBS asks |
+| VT100, VT220 | Unix systems, Citadel | 80x24, DEC line drawing | application cursor keys when the host asks |
+| Avatar (AVT/0+) | RemoteAccess, ProBoard, Maximus | 80x25 | as ANSI-BBS |
+| RIPscrip | RIP boards (RIPscrip 1.54 menus) | 640x350 graphics under the text | click buttons and mouse fields |
+| PETSCII (C64), PETSCII (C128 80 col) | Color 64, Image BBS, C*Base, Synchronet port 64/128 | 40x25 or 80x25, C64 or VDC colours | arrows, Home (HOME), End (CLR), Backspace (DEL), Insert, Escape (RUN/STOP), F1-F8, Control 1-8 colours, Control 9/0 reverse on/off |
+| ATASCII (Atari) | BBS Express, Phorem XE | 40x24 | Return (EOL), Backspace, Delete, Insert, Tab, End (CLEAR) |
+| Viewdata / Prestel | Telstar (raw TCP), NXtel | 40x24 teletext, 4:3 | Return and # send the Prestel # key; Terminal > Reveal Concealed Text |
+| Mode 7 (BBC Micro) | BBC Micro boards | 40x25 teletext | BBC cursor codes |
+| Apple II | GBBS Pro, ProLine, Warp Six | 80x24 (40 also works) | Apple arrows |
+| Amiga ANSI | AmiExpress | 80x25, Topaz style font, ISO 8859-1 | as ANSI-BBS |
+
+Choosing a type sets the screen size and the name sent first (unless you changed them). In a call,
+Terminal > Terminal Type switches and redraws what the BBS sent so far. When the first bytes of a
+call look like another type (a PETSCII clear screen, ATASCII line ends, RIPscrip lines, Viewdata
+attributes, Avatar codes), a bar offers to switch; AnsiView never switches by itself. The fonts for
+these types are AnsiView's own drawings (docs/FONTS.md). What works with which BBS family, and what
+was checked against live boards, is in docs/BBS-COMPAT.md (Terminal).
+
+**Telnet over TLS.** Turn on Secure (TLS) in a telnet entry (the port moves to 992). A certificate
+macOS trusts connects at once; a self signed one shows its subject and SHA-256 fingerprint once and
+is remembered; a changed certificate is refused with a warning (the entry's Saved certificate:
+Forget clears it).
+
+**IEMSI.** With IEMSI login on and a username and saved password, a BBS that asks for IEMSI
+(`**EMSI_IRQ`, AmiExpress and some Maximus or Mystic boards) is answered with them. Off by default.
 
 **Passwords** are saved only in your Mac's login Keychain (as internet passwords for the host,
 port and username, labelled "AnsiView BBS: name"), never in AnsiView's preferences or in an
