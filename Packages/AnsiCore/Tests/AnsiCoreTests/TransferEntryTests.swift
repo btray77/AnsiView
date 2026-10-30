@@ -77,7 +77,7 @@ import Testing
             #expect((1...2).contains(sentences.count), "\(kind) hint has \(sentences.count) sentences")
         }
         #expect(TransferHelp.hint(.zmodem).contains("BBS offers it"))
-        for text in [TransferHelp.chooser, TransferHelp.autoStart, TransferHelp.binaryWarning, TransferHelp.resume] {
+        for text in [TransferHelp.chooser, TransferHelp.autoStart, TransferHelp.binaryWarning(for: .xmodem), TransferHelp.binaryWarning(for: .zmodem), TransferHelp.resume] {
             #expect(!text.isEmpty)
             #expect(!text.contains("\u{2014}"))
         }

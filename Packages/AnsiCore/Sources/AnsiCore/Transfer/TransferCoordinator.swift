@@ -241,7 +241,7 @@ public struct TransferCoordinator {
 
     private mutating func start(_ kind: TransferProtocolKind, _ direction: TransferDirection,
                                 byteClean: Bool) -> [TransferCoordinatorAction] {
-        let warning = !byteClean && kind != .kermit ? TransferHelp.binaryWarning : nil
+        let warning = !byteClean && kind != .kermit ? TransferHelp.binaryWarning(for: kind) : nil
         let request = TransferRequest(kind: kind, direction: direction, initialBytes: held, byteClean: byteClean, warning: warning)
         held = []
         detector.reset()

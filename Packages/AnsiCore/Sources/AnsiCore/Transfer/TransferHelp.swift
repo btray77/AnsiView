@@ -27,7 +27,15 @@ public enum TransferHelp {
 
     public static let chooser = "Choose the protocol the BBS uses for this transfer. ZMODEM is best if the BBS offers it; otherwise YMODEM, then XMODEM-1K."
     public static let autoStart = "AnsiView saw the start of a file transfer. Accept if you asked the BBS to send or receive files; ignore it if this was ordinary text."
-    public static let binaryWarning = "The BBS did not agree to telnet binary mode, so some bytes may be changed on the way. If the transfer fails, try Kermit or ZMODEM."
+    /// Shown in the panel when the BBS refused telnet binary mode (Kermit needs none: it prefixes).
+    public static func binaryWarning(for kind: TransferProtocolKind) -> String {
+        let start = "The BBS did not agree to telnet binary mode, so some bytes may be changed on the way."
+        switch kind {
+        case .zmodem: return start + " ZMODEM escapes the bytes telnet could change; if it still fails, try Kermit."
+        case .kermit: return start + " Kermit sends 8 bit bytes as 7 bit text here, which is slower but safe."
+        default: return start + " \(kind.displayName) may fail; ZMODEM or Kermit work on such a line."
+        }
+    }
     public static let resume = "ZMODEM continues an interrupted download from where it stopped, as long as the partial file is still in the download folder."
     public static let cancel = "Stops the transfer and tells the BBS to stop too (Escape does the same). A partial ZMODEM download is kept so it can resume later."
     public static let folder = "Downloads from this BBS are saved here. AnsiView keeps your permission to write to the folder you chose."

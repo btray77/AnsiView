@@ -68,7 +68,7 @@ private func shown(_ actions: [TransferCoordinatorAction]) -> [UInt8] {
         #expect(c.tick(at: 1.9, byteClean: false).isEmpty)
         let request = started(c.tick(at: 2.0, byteClean: false))
         #expect(request?.byteClean == false)
-        #expect(request?.warning == TransferHelp.binaryWarning)
+        #expect(request?.warning == TransferHelp.binaryWarning(for: .zmodem))
         #expect(request?.options().zmodemEscapeTelnet == true)
 
         var k = TransferCoordinator(autoAcceptZmodem: false, usesTelnet: true)
@@ -79,7 +79,11 @@ private func shown(_ actions: [TransferCoordinatorAction]) -> [UInt8] {
 
         var y = TransferCoordinator(autoAcceptZmodem: false, usesTelnet: true)
         _ = y.begin(kind: .ymodem, direction: .send, at: 0, byteClean: false)
-        #expect(started(y.tick(at: 3, byteClean: false))?.warning == TransferHelp.binaryWarning)
+        #expect(started(y.tick(at: 3, byteClean: false))?.warning == TransferHelp.binaryWarning(for: .ymodem))
+        // The advice fits the protocol in use: ZMODEM is told it escapes, X/YMODEM are pointed to ZMODEM or Kermit.
+        #expect(TransferHelp.binaryWarning(for: .zmodem).contains("escapes"))
+        #expect(!TransferHelp.binaryWarning(for: .zmodem).contains("try Kermit or ZMODEM"))
+        #expect(TransferHelp.binaryWarning(for: .ymodem).contains("ZMODEM or Kermit"))
     }
 
     @Test func refusedBinaryWarnsAndEscapes() {
@@ -308,8 +312,8 @@ private func shown(_ actions: [TransferCoordinatorAction]) -> [UInt8] {
         fast.apply(progress(bytes: 1, size: 7300, session: 1, rate: 3.5 * 1_048_576, eta: 3725))
         #expect(fast.speedLine == "3.5 MB/s")
         #expect(fast.etaLine == "1:02:05")
-        fast.warning = TransferHelp.binaryWarning
-        #expect(fast.warning == TransferHelp.binaryWarning)
+        fast.warning = TransferHelp.binaryWarning(for: .zmodem)
+        #expect(fast.warning == TransferHelp.binaryWarning(for: .zmodem))
     }
 
     @Test func summaryListsFilesAndHashes() {
