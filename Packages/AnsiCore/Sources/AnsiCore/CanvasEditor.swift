@@ -551,12 +551,10 @@ public final class CanvasEditor {
     }
 
     /// The layers as a project file.
-    public var project: ArtProject { ArtProject(layers: layers, activeLayer: activeLayer) }
+    public var project: ArtProject { ArtProject(frames: frames, currentFrame: currentFrame) }
 
     public convenience init(project: ArtProject) {
-        self.init(canvas: project.layers[project.activeLayer].canvas)
-        layerStore = project.layers
-        activeLayer = project.activeLayer
+        self.init(frames: project.frames, current: project.currentFrame)
     }
 
     /// Applies a change to every layer (size, iCE and metadata changes).
