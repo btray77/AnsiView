@@ -124,7 +124,11 @@ public struct MusicTune: Equatable, Codable {
     public mutating func delete(index: Int) {
         guard items.indices.contains(index), case .note(_, let length, let dots) = items[index] else { return }
         items[index] = .note(semitone: nil, length: length, dots: dots)
-        while let last = items.last, case .note(nil, _, _) = last { items.removeLast() }
+        // Rests at the end, and commands after the last note (they change nothing), go.
+        while let last = items.last {
+            if case .note(let semitone, _, _) = last, semitone != nil { break }
+            items.removeLast()
+        }
         normalize()
     }
 
@@ -166,6 +170,41 @@ public struct MusicTune: Equatable, Codable {
             }
         }
         return state
+    }
+
+    /// Where a click at `raw` whole notes puts a new note: on the grid, but never earlier than the
+    /// end of the tune (past the end) or the start of the rest it falls in, so it cannot land on
+    /// the note before.
+    public func snappedPosition(_ raw: Double, grid: Double) -> Double {
+        let raw = max(0, raw)
+        var snapped = grid > 0 ? (raw / grid + Self.epsilon).rounded(.down) * grid : raw
+        if raw >= totalLength - Self.epsilon {
+            snapped = max(snapped, totalLength)
+        } else if let hit = placed(at: raw) {
+            snapped = max(snapped, hit.position)
+        }
+        return snapped
+    }
+
+    /// The PLAY string with the full starting state spelled out (tempo, length, articulation,
+    /// MF/MB and octave), so it plays the same after any other music in a stream. Use it for export.
+    public var selfContainedPlay: String {
+        let lead = leadingCount
+        let state = Self.state(of: Array(items[..<lead]))
+        let rest = Array(items[lead...])
+        var firstLength = 4
+        for item in rest {
+            if case .note(let semitone, let length, _) = item, semitone != nil { firstLength = length; break }
+        }
+        var start = PlayState()
+        start.tempo = state.tempo
+        start.articulation = state.articulation
+        start.background = state.background
+        start.length = firstLength
+        start.octave = -1  // forces an O before the first note
+        let head = "T\(state.tempo) L\(firstLength) \(state.articulation.command) \(state.background ? "MB" : "MF")"
+        let body = PlayString.serialize(rest, from: start)
+        return body.isEmpty ? head : head + " " + body
     }
 
     // MARK: Starting tempo, articulation and mode (the commands before the first note)
@@ -271,6 +310,41 @@ public struct MusicLibrary: Codable, Equatable {
 
     public init(snippets: [Snippet] = []) {
         self.snippets = snippets
+    }
+
+    private enum CodingKeys: String, CodingKey { case version, snippets }
+
+    /// Lenient: a missing version or id is fine, and one unreadable entry does not lose the rest.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = (try? container.decodeIfPresent(Int.self, forKey: .version)) ?? 1
+        var list = try container.nestedUnkeyedContainer(forKey: .snippets)
+        var result: [Snippet] = []
+        while !list.isAtEnd {
+            if let entry = try? list.decode(LenientSnippet.self), let snippet = entry.snippet {
+                result.append(snippet)
+            } else {
+                _ = try? list.decode(Discard.self)
+            }
+        }
+        snippets = result
+    }
+
+    private struct LenientSnippet: Decodable {
+        let snippet: Snippet?
+        private enum Keys: String, CodingKey { case id, name, play }
+        init(from decoder: Decoder) throws {
+            guard let container = try? decoder.container(keyedBy: Keys.self),
+                  let name = try? container.decode(String.self, forKey: .name),
+                  let play = try? container.decode(String.self, forKey: .play) else { snippet = nil; return }
+            let id = (try? container.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
+            snippet = Snippet(id: id, name: name, play: play)
+        }
+    }
+
+    /// Consumes one element of any type.
+    private struct Discard: Decodable {
+        init(from decoder: Decoder) throws {}
     }
 
     @discardableResult

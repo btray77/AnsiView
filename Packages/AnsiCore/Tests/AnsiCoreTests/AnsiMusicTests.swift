@@ -135,7 +135,9 @@ import Testing
                 visual += out.visual
                 sequences += out.finished
             }
-            sequences += filter.finish()
+            let end = filter.finish()
+            visual += end.visual
+            sequences += end.finished
             #expect(visual == whole.visual, "split \(split)")
             #expect(sequences == whole.sequences, "split \(split)")
         }

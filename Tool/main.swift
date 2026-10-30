@@ -312,7 +312,7 @@ if args[1] == "--music" || args[1] == "--music-wav" || args[1] == "--music-midi"
             for sequence in scan.sequences {
                 let preview = sequence.body.count > 60 ? String(sequence.body.prefix(60)) + "..." : sequence.body
                 print("  @\(sequence.offset) len=\(sequence.length) ESC[\(sequence.introducer.rawValue) "
-                    + "\(sequence.blocksDisplay ? "fg" : "bg") \(sequence.isTerminated ? "terminated" : "unterminated") "
+                    + "\(sequence.isTerminated ? (sequence.blocksDisplay ? "fg" : "bg") : "-") \(sequence.isTerminated ? "terminated" : "unterminated") "
                     + "notes=\(sequence.notes.count) duration=\(seconds(sequence.duration)) s  \"\(preview)\"")
             }
         }

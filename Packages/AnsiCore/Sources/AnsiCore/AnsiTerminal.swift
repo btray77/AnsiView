@@ -154,6 +154,7 @@ public struct AnsiTerminal {
                 if j < n, j == i + 2, musicMode.introduces(bytes[j]) {
                     // ANSI music: the PLAY string up to 0x0E is sound, not text (AnsiMusic.swift).
                     i = AnsiMusic.skipBody(bytes, from: j + 1)
+                    pendingWrap = false  // as for any other CSI (the file player used to ignore ESC[M as Delete Line)
                     continue
                 }
                 if j < n, isPrivate, bytes[i + 2] == UInt8(ascii: "="), bytes[j] == UInt8(ascii: "M"), musicMode != .off,

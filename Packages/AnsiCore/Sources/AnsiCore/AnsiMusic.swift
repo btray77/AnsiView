@@ -136,14 +136,15 @@ public struct MusicStreamFilter {
         return (visual, finished)
     }
 
-    /// Call at the end of the stream: an open sequence is reported unterminated, a partial
-    /// escape sequence is passed through.
-    public mutating func finish() -> [MusicSequence] {
+    /// Call at the end of the stream: an open sequence is reported unterminated, and the bytes
+    /// of a partial escape sequence held back so far are returned as visual bytes.
+    public mutating func finish() -> (visual: [UInt8], finished: [MusicSequence]) {
+        let held = pending
         defer { phase = .text }
         if case .body(let start, let introducer, let body, let length) = phase {
-            return [sequence(start: start, introducer: introducer, body: body, length: length, terminated: false)]
+            return (held, [sequence(start: start, introducer: introducer, body: body, length: length, terminated: false)])
         }
-        return []
+        return (held, [])
     }
 
     /// Bytes held back because they may start a music sequence (an ESC or an unfinished CSI).
@@ -181,9 +182,7 @@ public struct MusicStreamFilter {
                     return
                 }
                 if byte == UInt8(ascii: "M"), bytes.count >= 2, bytes[1] == UInt8(ascii: "="), mode != .off {
-                    let digits = bytes.dropFirst(2).prefix { (0x30...0x39).contains($0) }
-                    let value = digits.reduce(0) { min(9999, $0 * 10 + Int($1 - 0x30)) }
-                    if let selected = MusicMode.ctsam(value) { mode = selected }
+                    if let selected = MusicMode.ctsam(AnsiMusic.firstParameter(bytes.dropFirst())) { mode = selected }
                 }
                 visual += [0x1B] + bytes + [byte]
                 phase = .text
@@ -235,8 +234,9 @@ public enum AnsiMusic {
     public static func scan(_ stream: [UInt8], mode: MusicMode = .all, dialect: PlayDialect = .gwbasic) -> MusicScan {
         var filter = MusicStreamFilter(mode: mode, dialect: dialect)
         var (visual, sequences) = filter.feed(stream)
-        visual += filter.pending
-        sequences += filter.finish()
+        let end = filter.finish()
+        visual += end.visual
+        sequences += end.finished
         return MusicScan(sequences: sequences, visual: visual, shiftInsDropped: filter.shiftInsDropped)
     }
 
@@ -270,6 +270,20 @@ public enum AnsiMusic {
             i += 1
         }
         return i
+    }
+
+    /// The first CSI parameter the way AnsiTerminal reads it: digits up to the first `;`, other
+    /// bytes (private markers, intermediates, controls) ignored; 0 when there is none.
+    static func firstParameter(_ csi: ArraySlice<UInt8>) -> Int {
+        var value: Int?
+        for byte in csi {
+            if (0x30...0x39).contains(byte) {
+                value = min(9999, (value ?? 0) * 10 + Int(byte - 0x30))
+            } else if byte == 0x3B {
+                break
+            }
+        }
+        return value ?? 0
     }
 
     static func applyFirstCharacterRule(_ text: String, introducer: MusicIntroducer) -> String {
@@ -333,8 +347,11 @@ public enum AnsiMusic {
         if sauce != nil {
             let field = out.count - Sauce.recordLength + 90
             var size = UInt32(out[field]) | UInt32(out[field + 1]) << 8 | UInt32(out[field + 2]) << 16 | UInt32(out[field + 3]) << 24
-            size = size &+ UInt32(clamping: sequence.count)
-            for k in 0..<4 { out[field + k] = UInt8(truncatingIfNeeded: size >> (8 * UInt32(k))) }
+            // 0 means "unknown" in SAUCE; leave it so.
+            if size != 0 {
+                size = size &+ UInt32(clamping: sequence.count)
+                for k in 0..<4 { out[field + k] = UInt8(truncatingIfNeeded: size >> (8 * UInt32(k))) }
+            }
         }
         return out
     }

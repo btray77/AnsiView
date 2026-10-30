@@ -12,6 +12,7 @@ final class PianoRollView: NSView {
 
     var tune = MusicTune() {
         didSet {
+            window?.invalidateCursorRects(for: self)
             if let selected = selectedIndex, !tune.placed.contains(where: { $0.index == selected }) { selectedIndex = nil }
             updateSize()
             needsDisplay = true
@@ -173,7 +174,7 @@ final class PianoRollView: NSView {
             }
             selectedIndex = hit.index
         } else {
-            let snapped = (raw / grid).rounded(.down) * grid
+            let snapped = tune.snappedPosition(raw, grid: grid)
             let index = tune.addNote(semitone: pitch, at: snapped, length: entryLength, dots: entryDots)
             selectedIndex = index
             onChange?(tune)
@@ -230,7 +231,8 @@ final class PianoRollView: NSView {
         default: break
         }
         if let offset = MusicKeyboard.semitoneOffset(for: key) {
-            let semitone = min(83, entryOctave * 12 + offset)
+            let semitone = entryOctave * 12 + offset
+            guard semitone <= 83 else { NSSound.beep(); return }  // above PLAY's highest note
             tune.append(semitone: semitone, length: entryLength, dots: entryDots)
             selectedIndex = tune.placed.last?.index
             onChange?(tune)

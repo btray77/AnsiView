@@ -364,7 +364,7 @@ final class MusicEditorViewController: NSViewController, NSTextFieldDelegate, NS
     }
 
     private func updatePlayButton() {
-        let playing = player.isPlaying
+        let playing = player.isPlaying && player.onFinish != nil
         playButton.title = playing ? "Pause" : "Play"
         playButton.image = NSImage(systemSymbolName: playing ? "pause.fill" : "play.fill", accessibilityDescription: playButton.title)
         playButton.imagePosition = .imageLeading
@@ -420,9 +420,11 @@ final class MusicEditorViewController: NSViewController, NSTextFieldDelegate, NS
     private var waveform: Waveform { Waveform.allCases[max(0, waveformPopup.indexOfSelectedItem)] }
 
     @objc func togglePlay(_ sender: Any?) {
-        if player.isPlaying {
+        // A note preview (no finish handler) is not the tune: Play starts the tune over it.
+        let tuneActive = player.onFinish != nil
+        if tuneActive, player.isPlaying {
             player.pause()
-        } else if player.isPaused {
+        } else if tuneActive, player.isPaused {
             player.resume()
         } else {
             player.onFinish = { [weak self] in self?.stopPlayback() }
@@ -605,7 +607,7 @@ final class MusicEditorViewController: NSViewController, NSTextFieldDelegate, NS
     private var introducer: MusicIntroducer { MusicIntroducer.allCases[max(0, introducerPopup.indexOfSelectedItem)] }
 
     var escapeSequence: [UInt8] {
-        AnsiMusic.escape(tune.play, introducer: introducer, shiftIn: shiftInCheckbox.state == .on)
+        AnsiMusic.escape(tune.selfContainedPlay, introducer: introducer, shiftIn: shiftInCheckbox.state == .on)
     }
 
     @objc private func copyEscape(_ sender: Any?) {

@@ -55,6 +55,7 @@ final class MusicAudioPlayer {
                 guard let self, self.generation == current else { return }
                 // Stop the node so isPlaying is false once the audio has ended.
                 self.node.stop()
+                self.engine.stop()  // releases the audio hardware until the next play
                 self.isPaused = false
                 self.onFinish?()
             }
@@ -79,6 +80,9 @@ final class MusicAudioPlayer {
     func stop() {
         generation += 1
         isPaused = false
-        if attached { node.stop() }
+        if attached {
+            node.stop()
+            engine.stop()
+        }
     }
 }
