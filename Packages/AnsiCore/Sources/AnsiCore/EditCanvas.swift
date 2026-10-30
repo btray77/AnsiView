@@ -190,6 +190,8 @@ public struct EditCanvas: Equatable {
     public mutating func paintHalf(x: Int, y: Int, half: HalfBlock, color: RGB) {
         guard x >= 0, x < columns, y >= 0, y < AnsiTerminal.maxRows else { return }
         var (top, bottom) = Self.halves(self[x, y])
+        // Already that colour: leave the cell (and its character) alone.
+        if (half == .top ? top : bottom) == color { return }
         if half == .top { top = color } else { bottom = color }
         set(encodeHalves(top: top, bottom: bottom, keepingBackground: self[x, y].bg), x: x, y: y)
     }
