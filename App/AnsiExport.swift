@@ -102,7 +102,8 @@ enum AnsiExporter {
     // MARK: Stills
 
     static func exportStill(_ screen: AnsiScreen, format: StillFormat, scale: Int, to url: URL) throws {
-        guard let image = AnsiRenderer.render(screen, scale: scale)?.image else { throw AnsiExportError.renderFailed }
+        guard let image = AnsiRenderer.render(screen, options: RenderOptions(for: screen, scale: scale))?.image
+        else { throw AnsiExportError.renderFailed }
         switch format {
         case .png, .jpeg:
             let type = format == .png ? UTType.png : UTType.jpeg
@@ -137,8 +138,9 @@ enum AnsiExporter {
         }
     }
 
-    private static func render(_ frame: AnsiFrame, atlas: GlyphAtlas) throws -> CGImage {
-        guard let image = AnsiRenderer.render(frame.screen, blinkVisible: frame.blinkVisible, atlas: atlas)?.image
+    private static func render(_ frame: AnsiFrame, scale: Int) throws -> CGImage {
+        let options = RenderOptions(for: frame.screen, scale: scale, blinkVisible: frame.blinkVisible)
+        guard let image = AnsiRenderer.render(frame.screen, options: options)?.image
         else { throw AnsiExportError.renderFailed }
         return image
     }
@@ -150,7 +152,6 @@ enum AnsiExporter {
         CGImageDestinationSetProperties(dest, [
             kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0],
         ] as CFDictionary)
-        let atlas = GlyphAtlas(scale: scale)
         var exactTime = 0.0
         var writtenHundredths = 0.0
         for (index, frame) in frames.enumerated() {
@@ -160,7 +161,7 @@ enum AnsiExporter {
             let hundredths = max(2, (exactTime * 100).rounded() - writtenHundredths)
             writtenHundredths += hundredths
             let delay = hundredths / 100
-            CGImageDestinationAddImage(dest, try render(frame, atlas: atlas), [
+            CGImageDestinationAddImage(dest, try render(frame, scale: scale), [
                 kCGImagePropertyGIFDictionary: [
                     kCGImagePropertyGIFDelayTime: delay,
                     kCGImagePropertyGIFUnclampedDelayTime: delay,
@@ -174,8 +175,7 @@ enum AnsiExporter {
     private static func writeAnimatedWebP(
         _ frames: [AnsiFrame], scale: Int, to url: URL, progress: (Double) -> Void
     ) throws {
-        let atlas = GlyphAtlas(scale: scale)
-        let first = try render(frames[0], atlas: atlas)
+        let first = try render(frames[0], scale: scale)
         let width = Int32(first.width), height = Int32(first.height)
 
         var options = WebPAnimEncoderOptions()
@@ -193,7 +193,7 @@ enum AnsiExporter {
 
         var timestamp = 0
         for (index, frame) in frames.enumerated() {
-            let image = index == 0 ? first : try render(frame, atlas: atlas)
+            let image = index == 0 ? first : try render(frame, scale: scale)
             let rgba = try rgbaBytes(image)
             var picture = WebPPicture()
             guard WebPPictureInit(&picture) != 0 else { throw AnsiExportError.encodeFailed("WebP picture") }
@@ -223,8 +223,7 @@ enum AnsiExporter {
     }
 
     private static func writeMP4(_ frames: [AnsiFrame], scale: Int, to url: URL, progress: (Double) -> Void) throws {
-        let atlas = GlyphAtlas(scale: scale)
-        let first = try render(frames[0], atlas: atlas)
+        let first = try render(frames[0], scale: scale)
         let width = first.width, height = first.height
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
@@ -246,7 +245,7 @@ enum AnsiExporter {
 
         var milliseconds: Int64 = 0
         for (index, frame) in frames.enumerated() {
-            let image = index == 0 ? first : try render(frame, atlas: atlas)
+            let image = index == 0 ? first : try render(frame, scale: scale)
             while !input.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.005) }
             guard let pool = adaptor.pixelBufferPool else { throw AnsiExportError.encodeFailed("pixel buffer pool") }
             var buffer: CVPixelBuffer?

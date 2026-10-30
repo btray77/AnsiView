@@ -61,7 +61,8 @@ if args[1] == "--frame", args.count >= 5, let byteCount = Int(args[2]) {
     let analysis = AnsiAnalysis(source)
     var terminal = AnsiTerminal(source)
     terminal.advance(byteCount: byteCount)
-    guard let rendered = AnsiRenderer.render(terminal.screen(minimumRows: analysis.canvasRows)),
+    let frame = terminal.screen(minimumRows: analysis.canvasRows)
+    guard let rendered = AnsiRenderer.render(frame, options: RenderOptions(for: frame)),
           let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: args[4]) as CFURL, UTType.png.identifier as CFString, 1, nil)
     else { fail("render failed", 1) }
     CGImageDestinationAddImage(dest, rendered.image, nil)
@@ -75,7 +76,7 @@ let output = URL(fileURLWithPath: args[2])
 let scale = args.count > 3 ? Int(args[3]) : nil
 
 let screen = AnsiParser.parse(try Data(contentsOf: input), fileExtension: input.pathExtension)
-guard let rendered = AnsiRenderer.render(screen, scale: scale),
+guard let rendered = AnsiRenderer.render(screen, options: RenderOptions(for: screen, scale: scale)),
       let dest = CGImageDestinationCreateWithURL(output as CFURL, UTType.png.identifier as CFString, 1, nil)
 else { fail("render failed", 1) }
 CGImageDestinationAddImage(dest, rendered.image, nil)

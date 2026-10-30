@@ -1,41 +1,68 @@
 import CoreGraphics
-import CoreText
 import Foundation
 
-/// A rendered screen: a bitmap at `scale` pixels per VGA pixel.
+/// How to draw a screen.
+public struct RenderOptions {
+    public var font: BitmapFont = .vga
+    /// VGA 9 pixel wide character cells.
+    public var ninePixel = false
+    /// Output pixels per font pixel.
+    public var scale = 2
+    /// When false, blinking cells show only their background (the "off" half of a blink).
+    public var blinkVisible = true
+
+    public init(font: BitmapFont = .vga, ninePixel: Bool = false, scale: Int = 2, blinkVisible: Bool = true) {
+        self.font = font
+        self.ninePixel = ninePixel
+        self.scale = scale
+        self.blinkVisible = blinkVisible
+    }
+
+    /// The screen's own font and letter spacing, at the scale suited to its height.
+    public init(for screen: AnsiScreen, scale: Int? = nil, blinkVisible: Bool = true) {
+        self.init(font: screen.font,
+                  ninePixel: screen.sauce?.letterSpacing == .nine,
+                  scale: scale ?? AnsiRenderer.preferredScale(rows: screen.rows.count),
+                  blinkVisible: blinkVisible)
+    }
+}
+
+/// A rendered screen: a bitmap at `scale` pixels per font pixel.
 public struct RenderedAnsi {
     public let image: CGImage
     public let columns: Int
     public let rows: Int
     public let scale: Int
+    public let cellWidth: Int
+    public let cellHeight: Int
+    /// Height stretch that reproduces a 4:3 CRT for art whose SAUCE asks for legacy aspect.
+    public let pixelAspect: CGFloat
 
-    /// Size in points, one point per VGA pixel (8x16 per cell).
+    /// Size in points, one point per font pixel.
     public var pointSize: CGSize {
-        CGSize(width: columns * AnsiRenderer.cellWidth, height: rows * AnsiRenderer.cellHeight)
+        CGSize(width: columns * cellWidth, height: rows * cellHeight)
     }
 }
 
-/// Draws an AnsiScreen as a VGA text mode bitmap.
+/// Draws an AnsiScreen as a text mode bitmap.
 public enum AnsiRenderer {
-    public static let cellWidth = 8
-    public static let cellHeight = 16
-
     /// Scale used for a screen of this height: 2x normally, 1x for very tall files to bound memory.
     public static func preferredScale(rows: Int) -> Int {
         rows <= 250 ? 2 : 1
     }
 
-    /// Renders the screen. Blinking cells show only their background when `blinkVisible` is false.
-    /// Pass a shared `atlas` when rendering many frames at the same scale.
-    public static func render(
-        _ screen: AnsiScreen, scale requestedScale: Int? = nil,
-        blinkVisible: Bool = true, atlas sharedAtlas: GlyphAtlas? = nil
-    ) -> RenderedAnsi? {
+    /// Pixel aspect for a screen: 4:3 CRT stretch when SAUCE asks for legacy aspect.
+    public static func pixelAspect(for screen: AnsiScreen, ninePixel: Bool) -> CGFloat {
+        guard screen.sauce?.aspectRatio == .legacy else { return 1 }
+        return ninePixel ? 1.35 : 1.2
+    }
+
+    public static func render(_ screen: AnsiScreen, options: RenderOptions) -> RenderedAnsi? {
         let rowCount = max(1, screen.rows.count)
-        let scale = sharedAtlas?.scale ?? requestedScale ?? preferredScale(rows: rowCount)
-        let atlas = sharedAtlas ?? GlyphAtlas(scale: scale)
-        let cw = cellWidth * scale
-        let ch = cellHeight * scale
+        let scale = max(1, options.scale)
+        let masks = GlyphMasks.shared(font: options.font, ninePixel: options.ninePixel, scale: scale)
+        let cw = masks.cellWidth * scale
+        let ch = options.font.height * scale
         let width = screen.columns * cw
         let height = rowCount * ch
 
@@ -43,25 +70,17 @@ public enum AnsiRenderer {
         pixels.withUnsafeMutableBufferPointer { out in
             for (rowIndex, row) in screen.rows.enumerated() {
                 for (colIndex, cell) in row.enumerated() where colIndex < screen.columns {
-                    let mask = atlas.mask(for: cell.blink && !blinkVisible ? 0x20 : cell.code)
-                    let fg = cell.fg
-                    let bg = cell.bg
-                    let bgPacked = packed(bg)
-                    let fgPacked = packed(fg)
+                    let hidden = cell.blink && !options.blinkVisible
+                    let mask = masks.mask(for: hidden ? 0x20 : cell.code)
+                    let fgPacked = packed(cell.fg)
+                    let bgPacked = packed(cell.bg)
                     let originX = colIndex * cw
                     let originY = rowIndex * ch
                     for py in 0..<ch {
                         let rowStart = (originY + py) * width + originX
                         let maskStart = py * cw
                         for px in 0..<cw {
-                            let a = mask[maskStart + px]
-                            if a == 0 {
-                                out[rowStart + px] = bgPacked
-                            } else if a == 255 {
-                                out[rowStart + px] = fgPacked
-                            } else {
-                                out[rowStart + px] = packed(blend(bg, fg, a))
-                            }
+                            out[rowStart + px] = mask[maskStart + px] ? fgPacked : bgPacked
                         }
                     }
                 }
@@ -78,190 +97,53 @@ public enum AnsiRenderer {
                 bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
                 provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
         else { return nil }
-        return RenderedAnsi(image: image, columns: screen.columns, rows: rowCount, scale: scale)
+        return RenderedAnsi(
+            image: image, columns: screen.columns, rows: rowCount, scale: scale,
+            cellWidth: masks.cellWidth, cellHeight: options.font.height,
+            pixelAspect: pixelAspect(for: screen, ninePixel: options.ninePixel))
     }
 
     // RGBX in memory order, which is little endian UInt32 0xXXBBGGRR.
     private static func packed(_ c: RGB) -> UInt32 {
         UInt32(c.r) | UInt32(c.g) << 8 | UInt32(c.b) << 16 | 0xFF00_0000
     }
-
-    private static func blend(_ bg: RGB, _ fg: RGB, _ a: UInt8) -> RGB {
-        func mix(_ b: UInt8, _ f: UInt8) -> UInt8 {
-            UInt8((Int(b) * (255 - Int(a)) + Int(f) * Int(a)) / 255)
-        }
-        return RGB(r: mix(bg.r, fg.r), g: mix(bg.g, fg.g), b: mix(bg.b, fg.b))
-    }
 }
 
-/// Coverage masks (0-255, top row first) for each CP437 code at a given scale.
-/// Blocks, shades and box drawing are drawn pixel exact so art tiles without gaps;
-/// everything else is rasterized from Menlo.
-public final class GlyphAtlas {
-    public let scale: Int
-    private var cache: [[UInt8]?] = Array(repeating: nil, count: 256)
-    private let font: CTFont
+/// Scaled glyph masks for one font, letter spacing and scale, built once and shared.
+final class GlyphMasks {
+    let cellWidth: Int
+    private let masks: [[Bool]]
 
-    public init(scale: Int) {
-        self.scale = scale
-        let targetHeight = CGFloat(AnsiRenderer.cellHeight * scale)
-        self.font = CTFontCreateWithName("Menlo-Regular" as CFString, targetHeight / 1.2, nil)
+    private init(font: BitmapFont, ninePixel: Bool, scale: Int) {
+        let w = font.width + (ninePixel ? 1 : 0)
+        let h = font.height
+        cellWidth = w
+        masks = (0..<256).map { code in
+            let glyph = font.pixels(for: UInt8(code))
+            let ninth = ninePixel ? font.ninthColumn(for: UInt8(code)) : []
+            var out = [Bool](repeating: false, count: w * scale * h * scale)
+            for y in 0..<(h * scale) {
+                for x in 0..<(w * scale) {
+                    let fx = x / scale, fy = y / scale
+                    out[y * w * scale + x] = fx < font.width ? glyph[fy * font.width + fx] : ninth[fy]
+                }
+            }
+            return out
+        }
     }
 
-    public func mask(for code: UInt8) -> [UInt8] {
-        if let cached = cache[Int(code)] { return cached }
-        let built = Self.vgaPixels(for: code).map(upscale) ?? rasterize(code)
-        cache[Int(code)] = built
+    func mask(for code: UInt8) -> [Bool] { masks[Int(code)] }
+
+    private static let lock = NSLock()
+    private static var cache: [String: GlyphMasks] = [:]
+
+    static func shared(font: BitmapFont, ninePixel: Bool, scale: Int) -> GlyphMasks {
+        let key = "\(font.name)|\(font.width)x\(font.height)|\(ninePixel)|\(scale)"
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = cache[key], font.name != "Embedded" { return cached }
+        let built = GlyphMasks(font: font, ninePixel: ninePixel, scale: scale)
+        if font.name != "Embedded" { cache[key] = built }
         return built
     }
-
-    // MARK: Pixel exact glyphs on the 8x16 VGA grid
-
-    private static let w = AnsiRenderer.cellWidth
-    private static let h = AnsiRenderer.cellHeight
-
-    private static func vgaPixels(for code: UInt8) -> [Bool]? {
-        switch code {
-        case 0x00, 0x20, 0xFF:
-            return Array(repeating: false, count: w * h)
-        case 0xB0: return shade([0x22, 0x88])
-        case 0xB1: return shade([0x55, 0xAA])
-        case 0xB2: return shade([0xDD, 0x77])
-        case 0xDB: return fill { _, _ in true }
-        case 0xDC: return fill { _, y in y >= h / 2 }
-        case 0xDF: return fill { _, y in y < h / 2 }
-        case 0xDD: return fill { x, _ in x < w / 2 }
-        case 0xDE: return fill { x, _ in x >= w / 2 }
-        case 0xFE: return fill { x, y in (1...6).contains(x) && (4...11).contains(y) }
-        default:
-            guard let arms = boxArms[code] else { return nil }
-            return boxDrawing(arms)
-        }
-    }
-
-    private static func fill(_ on: (Int, Int) -> Bool) -> [Bool] {
-        var p = [Bool](repeating: false, count: w * h)
-        for y in 0..<h { for x in 0..<w where on(x, y) { p[y * w + x] = true } }
-        return p
-    }
-
-    /// Alternating row bit patterns, most significant bit is the leftmost pixel.
-    private static func shade(_ rowBits: [UInt8]) -> [Bool] {
-        fill { x, y in rowBits[y % rowBits.count] & (0x80 >> UInt8(x)) != 0 }
-    }
-
-    /// Arm weights (up, down, left, right): 0 none, 1 single line, 2 double line.
-    private typealias Arms = (u: Int, d: Int, l: Int, r: Int)
-
-    private static let boxArms: [UInt8: Arms] = [
-        0xB3: (1, 1, 0, 0), 0xB4: (1, 1, 1, 0), 0xB5: (1, 1, 2, 0), 0xB6: (2, 2, 1, 0),
-        0xB7: (0, 2, 1, 0), 0xB8: (0, 1, 2, 0), 0xB9: (2, 2, 2, 0), 0xBA: (2, 2, 0, 0),
-        0xBB: (0, 2, 2, 0), 0xBC: (2, 0, 2, 0), 0xBD: (2, 0, 1, 0), 0xBE: (1, 0, 2, 0),
-        0xBF: (0, 1, 1, 0), 0xC0: (1, 0, 0, 1), 0xC1: (1, 0, 1, 1), 0xC2: (0, 1, 1, 1),
-        0xC3: (1, 1, 0, 1), 0xC4: (0, 0, 1, 1), 0xC5: (1, 1, 1, 1), 0xC6: (1, 1, 0, 2),
-        0xC7: (2, 2, 0, 1), 0xC8: (2, 0, 0, 2), 0xC9: (0, 2, 0, 2), 0xCA: (2, 0, 2, 2),
-        0xCB: (0, 2, 2, 2), 0xCC: (2, 2, 0, 2), 0xCD: (0, 0, 2, 2), 0xCE: (2, 2, 2, 2),
-        0xCF: (1, 0, 2, 2), 0xD0: (2, 0, 1, 1), 0xD1: (0, 1, 2, 2), 0xD2: (0, 2, 1, 1),
-        0xD3: (2, 0, 0, 1), 0xD4: (1, 0, 0, 2), 0xD5: (0, 1, 0, 2), 0xD6: (0, 2, 0, 1),
-        0xD7: (2, 2, 1, 1), 0xD8: (1, 1, 2, 2), 0xD9: (1, 0, 1, 0), 0xDA: (0, 1, 0, 1),
-    ]
-
-    /// How far a double line reaches past center: -1 near line, 0 center, +1 far line.
-    private static func doubleReach(side: Int, other: Int) -> Int {
-        if side == 2 { return -1 }
-        if side == 1 { return 0 }
-        return other == 2 ? 1 : 0
-    }
-
-    /// Same for a single line, given the opposite arm and the two perpendicular arms.
-    private static func singleReach(opposite: Int, _ p1: Int, _ p2: Int) -> Int {
-        if opposite > 0 { return 0 }
-        if p1 == 2 && p2 == 2 { return -1 }
-        return (p1 == 2 || p2 == 2) ? 1 : 0
-    }
-
-    private static func boxDrawing(_ a: Arms) -> [Bool] {
-        var p = [Bool](repeating: false, count: w * h)
-        let cx = 3, cy = 7
-        func hline(_ y: Int, _ x0: Int, _ x1: Int) {
-            for x in max(0, min(x0, x1))...min(w - 1, max(x0, x1)) { p[y * w + x] = true }
-        }
-        func vline(_ x: Int, _ y0: Int, _ y1: Int) {
-            for y in max(0, min(y0, y1))...min(h - 1, max(y0, y1)) { p[y * w + x] = true }
-        }
-        // Left and right arms. Reach is measured toward the arm's own edge, so it flips sign on the right.
-        for (weight, edge, sign, opposite) in [(a.l, 0, 1, a.r), (a.r, w - 1, -1, a.l)] where weight > 0 {
-            if weight == 1 {
-                hline(cy, edge, cx + sign * singleReach(opposite: opposite, a.u, a.d))
-            } else {
-                hline(cy - 1, edge, cx + sign * doubleReach(side: a.u, other: a.d))
-                hline(cy + 1, edge, cx + sign * doubleReach(side: a.d, other: a.u))
-            }
-        }
-        for (weight, edge, sign, opposite) in [(a.u, 0, 1, a.d), (a.d, h - 1, -1, a.u)] where weight > 0 {
-            if weight == 1 {
-                vline(cx, edge, cy + sign * singleReach(opposite: opposite, a.l, a.r))
-            } else {
-                vline(cx - 1, edge, cy + sign * doubleReach(side: a.l, other: a.r))
-                vline(cx + 1, edge, cy + sign * doubleReach(side: a.r, other: a.l))
-            }
-        }
-        return p
-    }
-
-    private func upscale(_ pixels: [Bool]) -> [UInt8] {
-        let w = Self.w, h = Self.h, s = scale
-        var out = [UInt8](repeating: 0, count: w * s * h * s)
-        for y in 0..<(h * s) {
-            for x in 0..<(w * s) where pixels[(y / s) * w + x / s] {
-                out[y * w * s + x] = 255
-            }
-        }
-        return out
-    }
-
-    // MARK: Font glyphs
-
-    private func rasterize(_ code: UInt8) -> [UInt8] {
-        let width = Self.w * scale
-        let height = Self.h * scale
-        var buffer = [UInt8](repeating: 0, count: width * height)
-        let scalar = CP437.unicode[Int(code)]
-        let attributes: [NSAttributedString.Key: Any] = [
-            NSAttributedString.Key(kCTFontAttributeName as String): font,
-            NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 1, alpha: 1),
-        ]
-        let line = CTLineCreateWithAttributedString(
-            NSAttributedString(string: String(Character(scalar)), attributes: attributes))
-        let lineWidth = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
-        let ascent = CTFontGetAscent(font)
-        let descent = CTFontGetDescent(font)
-        buffer.withUnsafeMutableBytes { raw in
-            guard let ctx = CGContext(
-                data: raw.baseAddress, width: width, height: height,
-                bitsPerComponent: 8, bytesPerRow: width,
-                space: CGColorSpaceCreateDeviceGray(),
-                bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return }
-            ctx.setShouldSmoothFonts(false)
-            ctx.textPosition = CGPoint(
-                x: (CGFloat(width) - lineWidth) / 2,
-                y: (CGFloat(height) - (ascent + descent)) / 2 + descent)
-            CTLineDraw(line, ctx)
-        }
-        return buffer
-    }
-}
-
-/// Code page 437 to Unicode, including the graphic glyphs DOS shows for control codes.
-public enum CP437 {
-    public static let unicode: [Unicode.Scalar] = Array((
-        "\u{0020}☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼"
-        + " !\"#$%&'()*+,-./0123456789:;<=>?"
-        + "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_"
-        + "`abcdefghijklmnopqrstuvwxyz{|}~⌂"
-        + "ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒ"
-        + "áíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐"
-        + "└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀"
-        + "αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u{00A0}"
-    ).unicodeScalars)
 }

@@ -39,7 +39,7 @@ final class AnsiPlayerViewController: NSViewController {
     let source: AnsiSource
     /// The frame currently on screen.
     private(set) var screen: AnsiScreen
-    private let atlas: GlyphAtlas
+    private let renderOptions: RenderOptions
     private let canvas = AnsiCanvasView()
     private let hud = NSTextField(labelWithString: "")
     private var terminal: AnsiTerminal
@@ -55,7 +55,9 @@ final class AnsiPlayerViewController: NSViewController {
     init(source: AnsiSource) {
         self.source = source
         self.analysis = AnsiAnalysis(source)
-        self.atlas = GlyphAtlas(scale: AnsiRenderer.preferredScale(rows: analysis.canvasRows))
+        var options = RenderOptions(for: analysis.finalScreen)
+        options.scale = AnsiRenderer.preferredScale(rows: analysis.canvasRows)
+        self.renderOptions = options
         self.terminal = AnsiTerminal(source)
         self.screen = analysis.finalScreen
         super.init(nibName: nil, bundle: nil)
@@ -70,8 +72,10 @@ final class AnsiPlayerViewController: NSViewController {
 
     /// Size of the art in points, one point per VGA pixel.
     var contentSize: CGSize {
-        CGSize(width: source.columns * AnsiRenderer.cellWidth,
-               height: analysis.canvasRows * AnsiRenderer.cellHeight)
+        let cellWidth = renderOptions.font.width + (renderOptions.ninePixel ? 1 : 0)
+        let aspect = AnsiRenderer.pixelAspect(for: analysis.finalScreen, ninePixel: renderOptions.ninePixel)
+        return CGSize(width: CGFloat(source.columns * cellWidth),
+                      height: (CGFloat(analysis.canvasRows * renderOptions.font.height) * aspect).rounded())
     }
 
     var isPlaying: Bool { frameTimer != nil }
@@ -296,7 +300,9 @@ final class AnsiPlayerViewController: NSViewController {
         while padded.rows.count < analysis.canvasRows {
             padded.rows.append(Array(repeating: AnsiCell(), count: source.columns))
         }
-        canvas.image = AnsiRenderer.render(padded, blinkVisible: blinkVisible, atlas: atlas)?.image
+        var options = renderOptions
+        options.blinkVisible = blinkVisible
+        canvas.image = AnsiRenderer.render(padded, options: options)?.image
     }
 }
 

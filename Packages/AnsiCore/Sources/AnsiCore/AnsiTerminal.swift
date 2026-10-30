@@ -20,6 +20,8 @@ public struct AnsiScreen {
     public var columns: Int
     public var rows: [[AnsiCell]]
     public var title: String?
+    public var sauce: Sauce?
+    public var font: BitmapFont = .vga
 
     public var hasBlink: Bool { rows.contains { $0.contains { $0.blink } } }
 
@@ -188,7 +190,10 @@ public struct AnsiTerminal {
         while result.count < minimumRows {
             result.append(Array(repeating: empty, count: columns))
         }
-        return AnsiScreen(columns: columns, rows: result, title: source.title)
+        var screen = AnsiScreen(columns: columns, rows: result, title: source.title)
+        screen.sauce = source.sauce
+        screen.font = BitmapFont.named(source.sauce?.fontName)
+        return screen
     }
 
     // MARK: Interpretation
