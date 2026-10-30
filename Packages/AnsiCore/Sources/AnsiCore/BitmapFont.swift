@@ -103,10 +103,29 @@ public struct BitmapFont {
         return font
     }
 
+    /// The point size at which a pixel outline font's grid is one pixel per font pixel: a glyph
+    /// `advance` font units wide must come out `width` pixels. The EGA 8x14 font's grid is 16
+    /// points (1600 units per em, 200 per column), not its 14 pixel height. Nil for no advance.
+    static func rasterSize(advance: Int, unitsPerEm: Int, width: Int) -> CGFloat? {
+        guard advance > 0, unitsPerEm > 0 else { return nil }
+        return CGFloat(width * unitsPerEm) / CGFloat(advance)
+    }
+
     /// Draws each glyph of a pixel outline font at its native pixel size with antialiasing off,
     /// which reproduces the original bitmap exactly.
     private static func rasterize(_ cgFont: CGFont, name: String, width: Int, height: Int) -> BitmapFont {
-        let font = CTFontCreateWithGraphicsFont(cgFont, CGFloat(height), nil, nil)
+        // The full block's advance gives the size where one font pixel is one bitmap pixel.
+        var blockGlyph = cgFont.getGlyphWithGlyphName(name: "uni2588" as CFString)
+        var advance: Int32 = 0
+        if blockGlyph == 0 {
+            let probe = CTFontCreateWithGraphicsFont(cgFont, CGFloat(height), nil, nil)
+            var unit: [UniChar] = [0x2588]
+            CTFontGetGlyphsForCharacters(probe, &unit, &blockGlyph, 1)
+        }
+        let measured = cgFont.getGlyphAdvances(glyphs: &blockGlyph, count: 1, advances: &advance)
+        let size = (measured ? rasterSize(advance: Int(advance), unitsPerEm: Int(cgFont.unitsPerEm), width: width) : nil)
+            ?? CGFloat(height)
+        let font = CTFontCreateWithGraphicsFont(cgFont, size, nil, nil)
         let baseline = CTFontGetDescent(font).rounded()
         var glyphs: [[Bool]] = []
         var buffer = [UInt8](repeating: 0, count: width * height)
