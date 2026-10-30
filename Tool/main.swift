@@ -8,6 +8,8 @@ import UniformTypeIdentifiers
 // ansirender --still png|jpeg|webp <scale> <input> <output>
 // ansirender --animate gif|webp|mp4 <baud> <scale> <input> <output>
 // ansirender --stats <input>...
+// ansirender --convert ansi|ansi256|text|utf8 <input> [output]   (stdout when output is - or missing)
+// ansirender --roundtrip <input>...   (checks that ANSI conversion reads back as the same cells)
 let args = CommandLine.arguments
 func fail(_ message: String, _ code: Int32) -> Never {
     FileHandle.standardError.write((message + "\n").data(using: .utf8)!)
@@ -29,6 +31,51 @@ if args[1] == "--stats" {
                      analysis.isAnimated ? "Y" : "n", "\(source.format)", source.font.name))
     }
     exit(0)
+}
+
+func loadArt(_ path: String) -> ArtFile {
+    let url = URL(fileURLWithPath: path)
+    guard let data = try? Data(contentsOf: url) else { fail("could not read \(path)", 1) }
+    return ArtFile(data: data, fileExtension: url.pathExtension)
+}
+
+if args[1] == "--convert", args.count >= 4, let format = TextFormat(rawValue: args[2]) {
+    let screen = AnsiAnalysis(loadArt(args[3])).finalScreen
+    let data: Data
+    switch format {
+    case .ansi: data = Data(TextConvert.modernANSI(screen, colors: .trueColor).utf8)
+    case .ansi256: data = Data(TextConvert.modernANSI(screen, colors: .xterm256).utf8)
+    case .text: data = Data(TextConvert.cp437Text(screen))
+    case .utf8: data = Data(TextConvert.utf8Text(screen).utf8)
+    case .html: fail("html is not available yet", 2)
+    }
+    if args.count < 5 || args[4] == "-" {
+        FileHandle.standardOutput.write(data)
+    } else {
+        do { try data.write(to: URL(fileURLWithPath: args[4])) } catch { fail("could not write \(args[4])", 1) }
+        print("wrote \(args[4]): \(data.count) bytes")
+    }
+    exit(0)
+}
+
+if args[1] == "--roundtrip" {
+    var failures = 0
+    for path in args.dropFirst(2) {
+        let screen = AnsiAnalysis(loadArt(path)).finalScreen
+        for mode in [ANSIColorMode.trueColor, .xterm256] {
+            let text = TextConvert.modernANSI(screen, colors: mode)
+            let back = AnsiAnalysis(ArtFile(data: Data(text.utf8), fileExtension: "ans")).finalScreen
+            func cells(_ s: AnsiScreen) -> [[AnsiCell]] {
+                var rows = s.rows.map { $0.map { c -> AnsiCell in var c = c; if c.code == 0 { c.code = 0x20 }; return c } }
+                while let last = rows.last, last.allSatisfy({ $0 == AnsiCell() }) { rows.removeLast() }
+                return rows
+            }
+            let same = cells(back) == cells(screen)
+            if !same { failures += 1 }
+            print("\((path as NSString).lastPathComponent) \(mode == .trueColor ? "24bit" : "256") \(same ? "same" : "DIFFERENT") \(text.utf8.count) bytes")
+        }
+    }
+    exit(failures == 0 ? 0 : 1)
 }
 
 if args[1] == "--still", args.count >= 6, let scale = Int(args[3]) {
