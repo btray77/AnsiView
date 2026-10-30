@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<!-- AnsiView's AppleScript dictionary (plan 10 ruling 7). -->
+<dictionary title="AnsiView Terminology" xmlns:xi="http://www.w3.org/2003/XInclude">
+    <xi:include href="file:///System/Library/ScriptingDefinitions/CocoaStandard.sdef" xpointer="xpointer(/dictionary/suite)"/>
+    <suite name="AnsiView Suite" code="AnsV" description="Render and convert ANSI art without opening a window.">
+        <command name="render" code="AnsVrend" description="Draws an art file (ANSI, ASCII, BIN, XBin and more) to a PNG or JPEG of the finished art, or an animated GIF of it being drawn. Returns the path written.">
+            <cocoa class="AnsiRenderScriptCommand"/>
+            <direct-parameter type="file" description="The art file."/>
+            <parameter name="to" code="toFl" type="file" description="The image file to write.">
+                <cocoa key="Output"/>
+            </parameter>
+            <parameter name="in format" code="frmt" type="text" optional="yes" description="png, jpeg or gif (default: from the file name, else png).">
+                <cocoa key="Format"/>
+            </parameter>
+            <parameter name="scale" code="scal" type="integer" optional="yes" description="Pixels per font pixel, 1 to 4 (default 2).">
+                <cocoa key="Scale"/>
+            </parameter>
+            <result type="text" description="The path of the file written."/>
+        </command>
+        <command name="convert" code="AnsVconv" description="Turns an art file into text. Without a file to write, returns the text.">
+            <cocoa class="AnsiConvertScriptCommand"/>
+            <direct-parameter type="file" description="The art file."/>
+            <parameter name="to" code="toFl" type="file" optional="yes" description="A file to write instead of returning the text.">
+                <cocoa key="Output"/>
+            </parameter>
+            <parameter name="in format" code="frmt" type="text" optional="yes" description="utf8 (default), text (CP437), ansi, ansi256 or html.">
+                <cocoa key="Format"/>
+            </parameter>
+            <result type="text" description="The text, or the path of the file written."/>
+        </command>
+    </suite>
+</dictionary>

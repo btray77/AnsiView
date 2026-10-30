@@ -87,6 +87,9 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.graphics-design
+        # AppleScript: render and convert (App/AnsiView.sdef, App/ScriptCommands.swift).
+        NSAppleScriptEnabled: true
+        OSAScriptingDefinition: AnsiView.sdef
         UTImportedTypeDeclarations:
           - UTTypeIdentifier: com.traynham.ansiview.ans
             UTTypeDescription: ANSI Art
