@@ -27,14 +27,20 @@ public enum ImageToAnsi {
 
     public enum PaletteChoice: String, CaseIterable, Codable {
         case vga16 = "vga"
+        /// 16 colours fitted to the picture (ruling 7), saved as XBin, which carries a palette.
+        case imagePalette = "xbin"
         case trueColor = "truecolor"
 
         public var label: String {
             switch self {
             case .vga16: return "16 VGA colours (.ans)"
+            case .imagePalette: return "16 colours fitted to the image (.xb)"
             case .trueColor: return "24 bit truecolor (.ans)"
             }
         }
+
+        /// The format a conversion with this palette saves in.
+        public var saveFormat: SaveFormat { self == .imagePalette ? .xbin : .ansi }
     }
 
     public enum Dither: String, CaseIterable, Codable {
@@ -135,13 +141,13 @@ public enum ImageToAnsi {
         canvas.setIceColors(options.iceColors)
         let strength = min(1, max(0, options.ditherStrength))
         let kernel = strength > 0 ? DitherKernel.kernel(for: options.dither) : nil
-        let palette = Palette.vga
+        var palette = Palette.vga
         let backgrounds = options.iceColors ? 0...15 : 0...7
 
         // Glyph search samples each cell at block resolution; huge canvases use bigger blocks.
         let cells = g.columns * g.cellRows
         let block = cells > 500_000 ? 8 : cells > 125_000 ? 4 : 2
-        let search: GlyphSearch? = options.mode == .glyphs
+        var search: GlyphSearch? = options.mode == .glyphs
             ? GlyphSearch(font: canvas.font,
                           glyphs: options.palette == .trueColor ? GlyphSearch.trueColorGlyphs
                               : GlyphSearch.basicGlyphs + (options.extendedGlyphs ? GlyphSearch.extendedGlyphs : []),
@@ -157,6 +163,13 @@ public enum ImageToAnsi {
                                     nearest: options.nearestNeighbour)
         grid.apply(options.adjustments)
         if cancel() { return nil }
+        if options.palette == .imagePalette {
+            palette = PaletteOptimizer.palette(linear: grid.linear, count: 16)
+            canvas.palette = palette
+            search = search.map { GlyphSearch(font: canvas.font, glyphs: $0.glyphCodes, palette: palette,
+                                              allowedBackgrounds: backgrounds, block: block) }
+            if cancel() { return nil }
+        }
 
         if options.palette == .trueColor {
             return trueColor(grid: grid, canvas: canvas, geometry: g, mode: options.mode, search: search, cancel: cancel)

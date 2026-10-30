@@ -78,6 +78,9 @@ public struct EditCanvas: Equatable {
     public var fontName = "IBM VGA"
     /// SAUCE flags other than iCE (letter spacing, aspect ratio) kept from an opened file.
     public var sauceFlags: UInt8 = 0
+    /// A 16 colour palette other than VGA (an image import's fitted palette). XBin saves it;
+    /// ANSI writes those colours as truecolor.
+    public var palette: [RGB]?
 
     public var height: Int { rows.count }
     public var font: BitmapFont { BitmapFont.named(fontName) }
