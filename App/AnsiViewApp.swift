@@ -193,6 +193,11 @@ struct AnsiViewApp: App {
                 Toggle("Hold Final Frame", isOn: $holdFinalFrame)
                 Toggle("Modem Sounds", isOn: $modemSounds)
             }
+            CommandGroup(before: .windowList) {
+                Button("ANSI Music Editor") { MusicEditorWindowController.show() }
+                    .keyboardShortcut("m", modifiers: [.command, .shift])
+                Divider()
+            }
             CommandMenu("Terminal") {
                 Button("Disconnect") { TerminalWindowController.focused?.disconnect() }
                 Button("Reconnect") { TerminalWindowController.focused?.reconnect() }
