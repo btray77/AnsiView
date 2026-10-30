@@ -1036,6 +1036,10 @@ struct SSHConnectionStateMachine {
 
         case .active(var state):
             switch message {
+            case .userAuthInfoResponse:
+                // AnsiView patch: keyboard-interactive answers that arrive after the login
+                // succeeded are dropped (review finding I1).
+                break
             case .channelOpen(let message):
                 try state.writeChannelOpen(message, into: &buffer)
             case .channelOpenConfirmation(let message):

@@ -219,20 +219,27 @@ final class SSHTransport: BBSTransport {
             switch SSHCompatibility.plan(prompts: prompts, savedPassword: self.login.password,
                                          passwordAlreadySent: self.sentPasswordToPrompt) {
             case .answer(let answers):
-                if !answers.isEmpty { self.sentPasswordToPrompt = true }
-                Self.log.notice("keyboard-interactive: answered \(answers.count) prompt(s) from the Keychain")
+                if !answers.isEmpty {
+                    self.sentPasswordToPrompt = true
+                    Self.log.notice("keyboard-interactive: answered the password prompt from the Keychain")
+                }
                 promise.succeed(answers)
             case .ask:
                 guard let askPrompts = self.askPrompts else {
                     promise.fail(LoginCancelled())
                     return
                 }
+                // One question at a time (the library refuses a second while one is open); an
+                // older one still waiting is given up rather than answered with these answers.
+                self.pendingPrompt?.fail(LoginCancelled())
                 self.pendingPrompt = promise
                 self.events?(.waitingForUser(true))
                 let question = SSHPromptSheet.Question(host: self.host, name: request.name,
                                                        instruction: request.instruction, prompts: prompts)
                 askPrompts(question) { answers in
-                    guard let pending = self.pendingPrompt, !self.done else { return }
+                    // Only this sheet's own promise is answered, and only while it is still current.
+                    guard let pending = self.pendingPrompt, pending.futureResult === promise.futureResult, !self.done
+                    else { return }
                     self.pendingPrompt = nil
                     self.events?(.waitingForUser(false))
                     if let answers, answers.count == prompts.count {
@@ -245,8 +252,13 @@ final class SSHTransport: BBSTransport {
         }
     }
 
-    /// Whether the Keychain password already went to a keyboard-interactive prompt.
+    /// Whether the Keychain password already went to this server (by the password method or a
+    /// keyboard-interactive prompt): it is not sent a second time (review minor M1).
     private var sentPasswordToPrompt = false
+
+    fileprivate func passwordSent() {
+        queue.async { self.sentPasswordToPrompt = true }
+    }
     /// A prompt sheet waiting for the user; failed on close.
     private var pendingPrompt: EventLoopPromise<[String]>?
 
@@ -473,6 +485,7 @@ private final class AuthDelegate: NIOSSHClientUserAuthenticationDelegate, NIOSSH
         }
         if !triedPassword, availableMethods.contains(.password) {
             triedPassword = true
+            if login.password != nil { transport?.passwordSent() }
             nextChallengePromise.succeed(.init(username: login.username, serviceName: "",
                                                offer: .password(.init(password: login.password ?? ""))))
             return

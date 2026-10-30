@@ -27,6 +27,15 @@ struct UserAuthenticationStateMachine {
     /// AnsiView patch: client side, whether the request in flight is keyboard-interactive.
     private var keyboardInteractiveInFlight = false
 
+    /// AnsiView patch: client side, whether the request in flight is a password request (only
+    /// then may the server ask for a password change).
+    private var passwordInFlight = false
+
+    /// AnsiView patch: client side, the number of the last question round, and the round whose
+    /// answers are awaited (nil when none is open). Late answers to an older round are dropped.
+    private var infoRound = 0
+    private var openInfoRound: Int?
+
     /// AnsiView patch: server side, the user and service of a keyboard-interactive challenge
     /// that waits for its SSH_MSG_USERAUTH_INFO_RESPONSE.
     private var keyboardInteractiveChallenge: (username: String, service: String)?
@@ -220,6 +229,7 @@ extension UserAuthenticationStateMachine {
         case (.client, .awaitingResponses):
             // Great, we got a response, and it's a success! Disregard all future responses
             self.state = .authenticationSucceeded
+            self.endClientRequest()
         case (.client, .authenticationSucceeded):
             // We should ignore all further auth messages in this state.
             break
@@ -251,6 +261,7 @@ extension UserAuthenticationStateMachine {
         case (.client(let delegate), .awaitingResponses(let attempts, let responseCount)):
             // Ok, the server didn't like that much. Let's try another one.
             self.state = .awaitingNextRequest(attempts: attempts)
+            self.endClientRequest()
             precondition(responseCount == 1, "We don't support parallel authentication attempts yet!")
             return self.requestNextAuthRequest(methods: .init(message), delegate: delegate)
         case (.client, .authenticationSucceeded):
@@ -282,13 +293,16 @@ extension UserAuthenticationStateMachine {
         _ message: SSHMessage.UserAuthInfoRequestMessage
     ) throws -> EventLoopFuture<SSHMessage.UserAuthInfoResponseMessage> {
         guard case .client(let delegate) = self.delegate, case .awaitingResponses = self.state,
-            self.keyboardInteractiveInFlight
+            self.keyboardInteractiveInFlight, self.openInfoRound == nil
         else {
             throw NIOSSHError.protocolViolation(
                 protocolName: Self.protocolName,
                 violation: "unexpected keyboard-interactive request"
             )
         }
+        self.infoRound += 1
+        let round = self.infoRound
+        self.openInfoRound = round
         let request = NIOSSHKeyboardInteractiveRequest(message)
         let promise = self.loop.makePromise(of: [String].self)
         if let responder = delegate as? NIOSSHClientKeyboardInteractiveDelegate {
@@ -304,13 +318,26 @@ extension UserAuthenticationStateMachine {
                     violation: "keyboard-interactive answers do not match the prompts"
                 )
             }
-            return SSHMessage.UserAuthInfoResponseMessage(responses: responses)
+            return SSHMessage.UserAuthInfoResponseMessage(responses: responses, round: round)
         }
+    }
+
+    /// The request in flight was answered (success or failure): no question stays open.
+    private mutating func endClientRequest() {
+        self.keyboardInteractiveInFlight = false
+        self.passwordInFlight = false
+        self.openInfoRound = nil
     }
 
     /// AnsiView patch: client side, RFC 4252 section 8. The password must be changed first;
     /// this client does not do that in the password method, so the login ends with the prompt.
     func receiveUserAuthPasswordChangeRequest(_ message: SSHMessage.UserAuthPasswordChangeRequestMessage) throws {
+        guard case .client = self.delegate, case .awaitingResponses = self.state, self.passwordInFlight else {
+            throw NIOSSHError.protocolViolation(
+                protocolName: Self.protocolName,
+                violation: "unexpected password change request"
+            )
+        }
         throw NIOSSHError.passwordChangeRequested(prompt: message.prompt)
     }
 
@@ -419,10 +446,11 @@ extension UserAuthenticationStateMachine {
         switch (self.delegate, self.state) {
         case (.client, .awaitingNextRequest(let attempts)):
             self.state = .awaitingResponses(attempts: attempts, pending: 1)
-            if case .keyboardInteractive = message.method {
-                self.keyboardInteractiveInFlight = true
-            } else {
-                self.keyboardInteractiveInFlight = false
+            self.endClientRequest()
+            switch message.method {
+            case .keyboardInteractive: self.keyboardInteractiveInFlight = true
+            case .password: self.passwordInFlight = true
+            default: break
             }
         case (.client, .idle),
             (.client, .awaitingServiceAcceptance):
@@ -465,10 +493,16 @@ extension UserAuthenticationStateMachine {
     }
 
     /// AnsiView patch: client side; the request stays in flight until success or failure.
-    mutating func sendUserAuthInfoResponse(_: SSHMessage.UserAuthInfoResponseMessage) {
-        guard case .client = self.delegate, case .awaitingResponses = self.state, self.keyboardInteractiveInFlight else {
-            preconditionFailure("Keyboard-interactive answers sent without a request")
+    /// Returns false when the answers are late (their round is no longer open: the server moved
+    /// on, or a newer round started); they must then be dropped, not sent (review finding I1).
+    mutating func sendUserAuthInfoResponse(_ message: SSHMessage.UserAuthInfoResponseMessage) -> Bool {
+        guard case .client = self.delegate, case .awaitingResponses = self.state, self.keyboardInteractiveInFlight,
+            self.openInfoRound == message.round
+        else {
+            return false
         }
+        self.openInfoRound = nil
+        return true
     }
 
     /// AnsiView patch: server side; like PK_OK it answers one request, and the client's

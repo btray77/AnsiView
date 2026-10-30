@@ -72,7 +72,8 @@ extension SendsUserAuthMessages {
         _ message: SSHMessage.UserAuthInfoResponseMessage,
         into buffer: inout ByteBuffer
     ) throws {
-        self.userAuthStateMachine.sendUserAuthInfoResponse(message)
+        // Late answers (the server moved on) are dropped instead of sent.
+        guard self.userAuthStateMachine.sendUserAuthInfoResponse(message) else { return }
         try self.serializer.serialize(message: .userAuthInfoResponse(message), to: &buffer)
     }
 

@@ -240,6 +240,9 @@ extension SSHMessage {
         static let id: UInt8 = 61
 
         var responses: [String]
+
+        /// Which question round these answers belong to (not sent; a late answer is dropped).
+        var round: Int = 0
     }
 
     // AnsiView patch: RFC 4252 section 8 SSH_MSG_USERAUTH_PASSWD_CHANGEREQ.
