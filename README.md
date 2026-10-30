@@ -433,6 +433,30 @@ cat photo.png | ansirender --from-image - > photo.ans          # - reads standar
 # --gamma 0.2-5  --sharpen 0-200  --remove-background [0-50]  --crop x,y,w,h
 ```
 
+### Text art fonts (TheDraw and FIGlet)
+
+Tools > Text to ASCII... (also in the Window menu) shows what you type in every installed font at
+once: TheDraw fonts (.tdf: outline, block and colour) and FIGlet fonts (.flf). Cards draw in the
+background, visible ones first, so typing never waits (246 fonts: about 6 ms to the first card and
+under 0.1 s for all, measured offscreen). Search, pick a kind, sort by name, height or width, star
+favourites (they come first, then recently used). Select a card for the detail pane: FIGlet
+horizontal and vertical layout (font default, full width, fitted, smushed, universal smush), wrap
+at a width, alignment, colours or a gradient for fonts without their own colours, TheDraw outline
+style (all 19) and letter spacing. Copy as text (Unicode or ASCII only), ANSI, a picture, a code
+comment (`//`, `#`, `--`, `/* */`, `;` or a box) or Markdown; save as .txt, .ans or .png; drag a card
+out as text. Arrows move between cards, Return copies, Command-F searches.
+
+In the editor, Tools > Text Art... opens the same window with Insert into Editor: the art floats at
+the cursor like a paste (move it, click or Return to place it, one undo step; Escape cancels;
+Transparent leaves the art underneath the spaces). Colour fonts keep their own colours; on an iCE
+canvas their blink bit becomes a bright background.
+
+Tools > Font Manager... lists the installed fonts (a .tdf with several fonts lists each one) with a
+preview of your sample text, and imports files, folders and .zip packs into AnsiView's own font
+folder, removes and reveals them. AnsiView comes with four original fonts (AV Outline, AV Block,
+AV Ember, AV Contour) and the 18 fonts of the FIGlet 2.2.5 distribution (New BSD); import your own
+collections for the rest. Formats, rulings and sources: [docs/FONTS.md](docs/FONTS.md).
+
 ### ANSI music
 
 BBS terminals such as Qmodem, Telix and TeleMate played music sent as an escape sequence: `ESC [ M`,
@@ -494,6 +518,12 @@ ansirender --convert text art.ans art.txt  # CP437 text, no escapes (utf8 for UT
 ansirender --convert html art.ans art.html # --inline for style attributes, --no-font for no embedded font
 # Images to block character ANSI (see Importing images)
 ansirender --from-image photo.png --width 80 -o photo.ans
+# Text art fonts (ANSI to stdout without -o; .png and .txt by extension)
+ansirender --font pack.tdf --font-index 2 --outline-style 5 --fg 11 --text "HELLO" -o hello.ans
+ansirender --font standard.flf --layout fit --width 60 --align center --text "Hi there" -o hi.txt
+ansirender --list-fonts pack.tdf *.flf
+ansirender --figlet-gallery "HELLO"        # every bundled font (--font-dir <folder> adds yours)
+ansirender --export-original-fonts out/    # AnsiView's original fonts as .tdf and .flf
 ```
 
 ANSI conversions carry no width record, so art wider than 80 columns reopens in AnsiView at 80.
@@ -588,6 +618,9 @@ Formats: `png jpeg webp gif awebp mp4 html ansi ansi256 text utf8`. Options: `--
   via [libwebp-Xcode](https://github.com/SDWebImage/libwebp-Xcode).
 - Updates use [Sparkle](https://sparkle-project.org) (MIT license), in the downloaded build only.
 - The bundled samples are original, made by `Packaging/samples/generate.swift`.
+- FIGlet fonts: the 18 fonts of the [FIGlet 2.2.5](https://github.com/cmatsuoka/figlet) distribution,
+  New BSD license (Glenn Chappell, Ian Chai, John Cowan, Christiaan Keet, Claudio Matsuoka); the
+  license ships beside them. AnsiView's own text art fonts are original (`OriginalFonts.swift`).
 
 See [Credits.md](Credits.md).
 
