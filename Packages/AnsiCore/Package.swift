@@ -9,7 +9,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "AnsiCore", resources: [.copy("Resources/Fonts")]),
-        .testTarget(name: "AnsiCoreTests", dependencies: ["AnsiCore"]),
+        .testTarget(name: "AnsiCoreTests", dependencies: ["AnsiCore"], resources: [.copy("Fixtures")]),
     ],
     swiftLanguageVersions: [.v5]
 )

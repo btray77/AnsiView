@@ -1,0 +1,135 @@
+{
+ "page": {
+  "options": {
+   "filter": null,
+   "archive": true,
+   "sauce": false,
+   "dimensions": true,
+   "artists": true,
+   "content": true,
+   "groups": false,
+   "filesize": false
+  }
+ },
+ "results": [
+  {
+   "year": 1996,
+   "files": {
+    "!WOHH1WH.OWH": {
+     "file": {
+      "raw": "!WOHH1WH.OWH",
+      "tn": {
+       "file": "!WOHH1WH.OWH.png",
+       "uri": "/pack/0196ciph/tn/!WOHH1WH.OWH.png",
+       "width": 160,
+       "height": 4
+      },
+      "x1": {
+       "file": "!WOHH1WH.OWH.png",
+       "uri": "/pack/0196ciph/x1/!WOHH1WH.OWH.png",
+       "width": 720,
+       "height": 21
+      },
+      "x2": {
+       "file": "!WOHH1WH.OWH.png",
+       "uri": "/pack/0196ciph/x1/!WOHH1WH.OWH.png",
+       "width": 1440,
+       "height": 42
+      }
+     }
+    },
+    "0196-MEM.CIP": {
+     "file": {
+      "raw": "0196-MEM.CIP",
+      "tn": {
+       "file": "0196-MEM.CIP.png",
+       "uri": "/pack/0196ciph/tn/0196-MEM.CIP.png",
+       "width": 160,
+       "height": 400
+      },
+      "x1": {
+       "file": "0196-MEM.CIP.png",
+       "uri": "/pack/0196ciph/x1/0196-MEM.CIP.png",
+       "width": 720,
+       "height": 2160
+      },
+      "x2": {
+       "file": "0196-MEM.CIP.png",
+       "uri": "/pack/0196ciph/x1/0196-MEM.CIP.png",
+       "width": 1440,
+       "height": 4320
+      }
+     },
+     "artists": [
+      "adrenalin"
+     ],
+     "content": [
+      "memberlist"
+     ]
+    },
+    "AD_CIPH1.ANS": {
+     "file": {
+      "raw": "AD_CIPH1.ANS",
+      "tn": {
+       "file": "AD_CIPH1.ANS.png",
+       "uri": "/pack/0196ciph/tn/AD_CIPH1.ANS.png",
+       "width": 160,
+       "height": 80
+      },
+      "x1": {
+       "file": "AD_CIPH1.ANS.png",
+       "uri": "/pack/0196ciph/x1/AD_CIPH1.ANS.png",
+       "width": 720,
+       "height": 432
+      },
+      "x2": {
+       "file": "AD_CIPH1.ANS.png",
+       "uri": "/pack/0196ciph/x1/AD_CIPH1.ANS.png",
+       "width": 1440,
+       "height": 864
+      }
+     },
+     "artists": [
+      "adrenalin"
+     ]
+    },
+    "FILE_ID.DIZ": {
+     "file": {
+      "raw": "FILE_ID.DIZ",
+      "tn": {
+       "file": "FILE_ID.DIZ.png",
+       "uri": "/pack/0196ciph/tn/FILE_ID.DIZ.png",
+       "width": 297,
+       "height": 216
+      },
+      "x1": {
+       "file": "FILE_ID.DIZ.png",
+       "uri": "/pack/0196ciph/x1/FILE_ID.DIZ.png",
+       "width": 297,
+       "height": 216
+      },
+      "x2": {
+       "file": "FILE_ID.DIZ.png",
+       "uri": "/pack/0196ciph/x1/FILE_ID.DIZ.png",
+       "width": 594,
+       "height": 432
+      }
+     },
+     "artists": [
+      "fade away"
+     ],
+     "content": [
+      "file id"
+     ]
+    }
+   },
+   "fileid": "FILE_ID.DIZ",
+   "fileids": [
+    "FILE_ID.DIZ"
+   ],
+   "archive": "0196ciph.zip",
+   "download": "https://16colo.rs/archive/1996/0196ciph.zip",
+   "gallery": "https://16colo.rs/pack/0196ciph"
+  }
+ ]
+}
