@@ -56,7 +56,7 @@ public struct TerminalEmulator {
     private var row = 0
     private var column = 0
     private var pendingWrap = false
-    private var autowrap = true
+    public private(set) var autowrap = true
     private var attributes = TextAttributes()
     /// iCE colours: the blink attribute gives a bright background instead of blinking text.
     public var iceColors = false
@@ -774,7 +774,12 @@ public struct TerminalEmulator {
             grid[row].removeLast()
             grid[row].insert(blankCell, at: column)
         }
-        let colors = attributes.colors(iceColors: iceColors)
+        var colors = attributes.colors(iceColors: iceColors)
+        if profile == .amiga {
+            // The Amiga's colour 3 is a true dark yellow: no VGA brown.
+            if colors.fg == Palette.vga[6] { colors.fg = RGB(r: 0xAA, g: 0xAA, b: 0x00) }
+            if colors.bg == Palette.vga[6] { colors.bg = RGB(r: 0xAA, g: 0xAA, b: 0x00) }
+        }
         grid[row][column] = AnsiCell(code: code, fg: colors.fg, bg: colors.bg, blink: attributes.blink && !iceColors,
                                      scalar: scalar)
         if let glyph { grid[row][column].glyph = glyph }

@@ -17,10 +17,10 @@ import Testing
 }
 
 @Test func platformFontsHaveTheirGlyphSets() {
-    #expect(PlatformFonts.petscii.glyphCount == 256)
+    #expect(PlatformFonts.petscii.glyphCount == 512)   // two sets, then the same underlined (C128)
     #expect(PlatformFonts.petscii.width == 8 && PlatformFonts.petscii.height == 8)
     #expect(PlatformFonts.atascii.glyphCount == 128)
-    #expect(PlatformFonts.appleII.glyphCount == 128)
+    #expect(PlatformFonts.appleII.glyphCount == 160)   // 128 characters and 32 MouseText pictures
     #expect(PlatformFonts.topaz.glyphCount == 256)
     #expect(PlatformFonts.teletext.width == 12 && PlatformFonts.teletext.height == 20)
     #expect(PlatformFonts.teletext.glyphCount == TeletextGlyphs.count)

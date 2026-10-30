@@ -10,6 +10,8 @@ struct RetroGrid {
         var bg: RGB
         var blink = false
         var concealed = false
+        /// C128 80 column underline: the engine draws an underlined glyph.
+        var underline = false
     }
 
     private(set) var columns: Int

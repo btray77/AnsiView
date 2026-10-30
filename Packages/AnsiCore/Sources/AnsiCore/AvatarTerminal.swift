@@ -45,6 +45,7 @@ public struct AvatarTerminal: TerminalEngine {
                 flush()
                 ansi.setInsertMode(false)
                 ansi.feed([0x1B, 0x5B, 0x32, 0x4A] + BBSCodes.sgr(attribute: 0x03))
+                attribute = 0x03
                 i += 1
             } else if b == 0x19 {
                 guard i + 2 < data.count else { pending = Array(data[i...]); break }
@@ -140,6 +141,7 @@ public struct AvatarTerminal: TerminalEngine {
         }
         out += Array("\u{1B}[\(start.row + 1);\(start.column + 1)H".utf8)
         // A fill that ends in the last column must not wrap and scroll.
-        ansi.feed(Array("\u{1B}[?7l".utf8) + out + Array("\u{1B}[?7h".utf8))
+        let wrapped = ansi.autowrap
+        ansi.feed(Array("\u{1B}[?7l".utf8) + out + (wrapped ? Array("\u{1B}[?7h".utf8) : []))
     }
 }

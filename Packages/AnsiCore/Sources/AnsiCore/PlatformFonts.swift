@@ -5,13 +5,13 @@
 /// SAA5050 repertoire with mosaics and double height, Apple II text and ISO 8859-1 for the Amiga.
 public enum PlatformFonts {
     /// C64 screen codes 0-127 in the upper case and graphics set, then 128-255 in the lower and upper case set.
-    public static let petscii = BitmapFont(name: "AnsiView PETSCII", width: 8, height: 8, glyphs: PETSCIIGlyphs.make())
+    public static let petscii = BitmapFont(name: "AnsiView PETSCII", width: 8, height: 8, glyphs: PETSCIIGlyphs.make() + PETSCIIGlyphs.make().map(underlined))
     /// ATASCII 0-127 (inverse video is drawn by swapping colours).
     public static let atascii = BitmapFont(name: "AnsiView ATASCII", width: 8, height: 8, glyphs: ATASCIIGlyphs.make())
     /// Teletext alphanumerics, contiguous and separated mosaics, and their double height halves (`TeletextGlyphs`).
     public static let teletext = BitmapFont(name: "AnsiView Teletext", width: 12, height: 20, glyphs: TeletextGlyphs.make())
     /// Apple II text: ASCII 0-127, single stroke.
-    public static let appleII = BitmapFont(name: "AnsiView Apple II", width: 8, height: 8, glyphs: appleIIGlyphs())
+    public static let appleII = BitmapFont(name: "AnsiView Apple II", width: 8, height: 8, glyphs: appleIIGlyphs() + MouseText.glyphs())
     /// An Amiga Topaz style font: ISO 8859-1, thick strokes.
     public static let topaz = BitmapFont(name: "AnsiView Topaz", width: 8, height: 8, glyphs: topazGlyphs())
 
@@ -84,6 +84,13 @@ public enum PlatformFonts {
     static func rotated180(_ g: Glyph) -> Glyph { (0..<64).map { g[63 - $0] } }
 
     // MARK: Apple II and Topaz
+
+    /// A glyph with its bottom row lit (the C128 VDC's underline attribute).
+    static func underlined(_ glyph: Glyph) -> Glyph {
+        var g = glyph
+        for i in (g.count - 8)..<g.count { g[i] = true }
+        return g
+    }
 
     static func appleIIGlyphs() -> [Glyph] {
         (0..<128).map { code in

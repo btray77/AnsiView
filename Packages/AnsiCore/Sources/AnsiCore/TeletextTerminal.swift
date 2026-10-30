@@ -1,3 +1,5 @@
+import CoreGraphics
+
 /// A teletext screen: Viewdata/Prestel (Telstar, NXtel and other videotex services, 40x24) or the
 /// BBC Micro's Mode 7 (40x25). Screen memory holds characters and serial attribute codes; each row
 /// is decoded left to right the way the SAA5050 did: set-at and set-after attributes, mosaics,
@@ -22,6 +24,12 @@ public struct TeletextTerminal: TerminalEngine {
     private var vduPending = 0
     private var vduCommand: UInt8 = 0
     private var vduBytes: [UInt8] = []
+    /// The BBC screen mode (VDU 22): 7 is teletext; 0-6 are the bitmap modes, shown as plain text
+    /// in the mode's colours with a graphics layer (`BBCGraphics`) under it.
+    public private(set) var bbcMode = 7
+    /// Per cell colours in modes 0-6: physical colour of the text (low nibble) and background (high).
+    private var colourMemory: [[UInt8]] = []
+    private var bbc = BBCGraphics(mode: 7)
     /// Shows concealed text (the Reveal key).
     public var reveal = false
     public private(set) var cursorVisible = true
@@ -37,8 +45,11 @@ public struct TeletextTerminal: TerminalEngine {
 
     public var font: BitmapFont? { PlatformFonts.teletext }
     /// 40 cells of 12x20 pixels fill a 4:3 picture: each pixel is shown a third wider than tall.
-    public var horizontalStretch: Double { 4.0 / 3.0 }
+    public var horizontalStretch: Double { 4.0 / 3.0 * 40 / Double(max(1, columns)) }
     public var cursor: (row: Int, column: Int) { (row, column) }
+    public func overlay() -> CGImage? { bbcMode == 7 ? nil : bbc.image() }
+    /// A pixel of the BBC graphics layer (physical colour 0-7), for tests.
+    func graphicsPixel(_ x: Int, _ y: Int) -> UInt8 { bbc.pixel(x, y) }
     public var scrollbackCount: Int { scrollback.count }
     public mutating func takeReplies() -> [UInt8] { [] }
     public mutating func clearScrollback() { scrollback.removeAll(); changeCount &+= 1 }
@@ -96,6 +107,8 @@ public struct TeletextTerminal: TerminalEngine {
             if vduPending == 0, vduCommand == 31, vduBytes.count == 2 {
                 column = min(columns - 1, Int(vduBytes[0]))
                 row = min(rows - 1, Int(vduBytes[1]))
+            } else if vduPending == 0 {
+                vdu(vduCommand, vduBytes)
             }
             return
         }
@@ -113,12 +126,15 @@ public struct TeletextTerminal: TerminalEngine {
             if column > 0 { column -= 1 } else if row > 0 { row -= 1; column = columns - 1 }
         case 0x09: advance(scrolls: true)
         case 0x0A: lineFeed()
-        case 0x0B: if row > 0 { row -= 1 } else { memory.insert(Array(repeating: 0x20, count: columns), at: 0); memory.removeLast() }
+        case 0x0B: if row > 0 { row -= 1 } else { memory.insert(Array(repeating: 0x20, count: columns), at: 0); memory.removeLast(); if !colourMemory.isEmpty { colourMemory.insert(Array(repeating: bbc.cellColour, count: columns), at: 0); colourMemory.removeLast() } }
         case 0x0C: clear()
         case 0x0D: column = 0
+        case 0x10: bbc.clear()
         case 0x1E: row = 0; column = 0
         case 0x7F:
             if column > 0 { column -= 1; memory[row][column] = 0x20 }
+        case 0x20...0x7E where bbcMode != 7: put(b, scrolls: true)
+        case 0x80...0xFF where bbcMode != 7: put(b & 0x7F < 0x20 ? 0x20 : b & 0x7F, scrolls: true)
         case 0x80...0x9F: put(b - 0x80, scrolls: true)
         // The BBC's OS swaps these so that # shows as #, _ as a long dash and ` as a pound sign.
         case 0x23: put(0x5F, scrolls: true)
@@ -130,8 +146,36 @@ public struct TeletextTerminal: TerminalEngine {
         }
     }
 
+    /// VDU codes with parameters that change the screen (modes 0-6 and graphics).
+    private mutating func vdu(_ command: UInt8, _ p: [UInt8]) {
+        switch command {
+        case 22: setMode(Int(p[0] & 7))
+        case 17:
+            let colour = bbc.physical(Int(p[0] & 0x7F))
+            if p[0] & 0x80 == 0 { bbc.textForeground = colour } else { bbc.textBackground = colour }
+        case 18: bbc.graphicsColour = (mode: Int(p[0]), colour: Int(p[1] & 0x7F))
+        case 19: bbc.setPalette(logical: Int(p[0]), physical: Int(p[1]))
+        case 25:
+            let x = Int(Int16(bitPattern: UInt16(p[2]) << 8 | UInt16(p[1]))), y = Int(Int16(bitPattern: UInt16(p[4]) << 8 | UInt16(p[3])))
+            bbc.plot(Int(p[0]), x: x, y: y)
+        default: break
+        }
+    }
+
+    private mutating func setMode(_ mode: Int) {
+        let sizes = [(80, 32), (40, 32), (20, 32), (80, 25), (40, 32), (20, 32), (40, 25), (40, 25)]
+        bbcMode = mode
+        bbc = BBCGraphics(mode: mode)
+        let (c, r) = sizes[mode]
+        columns = c
+        rows = r
+        scrollback.removeAll()
+        clear()
+    }
+
     private mutating func clear() {
         memory = Array(repeating: Array(repeating: 0x20, count: columns), count: rows)
+        colourMemory = Array(repeating: Array(repeating: bbc.cellColour, count: columns), count: rows)
         row = 0
         column = 0
     }
@@ -141,6 +185,10 @@ public struct TeletextTerminal: TerminalEngine {
             scrollback.append(memory.removeFirst())
             if scrollback.count > TerminalEmulator.maxScrollback { scrollback.removeFirst() }
             memory.append(Array(repeating: 0x20, count: columns))
+            if !colourMemory.isEmpty {
+                colourMemory.removeFirst()
+                colourMemory.append(Array(repeating: bbc.cellColour, count: columns))
+            }
         } else {
             row += 1
         }
@@ -154,10 +202,31 @@ public struct TeletextTerminal: TerminalEngine {
 
     private mutating func put(_ code: UInt8, scrolls: Bool = false) {
         memory[row][column] = code
+        if bbcMode != 7, row < colourMemory.count, column < colourMemory[row].count { colourMemory[row][column] = bbc.cellColour }
         advance(scrolls: scrolls)
     }
 
     // MARK: Display
+
+    /// Modes 0-6: plain characters in their cell colours (the scrollback in white on black).
+    private func plainScreen(scrollOffset: Int) -> AnsiScreen {
+        let offset = min(max(0, scrollOffset), scrollback.count)
+        let start = scrollback.count - offset
+        var out: [[AnsiCell]] = []
+        for index in start..<(start + rows) {
+            let onScreen = index >= scrollback.count
+            let line = onScreen ? memory[index - scrollback.count] : scrollback[index]
+            let colours = onScreen ? colourMemory[index - scrollback.count] : []
+            out.append((0..<columns).map { c in
+                let code = c < line.count ? line[c] : 0x20
+                let colour = c < colours.count ? colours[c] : 0x07
+                var cell = AnsiCell(code: code, fg: BBCGraphics.colours[Int(colour & 7)], bg: BBCGraphics.colours[Int(colour >> 4 & 7)])
+                cell.glyph = UInt16(TeletextGlyphs.alpha(code))
+                return cell
+            })
+        }
+        return AnsiScreen(columns: columns, rows: out)
+    }
 
     /// One decoded cell: its glyph, colours, flags.
     private struct Shown {
@@ -237,6 +306,7 @@ public struct TeletextTerminal: TerminalEngine {
     }
 
     public func screen(scrollOffset: Int) -> AnsiScreen {
+        if bbcMode != 7 { return plainScreen(scrollOffset: scrollOffset) }
         let offset = min(max(0, scrollOffset), scrollback.count)
         let start = scrollback.count - offset
         let width = columns

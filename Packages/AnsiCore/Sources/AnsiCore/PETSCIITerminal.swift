@@ -25,6 +25,9 @@ public struct PETSCIITerminal: TerminalEngine {
     private var colour: Int
     private var reverse = false
     private var flash = false
+    /// C128 80 column: underline (0x02 on, 0x82 off) and an ESC sequence waiting for its letter.
+    private var underline = false
+    private var escapePending = false
     /// C64 terminal programs (CCGMS, Novaterm) start in the lower and upper case set, and boards
     /// such as Synchronet's PETSCII port rely on it without sending 0x0E.
     public private(set) var lowerCaseSet = true
@@ -55,7 +58,7 @@ public struct PETSCIITerminal: TerminalEngine {
         let lower = lowerCaseSet
         return grid.screen(scrollOffset: scrollOffset) { c in
             var cell = RetroGrid.cell(c)
-            cell.glyph = c.glyph + (lower ? 128 : 0)
+            cell.glyph = c.glyph + (lower ? 128 : 0) + (c.underline ? 256 : 0)
             cell.code = Self.text(screenCode: Int(c.glyph), lowerCase: lower)
             return cell
         }
@@ -95,6 +98,11 @@ public struct PETSCIITerminal: TerminalEngine {
     }
 
     private mutating func consume(_ b: UInt8) {
+        if escapePending {
+            escapePending = false
+            c128Escape(b)
+            return
+        }
         let colours = model == .c64 ? Self.c64ColourCodes : Self.c128ColourCodes
         if let index = colours[b] { colour = index; return }
         switch b {
@@ -105,6 +113,9 @@ public struct PETSCIITerminal: TerminalEngine {
             grid.lineFeed()
         case 0x0E: lowerCaseSet = true
         case 0x8E: lowerCaseSet = false
+        case 0x1B where model == .c128: escapePending = true
+        case 0x02 where model == .c128: underline = true
+        case 0x82 where model == .c128: underline = false
         case 0x0F where model == .c128: flash = true
         case 0x8F where model == .c128: flash = false
         case 0x11: grid.lineFeed()
@@ -131,6 +142,35 @@ public struct PETSCIITerminal: TerminalEngine {
         }
     }
 
+    /// The C128 screen editor's ESC sequences (80 column terminal programs pass them on).
+    private mutating func c128Escape(_ b: UInt8) {
+        let blankRow = Array(repeating: blankCell, count: columns)
+        switch b {
+        case 0x40: // @: clear to the end of the screen
+            for c in grid.column..<columns { grid.cells[grid.row][c] = blankCell }
+            for r in (grid.row + 1)..<max(grid.row + 1, rows) { grid.cells[r] = blankRow }
+        case 0x4A: grid.column = 0                                   // J: start of line
+        case 0x4B:                                                   // K: end of the line's text
+            let last = grid.cells[grid.row].lastIndex { $0.glyph != 0x20 } ?? -1
+            grid.column = min(columns - 1, last + 1)
+        case 0x51: for c in grid.column..<columns { grid.cells[grid.row][c] = blankCell }   // Q: erase to end of line
+        case 0x50: for c in 0...grid.column { grid.cells[grid.row][c] = blankCell }        // P: erase to start of line
+        case 0x44:                                                   // D: delete the line
+            grid.cells.remove(at: grid.row)
+            grid.cells.append(blankRow)
+        case 0x49:                                                   // I: insert a line
+            grid.cells.insert(blankRow, at: grid.row)
+            grid.cells.removeLast()
+        case 0x56:                                                   // V: scroll up
+            grid.cells.removeFirst()
+            grid.cells.append(blankRow)
+        case 0x57:                                                   // W: scroll down
+            grid.cells.insert(blankRow, at: 0)
+            grid.cells.removeLast()
+        default: break                                               // O and the window codes: nothing to show
+        }
+    }
+
     private var blankCell: RetroGrid.Cell {
         RetroGrid.Cell(glyph: 0x20, text: 0x20, fg: palette[colour], bg: palette[0])
     }
@@ -138,7 +178,8 @@ public struct PETSCIITerminal: TerminalEngine {
     private mutating func put(_ code: Int) {
         var fg = palette[colour], bg = palette[0]
         if reverse { swap(&fg, &bg) }
-        grid.cells[grid.row][grid.column] = RetroGrid.Cell(glyph: UInt16(code), text: 0x20, fg: fg, bg: bg, blink: flash)
+        grid.cells[grid.row][grid.column] = RetroGrid.Cell(glyph: UInt16(code), text: 0x20, fg: fg, bg: bg, blink: flash,
+                                                           underline: underline)
         if grid.column == columns - 1 {
             grid.column = 0
             grid.lineFeed()

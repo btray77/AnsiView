@@ -12,6 +12,8 @@ public struct ATASCIITerminal: TerminalEngine {
     public private(set) var changeCount = 0
     public private(set) var bells = 0
     public var cursorVisible: Bool { true }
+    /// The Atari's inverse video key: typed characters are sent with bit 7 set.
+    public var inverseTyping = false
 
     public init(columns: Int = 40, rows: Int = 24) {
         grid = RetroGrid(columns: columns, rows: rows,
@@ -108,7 +110,7 @@ public struct ATASCIITerminal: TerminalEngine {
             defer { previousCR = scalar == "\r" }
             if scalar == "\n" { if !previousCR { out.append(0x9B) }; continue }
             if scalar == "\r" { out.append(0x9B); continue }
-            if scalar.value >= 0x20, scalar.value < 0x7F { out.append(UInt8(scalar.value)) }
+            if scalar.value >= 0x20, scalar.value < 0x7F { out.append(UInt8(scalar.value) | (inverseTyping ? 0x80 : 0)) }
         }
         return out
     }
