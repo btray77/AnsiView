@@ -76,7 +76,9 @@ public struct ZipArchive {
     public var artEntries: [Entry] {
         let readable = entries.filter { ArtFiles.isArt($0.path) && Self.supportedMethods.contains($0.method) }
         let order = ArtFiles.ordered(readable.map(\.path))
-        return order.compactMap { path in readable.first { $0.path == path } }
+        // A dictionary, not a search per path: packs with thousands of entries stay fast (plan 9 item 47).
+        let byPath = Dictionary(readable.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        return order.compactMap { byPath[$0] }
     }
 
     /// Art entries skipped because their compression method is not supported.
