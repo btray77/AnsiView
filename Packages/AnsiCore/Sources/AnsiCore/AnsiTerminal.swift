@@ -38,35 +38,20 @@ public struct AnsiSource {
     public let columns: Int
     public let iceColors: Bool
     public let title: String?
+    public let sauce: Sauce?
 
     public init(data: Data, fileExtension: String? = nil) {
-        var bytes = [UInt8](data)
-        var columns = Self.defaultColumns
-        // iCE files use the blink bit for bright backgrounds instead of blinking.
-        var iceColors = fileExtension?.lowercased() == "ice"
-        var title: String?
-
-        // SAUCE metadata record: last 128 bytes, starting with "SAUCE00".
-        if bytes.count >= 128 {
-            let s = bytes.count - 128
-            if Array(bytes[s..<s + 7]) == Array("SAUCE00".utf8) {
-                let dataType = bytes[s + 94]
-                let width = Int(bytes[s + 96]) | Int(bytes[s + 97]) << 8
-                if dataType == 1, (1...1000).contains(width) { columns = width }
-                if bytes[s + 105] & 0x01 != 0 { iceColors = true }
-                let rawTitle = String(decoding: bytes[s + 7..<s + 42], as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters))
-                if !rawTitle.isEmpty { title = rawTitle }
-                bytes.removeLast(128)
-            }
-        }
-        // DOS end of file marker; anything after it is SAUCE comments or padding.
+        let (sauce, contentLength) = Sauce.read([UInt8](data))
+        var bytes = Array([UInt8](data).prefix(contentLength))
+        // DOS end of file marker; anything after it is padding.
         if let eof = bytes.firstIndex(of: 0x1A) { bytes.removeSubrange(eof...) }
 
         self.bytes = bytes
-        self.columns = columns
-        self.iceColors = iceColors
-        self.title = title
+        self.sauce = sauce
+        self.columns = sauce?.columns ?? Self.defaultColumns
+        // iCE files use the blink bit for bright backgrounds instead of blinking.
+        self.iceColors = fileExtension?.lowercased() == "ice" || sauce?.iceColors == true
+        self.title = sauce.flatMap { $0.title.isEmpty ? nil : $0.title }
     }
 }
 
