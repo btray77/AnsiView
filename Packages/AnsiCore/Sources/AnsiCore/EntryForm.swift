@@ -104,6 +104,11 @@ public enum EntryForm {
         if let f = choice("emulation") { e.emulation = TerminalEmulation.allCases[safe: f.index] ?? .ansiBBS }
         if let f = choice("terminalType") { e.terminalType = f.choiceValue }
         if let f = form.field("telnetSecure") { e.telnetSecure = f.isOn }
+        if let f = choice("tlsClientIdentity") {
+            let item = f.index > 0 ? identityChoices(entry)[safe: f.index - 1] : nil
+            e.tlsClientIdentity = item?.reference
+            e.tlsClientIdentityName = item?.name ?? ""
+        }
         if let f = form.field("columns") { e.columns = f.number }
         if let f = form.field("rows") { e.rows = f.number }
         if let f = choice("font") { e.fontName = f.choiceValue }
@@ -187,6 +192,21 @@ public enum EntryForm {
         return e
     }
 
+    /// Keychain identities offered as TLS client certificates (the app sets this to
+    /// `TLSClientIdentities.list`; empty in tests and Quick Look).
+    public static var clientIdentities: () -> [TLSClientIdentities.Item] = { [] }
+
+    /// The identities in the client certificate menu: the Keychain's, plus the entry's own when it
+    /// is no longer there (so a form round trip keeps it).
+    static func identityChoices(_ e: BBSEntry) -> [TLSClientIdentities.Item] {
+        var items = clientIdentities()
+        if let reference = e.tlsClientIdentity, !items.contains(where: { $0.reference == reference }) {
+            items.append(TLSClientIdentities.Item(name: e.tlsClientIdentityName.isEmpty ? "Saved certificate" : e.tlsClientIdentityName,
+                                                  reference: reference))
+        }
+        return items
+    }
+
     /// The fields of the chosen protocol (ruling 9 of the transports plan).
     static func transportFields(_ e: BBSEntry, passphrase: String) -> [FormField] {
         var fields: [FormField] = []
@@ -194,6 +214,9 @@ public enum EntryForm {
         case .telnet:
             let telnet = "Telnet"
             fields.append(.toggle("telnetSecure", section: telnet, label: "Secure (TLS)", hint: "Wraps telnet in TLS (telnets), which many Synchronet boards offer on port 992. Self signed certificates are shown once for you to trust.", isOn: e.telnetSecure))
+            let identities = identityChoices(e)
+            let chosen = e.tlsClientIdentity.flatMap { reference in identities.firstIndex { $0.reference == reference } }
+            fields.append(.choice("tlsClientIdentity", section: telnet, label: "Client certificate", hint: "For a TLS board that asks who you are with a certificate: choose one from your Keychain. Most boards need none.", options: ["None"] + identities.map(\.name), index: chosen.map { $0 + 1 } ?? 0))
             fields.append(.action("forgetCertificate", section: telnet, label: "Saved certificate", hint: "Forgets the TLS certificate saved for this address, for when the sysop says it really changed. The next call asks again.", caption: "Forget"))
         case .raw:
             break

@@ -119,9 +119,15 @@ public final class TCPTransport: BBSTransport {
         self.verifier = verifier
     }
 
+    /// Shown to a BBS that asks for a client certificate (telnet over TLS).
+    public var clientIdentity: SecIdentity?
+
     private func tlsOptions() -> NWProtocolTLS.Options {
         let options = NWProtocolTLS.Options()
         let security = options.securityProtocolOptions
+        if let clientIdentity, let identity = sec_identity_create(clientIdentity) {
+            sec_protocol_options_set_local_identity(security, identity)
+        }
         // BBS TLS stacks are often old: TLS 1.0 and later are accepted.
         sec_protocol_options_set_min_tls_protocol_version(security, .TLSv10)
         let host = self.host, port = self.port
