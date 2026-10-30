@@ -38,16 +38,18 @@ public enum AnimationImporter {
         let clearSequence = Array("\u{1B}[2J".utf8)
         let markerPrefix = Array("\u{1B}[?\(AnimationEncoder.markerTag);".utf8)
         var terminal = AnsiTerminal(file)
-        var shown = Array(repeating: Array(repeating: AnsiCell(), count: columns), count: rows)
+        var shown = grid(AnsiScreen(columns: columns, rows: []), columns: columns, rows: rows)
         var touched = Set<Int>()
         var edits: [CellEdit] = []
         var dirty = false
         var idle = 0
         var lastChangeEnd = 0
         var result: [AnimationFrame] = []
+        // With AnsiView frame markers the markers alone say where frames end (review I8).
+        let marked = AnimationStreamCheck.usesExtension(bytes)
 
-        func close(delay: Double) {
-            guard dirty else { return }
+        func close(delay: Double, always: Bool = false) {
+            guard dirty || always else { return }
             result.append(frame(shown, delay: (delay * 1000).rounded() / 1000, edits: edits))
             touched.removeAll()
             edits.removeAll()
@@ -63,7 +65,7 @@ public enum AnimationImporter {
             if step.starts(with: markerPrefix) {
                 let parameters = String(decoding: step.dropFirst(markerPrefix.count).dropLast(), as: UTF8.self).split(separator: ";")
                 let ms = parameters.count >= 2 ? Double(parameters[1]) ?? 0 : 0
-                close(delay: ms / 1000)
+                close(delay: ms / 1000, always: true)
                 idle = 0
                 continue
             }
@@ -85,7 +87,7 @@ public enum AnimationImporter {
             }
             changed = visible
             let isClear = step.elementsEqual(clearSequence)
-            if idle >= options.idleBytes || isClear || changed.contains(where: touched.contains) {
+            if !marked, idle >= options.idleBytes || isClear || changed.contains(where: touched.contains) {
                 let held = idle >= options.idleBytes ? Double(end - lastChangeEnd) * characterTime : 0
                 close(delay: held)
             }
@@ -100,7 +102,7 @@ public enum AnimationImporter {
             idle = 0
             lastChangeEnd = end
         }
-        close(delay: idle >= options.idleBytes ? Double(bytes.count - lastChangeEnd) * characterTime : 0)
+        close(delay: !marked && idle >= options.idleBytes ? Double(bytes.count - lastChangeEnd) * characterTime : 0)
         if result.isEmpty { result.append(frame(shown, delay: AnimationFrame.defaultDelay, edits: [])) }
         return result
     }
@@ -114,10 +116,14 @@ public enum AnimationImporter {
 
     /// Exactly `rows` x `columns` cells of `screen` (blank padded).
     static func grid(_ screen: AnsiScreen, columns: Int, rows: Int) -> [[AnsiCell]] {
-        (0..<rows).map { y in
-            guard y < screen.rows.count else { return Array(repeating: AnsiCell(), count: columns) }
+        // Rows are passed through (and blank rows shared) so unchanged rows compare by identity
+        // in constant time (review I7).
+        let blank = Array(repeating: AnsiCell(), count: columns)
+        return (0..<rows).map { y in
+            guard y < screen.rows.count else { return blank }
             let row = screen.rows[y]
-            return row.count >= columns ? Array(row.prefix(columns)) : row + Array(repeating: AnsiCell(), count: columns - row.count)
+            if row.count == columns { return row }
+            return row.count > columns ? Array(row.prefix(columns)) : row + Array(repeating: AnsiCell(), count: columns - row.count)
         }
     }
 }

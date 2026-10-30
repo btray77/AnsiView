@@ -59,6 +59,32 @@ public enum AnimationEncoder {
         return result
     }
 
+    /// What a real 25 line terminal would show differently from AnsiView (review I6).
+    /// AnsiView never scrolls a file; ANSI.SYS and terminals that wrap at once scroll the whole
+    /// screen when the bottom right cell of a 25 line screen is written, and cannot reach row 26.
+    public static func terminalWarnings(_ frames: [AnimationFrame]) -> [String] {
+        var warnings: [String] = []
+        let composites = frames.map(\.composite)
+        let blank = AnsiCell()
+        let corner = composites.indices.filter { k in
+            let c = composites[k]
+            return c.height >= 25 && written(c[c.columns - 1, 24]) != blank
+        }
+        if !corner.isEmpty {
+            warnings.append("Frame \(corner.map { "\($0 + 1)" }.joined(separator: ", ")) uses the bottom right cell of the 25 line screen: "
+                            + "DOS ANSI.SYS and similar terminals scroll the whole screen up a line when it is written, and later frames land one row high.")
+        }
+        let tall = composites.indices.filter { k in
+            let c = composites[k]
+            return c.height > 25 && c.rows[25...].contains { $0.contains { written($0) != blank } }
+        }
+        if !tall.isEmpty {
+            warnings.append("Frame \(tall.map { "\($0 + 1)" }.joined(separator: ", ")) draws below 25 rows: "
+                            + "a real 80 x 25 terminal cannot position the cursor there.")
+        }
+        return warnings
+    }
+
     public static func marker(frame: Int, delay: Double) -> [UInt8] {
         Array("\u{1B}[?\(markerTag);\(frame);\(Int((delay * 1000).rounded()))z".utf8)
     }

@@ -104,19 +104,25 @@ extension CanvasEditor {
         if tracksEdits { lastLogged = flattenedCanvas }
     }
 
-    /// Appends every cell that changed since the last look to the current frame's log (ruling 2).
+    /// Moves every cell that changed since the last look to the end of the current frame's log
+    /// (ruling 2). A cell has at most one entry, its last edit, so the log never outgrows the
+    /// canvas (review I2).
     func logEdits() {
         guard tracksEdits else { return }
         let now = flattenedCanvas
         defer { lastLogged = now }
         guard let before = lastLogged, before.columns == now.columns else { return }
         let time = recording ? clock() - recordStart : nil
+        var changed: [CellEdit] = []
         for y in 0..<now.height {
             if y < before.height, before.rows[y] == now.rows[y] { continue }
-            for x in 0..<now.columns where before[x, y] != now[x, y] {
-                if let last = liveEdits.last, last.x == x, last.y == y { continue }
-                liveEdits.append(CellEdit(x: x, y: y, time: time))
-            }
+            for x in 0..<now.columns where before[x, y] != now[x, y] { changed.append(CellEdit(x: x, y: y, time: time)) }
         }
+        guard !changed.isEmpty else { return }
+        if changed.count == 1, let last = liveEdits.last, last.x == changed[0].x, last.y == changed[0].y { return }
+        let columns = now.columns
+        let positions = Set(changed.map { $0.y * columns + $0.x })
+        liveEdits.removeAll { positions.contains($0.y * columns + $0.x) }
+        liveEdits += changed
     }
 }

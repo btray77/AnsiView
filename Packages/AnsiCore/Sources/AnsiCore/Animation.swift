@@ -35,9 +35,10 @@ public struct AnimationFrame: Equatable {
         self.edits = edits
     }
 
-    /// What the frame shows: its visible layers flattened.
+    /// What the frame shows: its visible layers flattened. A single layer is the frame, as in the
+    /// editor's plain save (`CanvasEditor.flattenedCanvas`), even when hidden (review M15).
     public var composite: EditCanvas {
-        layers.count == 1 && layers[0].visible ? layers[0].canvas : LayerStack.composite(layers)
+        layers.count == 1 ? layers[0].canvas : LayerStack.composite(layers)
     }
 
     static func clampDelay(_ value: Double) -> Double {
