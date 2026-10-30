@@ -208,9 +208,29 @@ private func shown(_ actions: [TransferCoordinatorAction]) -> [UInt8] {
         // The user cancels, then at once asks the BBS to send again: the new start must be asked about.
         var c = TransferCoordinator(autoAcceptZmodem: false, usesTelnet: false)
         _ = c.begin(kind: .zmodem, direction: .receive, at: 0, byteClean: true)
-        c.sessionFinished(at: 2)
+        c.sessionFinished(at: 2, succeeded: false)
+        c.userTyped()
         _ = c.received(Array("Starting lsz\r\n".utf8) + zrqinit, at: 2.2, byteClean: true)
         if case .offering = c.state {} else { Issue.record("a new start right after a session was not offered: \(c.state)") }
+    }
+
+    @Test func echoAfterCancelledTransferIsNotOffered() {
+        // A cancelled upload: the BBS's rz still drains what was in flight, then sends ZRINIT again.
+        var c = TransferCoordinator(autoAcceptZmodem: false, usesTelnet: false)
+        _ = c.begin(kind: .zmodem, direction: .send, at: 0, byteClean: true)
+        c.sessionFinished(at: 2, succeeded: false)
+        #expect(c.received(zrinit + Array("Transfer ended\r\n> ".utf8), at: 12, byteClean: true)
+            == [.showOnScreen(zrinit + Array("Transfer ended\r\n> ".utf8))])
+        #expect(c.state == .idle)
+        // After half a minute, or once the user types, starts are asked about again.
+        _ = c.received(zrinit, at: 33, byteClean: true)
+        if case .offering = c.state {} else { Issue.record("not offered after the quiet time") }
+        // A completed transfer leaves no quiet time.
+        var d = TransferCoordinator(autoAcceptZmodem: false, usesTelnet: false)
+        _ = d.begin(kind: .zmodem, direction: .receive, at: 0, byteClean: true)
+        d.sessionFinished(at: 2)
+        _ = d.received(zrqinit, at: 2.5, byteClean: true)
+        if case .offering = d.state {} else { Issue.record("not offered after a completed session") }
     }
 
     @Test func cancelWhileNegotiatingIsClean() {

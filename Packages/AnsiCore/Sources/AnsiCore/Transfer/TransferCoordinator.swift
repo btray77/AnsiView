@@ -10,6 +10,8 @@ public struct TransferRequest: Equatable, Sendable {
     public var byteClean: Bool
     /// Shown in the panel: the line may change bytes this protocol needs.
     public var warning: String?
+    /// The BBS started this transfer (its sender or receiver is already running).
+    public var fromBBS = false
 
     /// The engine options for this request: telnet escapes or 8th bit prefixing on a line that
     /// is not byte clean, resume for ZMODEM downloads (ruling 5).
@@ -58,6 +60,8 @@ public enum TransferCoordinatorAction: Equatable, Sendable {
     case startSession(TransferRequest)
     /// Raw bytes for the BBS (the cancel sequence when a pending start is abandoned).
     case sendToRemote([UInt8])
+    /// A start that never became a session was abandoned: the terminal resumes.
+    case endPending
     /// The running session must fail (the connection went away).
     case failSession(String)
 }
@@ -81,6 +85,8 @@ public struct TransferCoordinator {
     public static let binaryWait: Double = 2
     /// Seconds after Ignore during which the same start is drawn without asking.
     public static let quietAfterIgnore: Double = 60
+    /// Seconds after a cancelled or failed session during which starts are drawn, not asked about.
+    public static let quietAfterAbort: Double = 30
     /// The lrzsz cancel string: 10 CAN then 10 backspaces (stops ZMODEM, X/YMODEM and Kermit senders).
     public static let cancelSequence: [UInt8] = Array(repeating: 0x18, count: 10) + Array(repeating: 0x08, count: 10)
 
@@ -90,6 +96,7 @@ public struct TransferCoordinator {
     private var detector = TransferStartDetector()
     private var held: [UInt8] = []
     private var quietUntil: [TransferStartDetector.Kind: Double] = [:]
+    private var quietAfterAbortUntil: Double = -.infinity
     /// The pending start came from the BBS (its sender or receiver is already running).
     private var remoteStarted = false
 
@@ -128,7 +135,7 @@ public struct TransferCoordinator {
             return []
         case .idle:
             guard let match = detector.scan(bytes) else { return bytes.isEmpty ? [] : [.showOnScreen(bytes)] }
-            if now < (quietUntil[match.kind] ?? -.infinity) {
+            if now < quietAfterAbortUntil || now < (quietUntil[match.kind] ?? -.infinity) {
                 detector.reset()
                 return [.showOnScreen(match.terminalBytes + match.transferBytes)]
             }
@@ -199,10 +206,18 @@ public struct TransferCoordinator {
         return []
     }
 
-    /// The running session ended (completed, failed or cancelled). A new start right after it
-    /// is asked about as usual (the user may have asked the BBS to send again at once).
-    public mutating func sessionFinished(at now: Double) {
+    /// The running session ended. After a cancel or failure the other side may still be
+    /// draining what was in flight and then repeat its start (an rz sends ZRINIT again): such
+    /// starts are drawn, not asked about, until the user types or `quietAfterAbort` passes.
+    /// After a completed session nothing is quieted.
+    public mutating func sessionFinished(at now: Double, succeeded: Bool = true) {
         reset()
+        quietAfterAbortUntil = succeeded ? -.infinity : now + Self.quietAfterAbort
+    }
+
+    /// The user typed at the BBS: a start from now on is a new request, so it is asked about.
+    public mutating func userTyped() {
+        quietAfterAbortUntil = -.infinity
     }
 
     /// Escape or Cancel before the session exists: the bar is dismissed like Ignore; a pending
@@ -214,18 +229,23 @@ public struct TransferCoordinator {
         case .negotiating:
             let tell = remoteStarted
             reset()
-            return tell ? [.sendToRemote(Self.cancelSequence)] : []
+            return (tell ? [.sendToRemote(Self.cancelSequence)] : []) + [.endPending]
         case .idle, .running: return []
         }
     }
 
     /// The connection ended.
     public mutating func connectionClosed(at now: Double) -> [TransferCoordinatorAction] {
-        let wasRunning = state == .running
-        let wasOffering: Bool = { if case .offering = state { return true }; return false }()
+        let previous = state
+        let release = held
         reset()
-        if wasRunning { return [.failSession("the connection closed")] }
-        return wasOffering ? [.hideOffer] : []
+        switch previous {
+        case .running: return [.failSession("the connection closed")]
+        case .negotiating: return [.endPending]
+        case .offering: return [.hideOffer] + (release.isEmpty ? [] : [.showOnScreen(release)])
+        case .choosingFiles: return release.isEmpty ? [] : [.showOnScreen(release)]
+        case .idle: return []
+        }
     }
 
     // MARK: Private
@@ -242,7 +262,8 @@ public struct TransferCoordinator {
     private mutating func start(_ kind: TransferProtocolKind, _ direction: TransferDirection,
                                 byteClean: Bool) -> [TransferCoordinatorAction] {
         let warning = !byteClean && kind != .kermit ? TransferHelp.binaryWarning(for: kind) : nil
-        let request = TransferRequest(kind: kind, direction: direction, initialBytes: held, byteClean: byteClean, warning: warning)
+        let request = TransferRequest(kind: kind, direction: direction, initialBytes: held, byteClean: byteClean, warning: warning,
+                                      fromBBS: remoteStarted)
         held = []
         detector.reset()
         state = .running

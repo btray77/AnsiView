@@ -117,7 +117,7 @@ public struct TransferSummary: Equatable {
     public var folder: URL?
 
     public init(outcome: FileTransferSession.Outcome, kind: TransferProtocolKind, direction: TransferDirection,
-                elapsed: Double, bytes: Int) {
+                elapsed: Double, bytes: Int, savedBeforeEnd: [TransferredFile] = []) {
         switch outcome {
         case .completed(let files):
             self.files = files
@@ -127,11 +127,11 @@ public struct TransferSummary: Equatable {
             headline = "\(verb) \(files.count) file\(files.count == 1 ? "" : "s"), \(TransferText.count(bytes)) bytes in "
                 + "\(TransferText.duration(elapsed))\(rate) with \(kind.displayName)"
         case .failed(let reason):
-            files = []
+            files = savedBeforeEnd
             succeeded = false
             headline = "Transfer failed: \(reason)"
         case .cancelled(let reason):
-            files = []
+            files = savedBeforeEnd
             succeeded = false
             headline = "Transfer cancelled: \(reason)"
         }

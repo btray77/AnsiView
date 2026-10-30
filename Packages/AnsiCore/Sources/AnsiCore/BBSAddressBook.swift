@@ -288,6 +288,25 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     }
 }
 
+/// The per entry file transfer settings a terminal window can change.
+public enum TransferSetting: Sendable {
+    case protocolChoice, downloadFolder
+}
+
+public extension BBSEntry {
+    /// This entry with only the named transfer settings taken from `other` (an open terminal's
+    /// copy), so edits made in the directory meanwhile are kept.
+    func merging(transferSettings: Set<TransferSetting>, from other: BBSEntry) -> BBSEntry {
+        var e = self
+        if transferSettings.contains(.protocolChoice) { e.transferProtocol = other.transferProtocol }
+        if transferSettings.contains(.downloadFolder) {
+            e.downloadFolderBookmark = other.downloadFolderBookmark
+            e.downloadFolderName = other.downloadFolderName
+        }
+        return e
+    }
+}
+
 /// The plan 7 address book: a JSON array of entries under `bbsAddressBook`. Kept so old data
 /// migrates into `DialingDirectory` (and a downgraded app still finds its book).
 public struct BBSAddressBook: Equatable {

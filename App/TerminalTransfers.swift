@@ -14,6 +14,8 @@ final class TerminalTransfers: NSObject {
     /// Lines of the last session's log (shown in the summary).
     private(set) var lastLog: [String] = []
     private var flow = TransferFlow()
+    /// Bumped per session, so late write completions of an earlier session leave the new window alone.
+    private var flowGeneration = 0
     private var timer: Timer?
     private var request: TransferRequest?
     private var pendingFiles: [URL] = []
@@ -98,11 +100,13 @@ final class TerminalTransfers: NSObject {
     // MARK: Driving
 
     func received(_ bytes: [UInt8]) {
+        if coordinator.state == .idle { syncSettings() }
         perform(coordinator.received(bytes, at: now, byteClean: byteClean))
     }
 
     /// Terminal > Download...: asks for the protocol (and the name for XMODEM), then starts.
     func chooseDownload() {
+        syncSettings()
         guard let terminal, terminal.client?.state == .connected, !isActive else { NSSound.beep(); return }
         TransferChooser.download(entry: terminal.entry, window: terminal.view.window, transfers: self) { [weak self] choice in
             guard let self, let choice else { return }
@@ -112,6 +116,7 @@ final class TerminalTransfers: NSObject {
 
     /// Terminal > Upload File(s)...: the open panel with a protocol choice.
     func chooseUpload() {
+        syncSettings()
         guard let terminal, terminal.client?.state == .connected, !isActive else { NSSound.beep(); return }
         TransferChooser.upload(entry: terminal.entry, fixed: nil, window: terminal.view.window) { [weak self] choice in
             guard let self, let choice else { return }
@@ -153,6 +158,9 @@ final class TerminalTransfers: NSObject {
         perform(coordinator.accept(at: now, byteClean: byteClean))
     }
 
+    /// The user typed at the BBS (a transfer start after this is a new request).
+    func userTyped() { coordinator.userTyped() }
+
     func ignoreOffer() { perform(coordinator.ignore(at: now)) }
 
     func connectionClosed() { perform(coordinator.connectionClosed(at: now)) }
@@ -163,7 +171,10 @@ final class TerminalTransfers: NSObject {
         session = nil
         timer?.invalidate()
         timer = nil
+        let wasPending = coordinator.isTransferActive
         _ = coordinator.connectionClosed(at: now)
+        if wasPending { terminal?.resumeAfterTransfer() }
+        syncSettings()
         if let terminal {
             coordinator = TransferCoordinator(autoAcceptZmodem: terminal.entry.zmodemAutoAccept,
                                               usesTelnet: TransportSettings(entry: terminal.entry).usesTelnet)
@@ -194,7 +205,7 @@ final class TerminalTransfers: NSObject {
             case .startSession(let request): start(request)
             case .sendToRemote(let bytes):
                 terminal?.client?.sendTransfer(bytes) {}
-                finishWithoutSession()
+            case .endPending: finishWithoutSession()
             case .failSession(let reason):
                 if let session, !session.isFinished {
                     session.cancel(reason: reason)
@@ -246,7 +257,9 @@ final class TerminalTransfers: NSObject {
         var total: Int?
         var count: Int?
         if request.direction == .receive {
-            guard let folder = accessedFolder ?? downloadFolderOverride else {
+            // An auto-accepted start comes here without the bar, so the folder may not be open yet.
+            if accessedFolder == nil, downloadFolderOverride == nil { ensureFolder() }
+            guard let folder = downloadFolderOverride ?? accessedFolder else {
                 fail(request, "no download folder is chosen")
                 return
             }
@@ -286,6 +299,7 @@ final class TerminalTransfers: NSObject {
         made.onFinish = { [weak self] outcome in self?.finished(outcome) }
         session = made
         flow = TransferFlow()
+        flowGeneration += 1
         refreshPanel()
         startTimer()
         made.start()
@@ -294,12 +308,13 @@ final class TerminalTransfers: NSObject {
     }
 
     private func fail(_ request: TransferRequest, _ reason: String) {
-        // Nothing started on our side; tell the BBS (its sender or receiver may be waiting).
-        terminal?.client?.sendTransfer(TransferCoordinator.cancelSequence) {}
+        // Nothing started on our side. A BBS that started the transfer is waiting: tell it to stop.
+        // (When the user started it from the menu, the cancel string would only type into a prompt.)
+        if request.fromBBS { terminal?.client?.sendTransfer(TransferCoordinator.cancelSequence) {} }
         summary = TransferSummary(outcome: .failed(reason), kind: request.kind, direction: request.direction, elapsed: 0, bytes: 0)
         lastLog = ["transfer failed: \(reason)"]
         writeLog(kind: request.kind, direction: request.direction, lines: lastLog)
-        coordinator.sessionFinished(at: now)
+        coordinator.sessionFinished(at: now, succeeded: false)
         terminal?.resumeAfterTransfer()
         panel.showSummary(summary!, log: lastLog)
     }
@@ -313,12 +328,24 @@ final class TerminalTransfers: NSObject {
             let bytes = session.takeOutput(max: room)
             if bytes.isEmpty { break }
             let count = bytes.count
+            let generation = flowGeneration
             flow.sent(count)
             client.sendTransfer(bytes) { [weak self] in
-                guard let self else { return }
+                guard let self, generation == self.flowGeneration else { return }
                 self.flow.completed(count)
                 self.pump()
             }
+        }
+    }
+
+    /// After the end: whatever the engine still holds (the cancel sequence after a cancel or a
+    /// failure) goes out regardless of the window, or the BBS would never hear it.
+    private func drainFinal(_ session: FileTransferSession) {
+        guard let client = terminal?.client else { return }
+        while true {
+            let bytes = session.takeOutput(max: 64 * 1024)
+            if bytes.isEmpty { break }
+            client.sendTransfer(bytes) {}
         }
     }
 
@@ -348,15 +375,25 @@ final class TerminalTransfers: NSObject {
     private func finished(_ outcome: FileTransferSession.Outcome) {
         guard let session, let request else { return }
         let progress = session.progress
-        // The cancel sequence (if any) is still queued: send it.
-        pump()
-        let result = TransferSummary(outcome: outcome, kind: request.kind, direction: request.direction,
-                                     elapsed: progress.elapsed, bytes: progress.sessionBytes)
+        drainFinal(session)
+        let saved = session.log.compactMap { entry -> TransferredFile? in
+            if case .fileCompleted(let file) = entry.event { return file }
+            return nil
+        }
+        var result = TransferSummary(outcome: outcome, kind: request.kind, direction: request.direction,
+                                     elapsed: progress.elapsed, bytes: progress.sessionBytes, savedBeforeEnd: saved)
+        if !result.succeeded, request.kind == .zmodem, request.direction == .receive, let folder = downloadFolderOverride ?? accessedFolder,
+           let name = progress.fileName {
+            let part = folder.appendingPathComponent(TransferFileName.sanitize(name) + ".part")
+            if let size = (try? FileManager.default.attributesOfItem(atPath: part.path))?[.size] as? Int {
+                result.lines.append("Kept \(part.lastPathComponent) (\(TransferText.count(size)) bytes): the next ZMODEM download of \(name) continues from there.")
+            }
+        }
         summary = result
         lastLog = session.logLines()
         writeLog(kind: request.kind, direction: request.direction, lines: lastLog + ["result: \(result.headline)"] + result.lines)
         self.session = nil
-        coordinator.sessionFinished(at: now)
+        coordinator.sessionFinished(at: now, succeeded: result.succeeded)
         terminal?.resumeAfterTransfer()
         panel.showSummary(result, log: lastLog)
         updateStatus()
@@ -397,7 +434,13 @@ final class TerminalTransfers: NSObject {
 
     private func remember(_ kind: TransferProtocolKind) {
         guard let terminal, terminal.entry.transferProtocol != kind else { return }
-        terminal.updateEntry { $0.transferProtocol = kind }
+        terminal.updateEntry([.protocolChoice]) { $0.transferProtocol = kind }
+    }
+
+    /// Takes the transfer settings saved in the directory since the window opened.
+    private func syncSettings() {
+        terminal?.syncTransferSettings()
+        if let terminal { coordinator.autoAcceptZmodem = terminal.entry.zmodemAutoAccept }
     }
 
     /// Makes sure a writable download folder is open for this session (ruling 6). False when
@@ -422,7 +465,7 @@ final class TerminalTransfers: NSObject {
     /// A folder chosen in the download chooser for this BBS only.
     func setEntryFolder(_ url: URL) {
         guard let bookmark = TransferFolders.bookmark(url) else { return }
-        terminal?.updateEntry {
+        terminal?.updateEntry([.downloadFolder]) {
             $0.downloadFolderBookmark = bookmark
             $0.downloadFolderName = (url.path as NSString).abbreviatingWithTildeInPath
         }
@@ -804,7 +847,6 @@ final class TransferPanelView: NSView {
         logButton.action = #selector(showLog)
         logButton.toolTip = "Opens this BBS's transfer log: every transfer with its protocol details and results."
         closeButton.bezelStyle = .rounded
-        closeButton.keyEquivalent = "\r"
         closeButton.target = self
         closeButton.action = #selector(close)
         closeButton.toolTip = "Closes this panel and returns to the terminal."

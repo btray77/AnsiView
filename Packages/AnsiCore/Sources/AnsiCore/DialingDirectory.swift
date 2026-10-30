@@ -197,6 +197,8 @@ public struct DialingDirectory: Equatable {
             copy.sshKeyName = nil
             copy.captureFolderName = nil
             copy.captureOnConnect = false
+            copy.downloadFolderBookmark = nil
+            copy.downloadFolderName = nil
             return copy
         }
         let file = ExportFile(format: Self.exportFormat, version: Self.version, entries: chosen)

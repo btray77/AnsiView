@@ -142,8 +142,10 @@ final class TerminalViewController: NSViewController {
 
     /// The BBS; transfer choices made in the terminal update it (see `updateEntry`).
     private(set) var entry: BBSEntry
-    /// Called when the terminal changed the entry (transfer protocol, download folder).
-    var onEntryChange: ((BBSEntry) -> Void)?
+    /// Called when the terminal changed the entry's transfer protocol or download folder.
+    var onEntryChange: ((BBSEntry, Set<TransferSetting>) -> Void)?
+    /// The entry as saved in the directory now (nil for an unsaved entry).
+    var savedEntry: (() -> BBSEntry?)?
     /// File transfers (App/TerminalTransfers.swift).
     private(set) lazy var transfers = TerminalTransfers(terminal: self)
     private(set) var emulator: TerminalEmulator
@@ -329,7 +331,7 @@ final class TerminalViewController: NSViewController {
 
     /// Terminal > Log In: runs the entry's login script from its first step.
     func runLogin() {
-        guard client?.state == .connected else { return }
+        guard client?.state == .connected, !transfers.isActive else { return }
         let password = entry.credentialKey.flatMap { passwords?.password(for: $0) }
         var runner = LoginScriptRunner(steps: entry.loginScript, username: entry.username, password: password,
                                        encoding: entry.encoding)
@@ -343,7 +345,7 @@ final class TerminalViewController: NSViewController {
     private func perform(_ actions: [LoginAction]) {
         for action in actions {
             switch action {
-            case .send(let bytes): client?.send(bytes)
+            case .send(let bytes): if !transfers.isActive { client?.send(bytes) }
             case .finished: loginText = "Login script done"
             case .failed(let message): loginText = message
             }
@@ -559,10 +561,17 @@ final class TerminalViewController: NSViewController {
         view.window?.makeFirstResponder(terminalView)
     }
 
-    /// Changes the entry (from the transfer choosers) and tells the directory.
-    func updateEntry(_ change: (inout BBSEntry) -> Void) {
+    /// Changes the entry (from the transfer choosers) and tells the directory which settings changed.
+    func updateEntry(_ settings: Set<TransferSetting>, _ change: (inout BBSEntry) -> Void) {
         change(&entry)
-        onEntryChange?(entry)
+        onEntryChange?(entry, settings)
+    }
+
+    /// Picks up transfer settings edited in the dialing directory while this window was open.
+    func syncTransferSettings() {
+        guard let saved = savedEntry?() else { return }
+        entry = entry.merging(transferSettings: [.protocolChoice, .downloadFolder], from: saved)
+        entry.zmodemAutoAccept = saved.zmodemAutoAccept
     }
 
     // MARK: Screen
@@ -670,7 +679,9 @@ final class TerminalViewController: NSViewController {
     }
 
     private func send(_ bytes: [UInt8]) {
-        guard !bytes.isEmpty else { return }
+        // Typing, macros, paste and the Send menu items never reach a running file transfer.
+        guard !bytes.isEmpty, !transfers.isActive else { return }
+        transfers.userTyped()
         if scrollOffset != 0 {
             scrollOffset = 0
             terminalView.needsDisplay = true
@@ -780,14 +791,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
         if store.directory.entries.contains(where: { $0.id == entry.id }) {
             controller.terminal.callRecorder = { [weak store] id in store?.recordCall(id) }
             // Only the transfer choices are written back, so edits made in the directory meanwhile stay.
-            controller.terminal.onEntryChange = { [weak store] changed in
+            controller.terminal.onEntryChange = { [weak store] changed, settings in
                 store?.update { d in
                     guard let i = d.entries.firstIndex(where: { $0.id == changed.id }) else { return }
-                    d.entries[i].transferProtocol = changed.transferProtocol
-                    d.entries[i].downloadFolderBookmark = changed.downloadFolderBookmark
-                    d.entries[i].downloadFolderName = changed.downloadFolderName
+                    d.entries[i] = d.entries[i].merging(transferSettings: settings, from: changed)
                 }
             }
+            controller.terminal.savedEntry = { [weak store] in store?.entry(entry.id) }
         }
         open.insert(controller)
         return controller
