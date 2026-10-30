@@ -147,17 +147,47 @@ final class GalleryCollectionView: NSCollectionView {
     }
 }
 
+/// Grid (thumbnails) or list (rows) for a window of art, remembered per kind of window.
+enum BrowseLayout: String {
+    case grid, list
+
+    static func stored(key: String) -> BrowseLayout {
+        UserDefaults.standard.string(forKey: key).flatMap(BrowseLayout.init(rawValue:)) ?? .grid
+    }
+
+    func store(key: String) { UserDefaults.standard.set(rawValue, forKey: key) }
+
+    /// The two segment toggle (list, grid) that switches it.
+    static func makeToggle(selected: BrowseLayout, target: AnyObject, action: Selector) -> NSSegmentedControl {
+        let images = [NSImage(systemSymbolName: "list.bullet", accessibilityDescription: "List")!,
+                      NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: "Grid")!]
+        let toggle = NSSegmentedControl(images: images, trackingMode: .selectOne, target: target, action: action)
+        toggle.setToolTip("Show as a list", forSegment: 0)
+        toggle.setToolTip("Show as a grid of pictures", forSegment: 1)
+        toggle.toolTip = "List or grid of pictures"
+        toggle.selectedSegment = selected == .list ? 0 : 1
+        return toggle
+    }
+
+    init(segment: Int) { self = segment == 0 ? .list : .grid }
+}
+
 /// One thumbnail and its file name.
 final class GalleryItem: NSCollectionViewItem {
     static let identifier = NSUserInterfaceItemIdentifier("GalleryItem")
     private let picture = NSImageView()
     private let label = NSTextField(labelWithString: "")
+    private let note = NSTextField(labelWithString: "")
 
     var name = "" {
         didSet { label.stringValue = name; view.setAccessibilityLabel(name) }
     }
     var thumbnail: NSImage? {
-        didSet { picture.image = thumbnail }
+        didSet { picture.image = thumbnail; note.isHidden = thumbnail != nil || placeholder.isEmpty }
+    }
+    /// Shown in place of the picture until it arrives ("Loading...", "No preview").
+    var placeholder = "" {
+        didSet { note.stringValue = placeholder; note.isHidden = thumbnail != nil || placeholder.isEmpty }
     }
 
     override var isSelected: Bool {
@@ -175,9 +205,17 @@ final class GalleryItem: NSCollectionViewItem {
         label.lineBreakMode = .byTruncatingMiddle
         label.font = .systemFont(ofSize: 11)
         label.translatesAutoresizingMaskIntoConstraints = false
+        note.textColor = NSColor(white: 0.6, alpha: 1)
+        note.font = .systemFont(ofSize: 11)
+        note.alignment = .center
+        note.isHidden = true
+        note.translatesAutoresizingMaskIntoConstraints = false
         box.addSubview(picture)
         box.addSubview(label)
+        box.addSubview(note)
         NSLayoutConstraint.activate([
+            note.centerXAnchor.constraint(equalTo: picture.centerXAnchor),
+            note.centerYAnchor.constraint(equalTo: picture.centerYAnchor),
             picture.topAnchor.constraint(equalTo: box.topAnchor, constant: 6),
             picture.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 4),
             picture.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -4),

@@ -35,6 +35,8 @@ final class SixteenColorsPreview: NSViewController {
     /// The SAUCE line and the file line, for checks and VoiceOver.
     var caption: String { titleLabel.stringValue + "\n" + detailLabel.stringValue }
     var showsPicture: Bool { !pictureScroll.isHidden }
+    /// The hint over the black stage is light enough to read (for checks).
+    var hintIsReadable: Bool { (message.textColor?.usingColorSpace(.sRGB)?.brightnessComponent ?? 0) > 0.5 }
     var note: String { message.isHidden ? detailLabel.stringValue : message.stringValue }
 
     override func loadView() {
@@ -45,7 +47,8 @@ final class SixteenColorsPreview: NSViewController {
         stage.toolTip = "The selected file, drawn by AnsiView. Click animated art to skip to the end."
 
         message.alignment = .center
-        message.textColor = .secondaryLabelColor
+        // Light on the black stage in both appearances.
+        message.textColor = NSColor(white: 0.72, alpha: 1)
         message.translatesAutoresizingMaskIntoConstraints = false
         stage.addSubview(message)
 

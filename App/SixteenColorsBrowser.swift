@@ -157,6 +157,8 @@ final class SixteenColorsClient {
         if let saved = cache.data(for: key), let image = NSImage(data: saved) { return image }
         if missing.contains(url) { throw HTTPError(status: 404) }
         let start = try await waitForTurn(priority)
+        // Another load of the same picture may have finished while this one waited.
+        if let saved = cache.data(for: key), let image = NSImage(data: saved) { return image }
         log.info("GET \(url.absoluteString, privacy: .public)")
         let data: Data
         do {
@@ -247,6 +249,7 @@ final class SixteenColorsClient {
             return cache.url(for: key)
         }
         let start = try await waitForTurn(priority)
+        if cache.contains(key) { return cache.url(for: key) }
         log.info("Download \(url.absoluteString, privacy: .public)")
         do {
             let (temporary, response) = try await session.download(for: request(url))
@@ -289,7 +292,8 @@ final class SixteenColorsClient {
 /// selected file. Open Pack downloads the ZIP and shows it in a gallery; Open downloads one file
 /// and opens it.
 @MainActor
-final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTableViewDelegate,
+    NSCollectionViewDataSource, NSCollectionViewDelegate {
     static let hint = "Choose a year, then a pack. Selecting a file previews it on the right; double click or Open opens it in its own window."
 
     let client: SixteenColorsClient
@@ -326,6 +330,38 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     private var previewTask: Task<Void, Never>?
     /// The file the preview shows (or is loading).
     private(set) var selectedFileIndex: Int?
+
+    /// Where the grid / list choice is remembered for this window.
+    static let layoutKey = "sixteenColorsLayout"
+    private(set) var layout = BrowseLayout.stored(key: SixteenColorsBrowser.layoutKey)
+    private let fileGrid = GalleryCollectionView()
+    private let gridScroll = NSScrollView()
+    private let filesPane = NSView()
+    private var listScroll: NSScrollView?
+    private var layoutToggle: NSSegmentedControl?
+    /// The pack's file thumbnails as they arrive (by file index), and the loads still going.
+    private var gridImages: [Int: NSImage] = [:]
+    private var gridLoads: [Int: Task<Void, Never>] = [:]
+    private var gridFailed: Set<Int> = []
+    /// Pack row pictures by pack name, the loads still going, and packs with no picture.
+    private var packImages: [String: NSImage] = [:]
+    private var packLoads: [String: Task<Void, Never>] = [:]
+    private var packNoImage: Set<String> = []
+
+    /// The grid of the pack's thumbnails (for checks).
+    var fileGridView: NSCollectionView { fileGrid }
+    /// The list of the pack's files (for checks).
+    var fileListView: NSTableView { fileTable }
+
+    /// A pack row's picture, once it is here (for checks).
+    func packThumbnail(named name: String) -> NSImage? { packImages[name] }
+
+    /// Scrolls the pack list (for checks).
+    func scrollPacks(toRow row: Int) {
+        packTable.scrollRowToVisible(row)
+        packTable.enclosingScrollView?.reflectScrolledClipView(packTable.enclosingScrollView!.contentView)
+        packTable.enclosingScrollView?.layoutSubtreeIfNeeded()
+    }
 
     var statusText: String { status.stringValue }
     var retryVisible: Bool { !retryButton.isHidden }
@@ -364,8 +400,35 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
                                 tip: "Years of the 16colo.rs archive, with how many packs each has.")
         let packScroll = column(packTable, "pack", "Pack", width: 260,
                                 tip: "The year's art packs. Double click (or Open Pack) to download one and see it in a gallery.")
-        let fileScroll = column(fileTable, "file", "File", width: 320,
+        packTable.rowHeight = 44
+        let listScroll = column(fileTable, "file", "File", width: 320,
                                 tip: "The pack's files. Select one to preview it; double click to open it.")
+        // The files pane holds the list and the grid of thumbnails; the toggle shows one of them.
+        let gridLayout = NSCollectionViewFlowLayout()
+        gridLayout.itemSize = NSSize(width: 172, height: 172)
+        gridLayout.minimumInteritemSpacing = 8
+        gridLayout.minimumLineSpacing = 8
+        gridLayout.sectionInset = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        fileGrid.collectionViewLayout = gridLayout
+        fileGrid.dataSource = self
+        fileGrid.delegate = self
+        fileGrid.isSelectable = true
+        fileGrid.backgroundColors = [NSColor(white: 0.08, alpha: 1)]
+        fileGrid.register(GalleryItem.self, forItemWithIdentifier: GalleryItem.identifier)
+        fileGrid.onOpen = { [weak self] index in Task { await self?.openFile(index) } }
+        fileGrid.toolTip = "Pictures of the pack's files from 16colo.rs. Click one to preview it; double click to open it."
+        fileGrid.setAccessibilityLabel("Files")
+        gridScroll.documentView = fileGrid
+        gridScroll.hasVerticalScroller = true
+        gridScroll.borderType = .bezelBorder
+        self.listScroll = listScroll
+        for pane in [listScroll, gridScroll] {
+            pane.frame = filesPane.bounds
+            pane.autoresizingMask = [.width, .height]
+            filesPane.addSubview(pane)
+        }
+        listScroll.isHidden = layout == .grid
+        gridScroll.isHidden = layout == .list
         addChild(preview)
         preview.onOpen = { [weak self] in self?.openSelectedFile() }
         preview.onEdit = { [weak self] in self?.editSelectedFile() }
@@ -376,7 +439,7 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         split.dividerStyle = .thin
         split.addArrangedSubview(yearScroll)
         split.addArrangedSubview(packScroll)
-        split.addArrangedSubview(fileScroll)
+        split.addArrangedSubview(filesPane)
         split.addArrangedSubview(preview.view)
         split.setHoldingPriority(.defaultLow + 1, forSubviewAt: 0)
         split.setHoldingPriority(.defaultLow + 2, forSubviewAt: 1)
@@ -405,7 +468,9 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         credit.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         credit.textColor = .tertiaryLabelColor
         credit.setContentHuggingPriority(.required, for: .horizontal)
-        let bar = NSStackView(views: [spinner, status, retryButton, NSView(), openPackButton])
+        let toggle = BrowseLayout.makeToggle(selected: layout, target: self, action: #selector(layoutToggled(_:)))
+        layoutToggle = toggle
+        let bar = NSStackView(views: [spinner, status, retryButton, NSView(), toggle, openPackButton])
         bar.orientation = .horizontal
         bar.spacing = 8
         bar.translatesAutoresizingMaskIntoConstraints = false
@@ -431,15 +496,15 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
             footer.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
             yearScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
             packScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
-            fileScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
+            filesPane.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
             split.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
         ])
         view = container
         // Starting widths: years narrow, then packs, files, and the preview takes the rest.
         DispatchQueue.main.async { [split] in
-            split.setPosition(130, ofDividerAt: 0)
-            split.setPosition(430, ofDividerAt: 1)
-            split.setPosition(820, ofDividerAt: 2)
+            split.setPosition(110, ofDividerAt: 0)
+            split.setPosition(380, ofDividerAt: 1)
+            split.setPosition(780, ofDividerAt: 2)
         }
     }
 
@@ -487,6 +552,7 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         select(index, in: yearTable)
         let year = years[index].year
         packs = []
+        cancelPackLoads()
         showPack(nil)
         packTable.reloadData()
         begin("Loading packs from \(year)...")
@@ -528,7 +594,13 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         previewTask?.cancel()
         previewGeneration += 1
         selectedFileIndex = nil
+        for load in gridLoads.values { load.cancel() }
+        gridLoads = [:]
+        gridImages = [:]
+        gridFailed = []
         fileTable.reloadData()
+        fileGrid.reloadData()
+        if let loaded { packCoverKnown(loaded) }
         preview.show(.empty(loaded == nil ? SixteenColorsPreview.emptyHint : "Select a file of \(loaded!.name) to preview it here."))
         updateButtons()
     }
@@ -579,6 +651,11 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     func chooseFile(_ row: Int) -> Task<Void, Never>? {
         guard files.indices.contains(row) else { return nil }
         select(row, in: fileTable)
+        let path = IndexPath(item: row, section: 0)
+        if fileGrid.selectionIndexPaths != [path] {
+            fileGrid.selectionIndexPaths = [path]
+            fileGrid.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge)
+        }
         previewTask?.cancel()
         previewTask = Task { [weak self] in await self?.previewFile(row) }
         return previewTask
@@ -689,8 +766,154 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     private func keepKeyboardInList() {
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.view.window else { return }
-            window.makeFirstResponder(self.fileTable)
+            window.makeFirstResponder(self.layout == .grid ? self.fileGrid : self.fileTable)
         }
+    }
+
+    // MARK: Layout
+
+    @objc private func layoutToggled(_ sender: NSSegmentedControl) {
+        setLayout(BrowseLayout(segment: sender.selectedSegment))
+    }
+
+    /// Shows the files as a list or a grid of thumbnails, and remembers the choice.
+    func setLayout(_ new: BrowseLayout) {
+        layout = new
+        new.store(key: Self.layoutKey)
+        layoutToggle?.selectedSegment = new == .list ? 0 : 1
+        listScroll?.isHidden = new == .grid
+        gridScroll.isHidden = new == .list
+        if new == .grid { fileGrid.reloadData() } else { fileTable.reloadData() }
+        if let index = selectedFileIndex { select(index, in: fileTable) }
+        if let index = selectedFileIndex {
+            let path = IndexPath(item: index, section: 0)
+            fileGrid.selectionIndexPaths = [path]
+            if new == .grid { fileGrid.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge) }
+        }
+        view.window?.makeFirstResponder(new == .grid ? fileGrid : fileTable)
+    }
+
+    // MARK: Grid of thumbnails
+
+    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
+        layout == .grid ? files.count : 0
+    }
+
+    func collectionView(_ collectionView: NSCollectionView,
+                        itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
+        let item = collectionView.makeItem(withIdentifier: GalleryItem.identifier, for: indexPath)
+        guard let item = item as? GalleryItem, files.indices.contains(indexPath.item) else { return item }
+        let index = indexPath.item
+        let file = files[index]
+        item.name = file.name
+        item.view.toolTip = file.artists.isEmpty ? file.name : "\(file.name) by \(file.artists.joined(separator: ", "))"
+        if gridImages[index] == nil, let url = file.thumbnail, let saved = client.cachedImage(url) { gridImages[index] = saved }
+        item.thumbnail = gridImages[index]
+        item.placeholder = gridPlaceholder(index)
+        if gridImages[index] == nil { loadGridThumbnail(index) }
+        return item
+    }
+
+    private func gridPlaceholder(_ index: Int) -> String {
+        if files[index].thumbnail == nil || gridFailed.contains(index) {
+            return client.isOffline ? "Offline" : "No preview"
+        }
+        return "Loading..."
+    }
+
+    /// Fetches one grid thumbnail when its turn comes; scrolling it away cancels the wait.
+    private func loadGridThumbnail(_ index: Int) {
+        guard gridLoads[index] == nil, !gridFailed.contains(index), let url = files[index].thumbnail else { return }
+        let pack = detail?.name
+        gridLoads[index] = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let image = try await self.client.image(url, priority: .grid)
+                guard pack == self.detail?.name else { return }
+                self.gridImages[index] = image
+                self.coverArrived(image, file: url)
+            } catch {
+                guard pack == self.detail?.name, !Self.isCancellation(error) else { return }
+                self.gridFailed.insert(index)
+            }
+            guard pack == self.detail?.name else { return }
+            self.gridLoads[index] = nil
+            if let item = self.fileGrid.item(at: IndexPath(item: index, section: 0)) as? GalleryItem {
+                item.thumbnail = self.gridImages[index]
+                item.placeholder = self.gridPlaceholder(index)
+            }
+        }
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, didEndDisplaying item: NSCollectionViewItem,
+                        forRepresentedObjectAt indexPath: IndexPath) {
+        gridLoads.removeValue(forKey: indexPath.item)?.cancel()
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
+        guard let index = collectionView.selectionIndexPaths.map(\.item).min(), index != selectedFileIndex else { return }
+        chooseFile(index)
+    }
+
+    // MARK: Pack row pictures
+
+    /// The picture for a pack's row: its cover when the file list is known, else the
+    /// FILE_ID.DIZ thumbnail 16colo.rs shows on its year pages.
+    private func packPictureURL(_ name: String) -> URL? {
+        if let known = client.cachedPack(named: name) { return known.cover?.thumbnail }
+        return SixteenColors.thumbnailURL(pack: name, file: "FILE_ID.DIZ")
+    }
+
+    /// A pack's file list arrived: its row may now have a better picture.
+    private func packCoverKnown(_ pack: SixteenColors.PackDetail) {
+        guard packImages[pack.name] == nil else { return }
+        packLoads.removeValue(forKey: pack.name)?.cancel()
+        packNoImage.remove(pack.name)
+        if let row = packs.firstIndex(where: { $0.name == pack.name }) {
+            packTable.reloadData(forRowIndexes: [row], columnIndexes: [0])
+        }
+    }
+
+    /// The grid fetched the open pack's cover: its row uses it too (no second request).
+    private func coverArrived(_ image: NSImage, file url: URL) {
+        guard let detail, detail.cover?.thumbnail == url, packImages[detail.name] == nil else { return }
+        packImages[detail.name] = image
+        packLoads.removeValue(forKey: detail.name)?.cancel()
+        if let row = packs.firstIndex(where: { $0.name == detail.name }) {
+            packTable.reloadData(forRowIndexes: [row], columnIndexes: [0])
+        }
+    }
+
+    private func loadPackPicture(_ name: String) {
+        guard packLoads[name] == nil, packImages[name] == nil, !packNoImage.contains(name),
+              let url = packPictureURL(name) else { return }
+        if let saved = client.cachedImage(url) {
+            packImages[name] = saved
+            return
+        }
+        packLoads[name] = Task { [weak self] in
+            guard let self else { return }
+            do {
+                self.packImages[name] = try await self.client.image(url, priority: .packRow)
+            } catch {
+                if Self.isCancellation(error) { return }
+                self.packNoImage.insert(name)
+            }
+            self.packLoads[name] = nil
+            if let row = self.packs.firstIndex(where: { $0.name == name }) {
+                self.packTable.reloadData(forRowIndexes: [row], columnIndexes: [0])
+            }
+        }
+    }
+
+    private func cancelPackLoads() {
+        for load in packLoads.values { load.cancel() }
+        packLoads = [:]
+    }
+
+    func tableView(_ tableView: NSTableView, didRemove rowView: NSTableRowView, forRow row: Int) {
+        guard tableView === packTable, let cell = rowView.view(atColumn: 0) as? PackRowCell else { return }
+        packLoads.removeValue(forKey: cell.packName)?.cancel()
     }
 
     // MARK: Actions
@@ -757,6 +980,17 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        if tableView === packTable, packs.indices.contains(row) {
+            let pack = packs[row]
+            let cell = tableView.makeView(withIdentifier: PackRowCell.identifier, owner: nil) as? PackRowCell ?? PackRowCell()
+            cell.packName = pack.name
+            cell.title.stringValue = pack.groups.isEmpty ? pack.name : "\(pack.name)  \u{00B7}  \(pack.groups.joined(separator: ", "))"
+            if packImages[pack.name] == nil { loadPackPicture(pack.name) }
+            cell.picture.image = packImages[pack.name]
+            cell.placeholder.isHidden = packImages[pack.name] != nil
+            cell.picture.layer?.backgroundColor = packImages[pack.name] == nil ? nil : NSColor.black.cgColor
+            return cell
+        }
         let id = NSUserInterfaceItemIdentifier("cell")
         let cell = tableView.makeView(withIdentifier: id, owner: nil) as? NSTextField ?? {
             let field = NSTextField(labelWithString: "")
@@ -829,4 +1063,46 @@ final class SixteenColorsWindowController: NSWindowController, NSWindowDelegate 
         (contentViewController as? SixteenColorsBrowser)?.cancelListing()
         Self.current = nil
     }
+}
+
+/// A pack row: a small picture of the pack (its FILE_ID.DIZ or first file) and its name.
+final class PackRowCell: NSTableCellView {
+    static let identifier = NSUserInterfaceItemIdentifier("PackRowCell")
+    let picture = NSImageView()
+    let title = NSTextField(labelWithString: "")
+    /// Shown until (or instead of) the picture.
+    let placeholder = NSImageView()
+    var packName = ""
+
+    init() {
+        super.init(frame: .zero)
+        identifier = Self.identifier
+        picture.imageScaling = .scaleProportionallyUpOrDown
+        picture.wantsLayer = true
+        picture.layer?.magnificationFilter = .nearest
+        placeholder.image = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
+        placeholder.contentTintColor = .tertiaryLabelColor
+        title.lineBreakMode = .byTruncatingTail
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for view in [picture, placeholder, title] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        textField = title
+        imageView = picture
+        NSLayoutConstraint.activate([
+            picture.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            picture.centerYAnchor.constraint(equalTo: centerYAnchor),
+            picture.widthAnchor.constraint(equalToConstant: 40),
+            picture.heightAnchor.constraint(equalToConstant: 40),
+            placeholder.centerXAnchor.constraint(equalTo: picture.centerXAnchor),
+            placeholder.centerYAnchor.constraint(equalTo: picture.centerYAnchor),
+            title.leadingAnchor.constraint(equalTo: picture.trailingAnchor, constant: 8),
+            title.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            title.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 }
