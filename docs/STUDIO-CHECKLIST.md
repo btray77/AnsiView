@@ -144,6 +144,12 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Retro phonebook (list, tags, search, sort, notes, call stats), per-BBS settings, Keychain passwords, expect/send auto-login, dial queue with redial and busy detection, macros, JSON and SyncTERM import/export | done (local test server; real-BBS logins need owner), merged item 63 |
 | IEMSI, Sixel, iTerm2 images, SSH keys, TLS certs, RLogin | planned (transports) |
 
+## 16colo.rs browsing
+
+| Requirement | Status |
+|---|---|
+| Preview pane on selection (real art via AnsiView renderer, SAUCE caption, x1 fallback), pack thumbnail grid, pack row pictures, grid/list toggle in browser and galleries, 200 MB disk cache, offline mode | done (harness and live 16colo.rs; live app check needs owner), items 35-37 |
+
 ## Running right now
 
 - Editor v2: TheDraw-class tools (`ansiview-2.0-editor-tools`)
