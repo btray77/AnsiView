@@ -98,6 +98,8 @@ final class AnsiPlayerViewController: NSViewController {
 
     let analysis: AnsiAnalysis
     let source: ArtFile
+    /// Where the file lives, when the host knows (document windows and folder slideshows).
+    var fileURL: URL?
     let speed: PlayerSpeed
     /// Frame positions for the scrub bar and stepping; nil for static art, which has no bar.
     let timeline: PlaybackTimeline?

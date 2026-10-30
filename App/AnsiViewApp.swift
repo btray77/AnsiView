@@ -57,7 +57,7 @@ struct AnsiViewApp: App {
 
     var body: some Scene {
         DocumentGroup(viewing: AnsiDocument.self) { file in
-            AnsiPlayerScene(source: file.document.source)
+            AnsiPlayerScene(source: file.document.source, fileURL: file.fileURL)
         }
         // A DOS screen (640x400) at one and a half times size.
         .defaultSize(width: 960, height: 600)
@@ -67,6 +67,9 @@ struct AnsiViewApp: App {
                     .keyboardShortcut("e")
                 Button("Export Animation...") { send(#selector(AnsiCanvasView.exportAnimation(_:))) }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
+                Divider()
+                Button("Get Info") { send(#selector(AnsiPlayerViewController.showArtInfo(_:))) }
+                    .keyboardShortcut("i")
             }
             CommandGroup(before: .toolbar) {
                 Toggle("CRT Effect", isOn: $crtEffect)
@@ -114,25 +117,29 @@ struct AnsiViewApp: App {
 /// One document window: the player plus its per file speed, published to the menu commands.
 struct AnsiPlayerScene: View {
     let source: ArtFile
+    let fileURL: URL?
     @StateObject private var speed: PlayerSpeed
 
-    init(source: ArtFile) {
+    init(source: ArtFile, fileURL: URL?) {
         self.source = source
+        self.fileURL = fileURL
         _speed = StateObject(wrappedValue: PlayerSpeed(fileKey: source.identity))
     }
 
     var body: some View {
-        AnsiPlayerView(source: source, speed: speed)
+        AnsiPlayerView(source: source, fileURL: fileURL, speed: speed)
             .focusedSceneObject(speed)
     }
 }
 
 struct AnsiPlayerView: NSViewControllerRepresentable {
     let source: ArtFile
+    let fileURL: URL?
     let speed: PlayerSpeed
 
     func makeNSViewController(context: Context) -> AnsiPlayerViewController {
         let controller = AnsiPlayerViewController(source: source, speed: speed)
+        controller.fileURL = fileURL
         controller.sound = ModemSoundPlayer()
         return controller
     }
