@@ -9,20 +9,21 @@ private func fixture() throws -> String {
 
 @Test func syncTermImportsTelnetAndRaw() throws {
     let result = SyncTermImport.parse(try fixture())
-    #expect(result.entries.map(\.entry.name) == ["Example Telnet Board", "Raw Socket Board", "Default Port Board"])
+    #expect(result.entries.map(\.entry.name) == ["Example Telnet Board", "Raw Socket Board", "Secure Board", "Default Port Board"])
     let first = result.entries[0].entry
     #expect(first.host == "telnet.example.com" && first.port == 2323 && first.mode == .telnet)
     #expect(first.username == "guest")
     #expect(first.notes == "Door games and message bases")
     let raw = result.entries[1].entry
     #expect(raw.host == "raw.example.org" && raw.mode == .raw && raw.port == 23)
-    #expect(result.entries[2].entry.mode == .telnet)
+    #expect(result.entries[2].entry.mode == .ssh)
+    #expect(result.entries[3].entry.mode == .telnet)
 }
 
 @Test func syncTermSkipsOtherTypes() throws {
     let result = SyncTermImport.parse(try fixture())
-    // SSH, Modem, and an entry with no address.
-    #expect(result.skipped == ["Secure Board (SSH)", "Old Modem Entry (Modem)", "Broken Entry (no address)"])
+    // Modem, and an entry with no address (SSH imports since the transports plan).
+    #expect(result.skipped == ["Old Modem Entry (Modem)", "Broken Entry (no address)"])
 }
 
 @Test func syncTermPasswordsReturnedSeparately() throws {
@@ -38,7 +39,7 @@ private func fixture() throws -> String {
     let result = SyncTermImport.parse(try fixture())
     let first = result.entries[0].entry
     #expect(first.columns == 80 && first.rows == 50 && first.baud == 2400)
-    let last = result.entries[2].entry
+    let last = result.entries[3].entry
     #expect(last.columns == 132 && last.rows == 37 && last.baud == 0)
 }
 

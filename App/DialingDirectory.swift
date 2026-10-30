@@ -38,6 +38,11 @@ final class DialingDirectoryStore {
         entry.credentialKey.flatMap { passwords.password(for: $0) } ?? ""
     }
 
+    /// The SSH key file passphrase (Keychain), or "".
+    func passphrase(for entry: BBSEntry) -> String {
+        entry.sshPassphraseKey.flatMap { passwords.password(for: $0) } ?? ""
+    }
+
     enum SaveProblem: LocalizedError {
         case badAddress
         case passwordNeedsUsername
@@ -66,16 +71,34 @@ final class DialingDirectoryStore {
 
     /// Saves an entry (new or edited) and its password. The Keychain item follows a change of
     /// host, port or username; an empty password removes it.
-    func save(_ draft: BBSEntry, password: String, original: BBSEntry?) throws {
+    func save(_ draft: BBSEntry, password: String, passphrase: String = "", original: BBSEntry?) throws {
         // Calls recorded while the editor was open are kept.
         let entry = directory.keepingHistory(try validated(draft, password: password))
+        if !passphrase.isEmpty, entry.sshPassphraseKey == nil { throw SaveProblem.passwordNeedsUsername }
         do {
             try DialingDirectory.saveCredential(password: password, for: entry, original: original, in: directory, store: passwords)
+            try savePassphrase(passphrase, for: entry, original: original)
         } catch {
             throw SaveProblem.keychain(error)
         }
         update { d in
             if let index = d.entries.firstIndex(where: { $0.id == entry.id }) { d.entries[index] = entry } else { d.entries.append(entry) }
+        }
+    }
+
+    /// The SSH key passphrase follows the entry's host, port and username like the password; it is
+    /// written to the new key before the old one is removed. One per entry (not shared).
+    private func savePassphrase(_ passphrase: String, for entry: BBSEntry, original: BBSEntry?) throws {
+        let key = entry.sshPassphraseKey
+        if let key {
+            if passphrase.isEmpty {
+                if passwords.password(for: key) != nil, original?.sshPassphraseKey == key { try passwords.removePassword(for: key) }
+            } else if passwords.password(for: key) != passphrase {
+                try passwords.setPassword(passphrase, for: key, label: "AnsiView SSH key: \(entry.name)")
+            }
+        }
+        if let old = original?.sshPassphraseKey, old != key, passwords.password(for: old) != nil {
+            try passwords.removePassword(for: old)
         }
     }
 
@@ -86,6 +109,10 @@ final class DialingDirectoryStore {
         update { d in d.entries.removeAll { gone.contains($0.id) } }
         for entry in removed {
             if let key = entry.credentialKey, !directory.sharesCredential(key, excluding: entry.id) {
+                try? passwords.removePassword(for: key)
+            }
+            if let key = entry.sshPassphraseKey, passwords.password(for: key) != nil,
+               !directory.entries.contains(where: { $0.sshPassphraseKey == key }) {
                 try? passwords.removePassword(for: key)
             }
         }
@@ -343,8 +370,8 @@ final class DialingDirectoryViewController: NSViewController {
     // MARK: Editing
 
     func beginEdit(_ entry: BBSEntry, original: BBSEntry?) {
-        let form = EntryForm.make(entry: entry, password: store.password(for: entry), fonts: BitmapFont.supportedNames,
-                                  speeds: PlaybackSpeed.choices)
+        let form = EntryForm.make(entry: entry, password: store.password(for: entry), passphrase: store.passphrase(for: entry),
+                                  fonts: BitmapFont.supportedNames, speeds: PlaybackSpeed.choices)
         mode = .edit(form: form, draft: entry, original: original)
         refresh()
     }
@@ -353,8 +380,27 @@ final class DialingDirectoryViewController: NSViewController {
         guard case .edit(let form, let draft, let original) = mode else { return }
         switch event {
         case .done: save(form: form, draft: draft, original: original)
+        case .changed(let id) where id == "mode" || id == "wsSecure":
+            // The protocol's own fields appear at once, and a default port follows the protocol.
+            rebuild(entry: EntryForm.changingProtocol(form, draft: draft), password: EntryForm.apply(form, to: draft).password,
+                    original: original, selecting: id, from: form)
         case .activated(let action):
             let applied = EntryForm.apply(form, to: draft)
+            if action == "chooseKey" {
+                chooseKeyFile(applied.entry, password: applied.password, form: form, original: original)
+                return
+            }
+            if action == "forgetHostKey" {
+                let entry = applied.entry
+                let had = HostKeyPrompt().forget(host: entry.host, port: entry.port)
+                var shown = form
+                let address = KnownHosts.hostPattern(host: entry.host, port: entry.port)
+                shown.info = had ? "Forgot the saved host key of \(address). The next call asks about its key."
+                    : "No host key is saved for \(address)."
+                mode = .edit(form: shown, draft: draft, original: original)
+                refresh()
+                return
+            }
             if action == "chooseFolder" {
                 chooseCaptureFolder { url in
                     guard let url, case .edit(let current, let draft, let original) = self.mode else { return }
@@ -381,7 +427,9 @@ final class DialingDirectoryViewController: NSViewController {
     }
 
     private func rebuild(entry: BBSEntry, password: String, original: BBSEntry?, selecting id: String, from old: TextForm) {
-        var form = EntryForm.make(entry: entry, password: password, fonts: BitmapFont.supportedNames, speeds: PlaybackSpeed.choices)
+        let passphrase = old.field("keyPassphrase") == nil ? store.passphrase(for: entry) : EntryForm.passphrase(old)
+        var form = EntryForm.make(entry: entry, password: password, passphrase: passphrase, fonts: BitmapFont.supportedNames,
+                                  speeds: PlaybackSpeed.choices)
         if let show = old.field("showPassword"), show.isOn, let index = form.fields.firstIndex(where: { $0.id == "showPassword" }) {
             form.fields[index].isOn = true
         }
@@ -404,7 +452,7 @@ final class DialingDirectoryViewController: NSViewController {
     private func save(form: TextForm, draft: BBSEntry, original: BBSEntry?) {
         let (entry, password) = EntryForm.apply(form, to: draft)
         do {
-            try store.save(entry, password: password, original: original)
+            try store.save(entry, password: password, passphrase: EntryForm.passphrase(form), original: original)
             browser.select(entry.id)
             mode = .browse
         } catch {
@@ -418,6 +466,52 @@ final class DialingDirectoryViewController: NSViewController {
         guard case .settings(let form) = mode else { return }
         store.update { $0 = EntryForm.applySettings(form, to: $0) }
         mode = .browse
+    }
+
+    /// SSH key file: an open panel, an app scoped bookmark, and a check that AnsiView can use the key.
+    private func chooseKeyFile(_ entry: BBSEntry, password: String, form: TextForm, original: BBSEntry?) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.showsHiddenFiles = true
+        panel.prompt = "Choose"
+        panel.message = "Choose your SSH private key file (for example ~/.ssh/id_ed25519, not the .pub file)."
+        let finish: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url, case .edit(let current, let draft, let original) = self.mode else { return }
+            var entry = EntryForm.apply(current, to: draft).entry
+            let typedPassphrase = EntryForm.passphrase(current)
+            guard let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil,
+                                                       relativeTo: nil) else {
+                var shown = current
+                shown.info = "AnsiView could not keep permission for \(url.lastPathComponent). Choose another file."
+                self.mode = .edit(form: shown, draft: draft, original: original)
+                self.refresh()
+                return
+            }
+            entry.sshKeyBookmark = bookmark
+            entry.sshKeyName = url.lastPathComponent
+            self.rebuild(entry: entry, password: EntryForm.apply(current, to: draft).password, original: original,
+                         selecting: "chooseKey", from: current)
+            // Say soon when the key cannot be used (RSA, not a key, damaged); checked off the main thread.
+            guard let data = try? Data(contentsOf: url) else { return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                var problem: SSHKeyFileError?
+                do {
+                    _ = try SSHKeyFile.parse(data, passphrase: typedPassphrase.isEmpty ? nil : typedPassphrase)
+                } catch let error as SSHKeyFileError where error != .needsPassphrase && error != .wrongPassphrase {
+                    problem = error
+                } catch {}
+                guard let problem else { return }
+                DispatchQueue.main.async {
+                    if case .edit(var shown, let d, let o) = self.mode {
+                        shown.info = problem.message
+                        self.mode = .edit(form: shown, draft: d, original: o)
+                        self.refresh()
+                    }
+                }
+            }
+        }
+        if let window = view.window { panel.beginSheetModal(for: window, completionHandler: finish) } else { finish(panel.runModal()) }
     }
 
     private func chooseCaptureFolder(_ done: @escaping (URL?) -> Void) {

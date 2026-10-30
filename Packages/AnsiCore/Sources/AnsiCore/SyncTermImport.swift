@@ -2,8 +2,8 @@ import Foundation
 
 /// Reads a SyncTERM dialing directory (`syncterm.lst`): INI text with one `[Name]` section per
 /// BBS and `Key=Value` lines (`Address`, `Port`, `ConnectionType`, `Username`, `Password`,
-/// `Comment`, `BPSRate`, `ScreenMode`). Telnet and Raw entries import; other connection types
-/// are listed in `skipped`. Passwords come back beside the entry, for the Keychain.
+/// `Comment`, `BPSRate`, `ScreenMode`). Telnet, Raw, SSH, SSHNA and RLogin entries import;
+/// other connection types (RLoginReversed, TelnetS, Modem, Serial, Shell, ...) are listed in `skipped`. Passwords come back beside the entry, for the Keychain.
 public enum SyncTermImport {
     public struct Imported: Equatable {
         public var entry: BBSEntry
@@ -38,12 +38,15 @@ public enum SyncTermImport {
             switch type.lowercased() {
             case "telnet": mode = .telnet
             case "raw": mode = .raw
+            // SSHNA is SSH without authentication: imported as SSH with no password.
+            case "ssh", "sshna": mode = .ssh
+            case "rlogin": mode = .rlogin
             default:
                 result.skipped.append("\(name) (\(type))")
                 continue
             }
             guard let address = values["address"], !address.isEmpty,
-                  let parsed = BBSAddress.parse(address) else {
+                  let parsed = BBSAddress.parse(address, defaultPort: mode.defaultPort()) else {
                 result.skipped.append("\(name) (no address)")
                 continue
             }
@@ -57,7 +60,10 @@ public enum SyncTermImport {
                 entry.columns = size.columns
                 entry.rows = size.rows
             }
-            let password = values["password"].flatMap { $0.isEmpty ? nil : $0 }
+            let password = type.lowercased() == "sshna" ? nil : values["password"].flatMap { $0.isEmpty ? nil : $0 }
+            // SyncTERM sends the password as the RLogin client user (inferred from its documented
+            // Synchronet convention); the password itself goes to the Keychain.
+            if mode == .rlogin, password != nil { entry.rloginClientIsPassword = true }
             result.entries.append(Imported(entry: entry, password: password))
         }
         return result

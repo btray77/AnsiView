@@ -13,10 +13,18 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     exactVersion: 2.10.1
+  # Terminal SSH connections (app target only; the extensions and ansirender do not link it).
+  # Apache 2.0. swift-nio-ssh brings swift-crypto, swift-atomics and swift-collections.
+  swift-nio-ssh:
+    url: https://github.com/apple/swift-nio-ssh
+    exactVersion: 0.15.1
+  swift-nio:
+    url: https://github.com/apple/swift-nio
+    exactVersion: 2.104.0
 settings:
   base:
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "73"
+    CURRENT_PROJECT_VERSION: "74"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -125,6 +133,12 @@ targets:
       - package: AnsiCore
       - package: libwebp
       - package: Sparkle
+      - package: swift-nio-ssh
+        product: NIOSSH
+      - package: swift-nio
+        product: NIOPosix
+      - package: swift-nio
+        product: NIOCore
   AnsiPreview:
     type: app-extension
     platform: macOS

@@ -270,7 +270,8 @@ The quick connect field calls an address without saving it (`bbs.example.com`,
 **Editing a BBS** (E or N) shows a text mode form: Up and Down move between fields, Enter goes
 to the next, Left and Right (or Space) change a choice or a switch, typing edits text, and Esc
 saves and goes back (Cancel discards). The line under the form explains the selected field. The
-sections: Connection (name, host, port, protocol telnet or raw TCP, tags, notes), Terminal
+sections: Connection (name, host, port, protocol, tags, notes; then the chosen protocol's own
+fields, see Connections below), Terminal
 (terminal type, ANSI by default; columns and rows; font; CP437 or UTF-8; iCE colours, which show
 blinking as bright backgrounds; simulated modem speed; what Backspace sends; modem sound on, off
 or as Playback > Modem Sounds), Login (username, password, show password, log in automatically,
@@ -313,8 +314,9 @@ security bookmark, which is why the app has the `files.bookmarks.app-scope` enti
 
 **Import and export.** Export (X) writes the directory to a JSON file without passwords or
 capture folders. Import (I) reads such a file, a plan 7 style address book, or a SyncTERM
-dialing directory (`syncterm.lst`): telnet and raw entries come in (their passwords go into the
-Keychain), and SSH, RLogin, modem and other entries are listed as not imported. Entries already
+dialing directory (`syncterm.lst`): telnet, raw, SSH (and SSHNA, SSH without a password) and
+RLogin entries come in (their passwords go into the Keychain), and RLoginReversed, TelnetS,
+modem and other entries are listed as not imported. Entries already
 in the directory (same name, host, port and username) are skipped.
 
 **Settings** (G): redial passes and delay, showing the directory when AnsiView starts, and the
@@ -361,6 +363,47 @@ address that could not be found, a refused port, no answer within 15 seconds, or
 closing the connection. AnsiView only makes outgoing connections (the sandbox's
 `network.client` entitlement, which the app already had for 16colo.rs); the Quick Look,
 thumbnail and Spotlight extensions have no network access.
+
+#### Connections: telnet, raw TCP, SSH, WebSocket, RLogin
+
+The Protocol field of an entry picks how AnsiView reaches the BBS; the port follows the protocol
+(23 telnet and raw, 22 SSH, 80 WebSocket or 443 with wss, 513 RLogin) unless you typed your own.
+
+- **SSH** opens a session with a terminal (the entry's terminal type, columns and rows; a new
+  size is sent when you change it) and logs in as the entry's username (`guest` when empty: most
+  BBSes take any name and ask again on their own login screen). It tries the key file if one is
+  chosen, then the password saved in the Keychain, or an empty password when none is saved.
+  Key files: Ed25519 and ECDSA (P-256, P-384, P-521) in OpenSSH format, with or without a
+  passphrase (kept in the Keychain; at most 1024 bcrypt rounds, OpenSSH's default is 16), and PEM
+  ECDSA keys. RSA keys are not supported (the SSH
+  library cannot sign with them); make an Ed25519 key with `ssh-keygen -t ed25519`. Keyboard
+  interactive login is not supported either. The first connection to a server shows its host key
+  fingerprint (`SHA256:...`, as `ssh-keygen -l` prints it) and asks whether to trust it, unless
+  the entry's Trust new host key is on; trusted keys are kept in
+  `~/Library/Containers/com.traynham.AnsiView/Data/Library/Application Support/AnsiView/known_hosts`
+  (OpenSSH format). If a server later offers a different key, AnsiView refuses to connect and
+  shows both fingerprints; Forget the Saved Key (or the entry's Saved host key: Forget) lets the
+  next connection ask again. **Limitation:** the SSH library (Apple's swift-nio-ssh) only speaks
+  curve25519 and ECDH key exchange, Ed25519 and ECDSA host keys and AES-GCM. Many BBS SSH servers
+  (Synchronet and other cryptlib based ones, and ENiGMA 1/2 with an RSA host key) offer only
+  older methods, and AnsiView then says so; use their telnet port.
+- **WebSocket** connects to `ws://host:port/path`, or `wss://` with Secure on (TLS, with the
+  Mac's certificate trust). Data goes out as binary frames; binary and text frames are shown.
+  Subprotocols (such as `telnet` or `binary`) are sent when the BBS's web terminal names them.
+  Telnet inside runs telnet negotiation through the WebSocket, for bridges that carry a raw telnet
+  stream (fTelnet or websockify style). Errors name a TLS failure (for example a self signed
+  certificate) or an HTTP answer instead of the upgrade, with its status code.
+- **RLogin** (RFC 1282) sends the client user, server user (each your username unless set; Send
+  password puts your Keychain password in the client user, as Synchronet style servers expect) and
+  terminal type with the speed (`ansi/38400`, or the simulated speed), and shows the server's
+  refusal text if it refuses. The window size is not sent: the server asks for it with TCP urgent
+  data, which macOS's Network framework does not expose. The sandbox cannot use a privileged
+  source port, which BBS RLogin servers do not require.
+
+SSH and RLogin already send the username, so the login script does not run by itself on them
+(Terminal > Log In still runs it). For file transfers, every transport carries all 256 byte
+values unchanged (telnet doubles 255 and needs BINARY both ways for CR; SSH, WebSocket binary
+frames and RLogin after its handshake are clean).
 
 ### Copy and paste
 
@@ -587,6 +630,8 @@ Formats: `png jpeg webp gif awebp mp4 html ansi ansi256 text utf8`. Options: `--
 - WebP encoding uses [libwebp](https://chromium.googlesource.com/webm/libwebp) (BSD license)
   via [libwebp-Xcode](https://github.com/SDWebImage/libwebp-Xcode).
 - Updates use [Sparkle](https://sparkle-project.org) (MIT license), in the downloaded build only.
+- SSH connections use Apple's [swift-nio-ssh](https://github.com/apple/swift-nio-ssh) with
+  swift-nio, swift-crypto, swift-atomics, swift-collections and swift-system (Apache License 2.0).
 - The bundled samples are original, made by `Packaging/samples/generate.swift`.
 
 See [Credits.md](Credits.md).

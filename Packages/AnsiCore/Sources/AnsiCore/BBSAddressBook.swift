@@ -1,10 +1,29 @@
 import Foundation
 
-/// Telnet (with option negotiation) or a plain TCP byte stream.
+/// How the terminal reaches a BBS: telnet (with option negotiation), a plain TCP byte stream,
+/// SSH, a WebSocket (ws or wss) or RLogin (RFC 1282).
 public enum ConnectionMode: String, Codable, CaseIterable {
-    case telnet, raw
+    case telnet, raw, ssh, webSocket, rlogin
 
-    public var label: String { self == .telnet ? "Telnet" : "Raw TCP" }
+    public var label: String {
+        switch self {
+        case .telnet: return "Telnet"
+        case .raw: return "Raw TCP"
+        case .ssh: return "SSH"
+        case .webSocket: return "WebSocket"
+        case .rlogin: return "RLogin"
+        }
+    }
+
+    /// The usual port: 23 telnet and raw, 22 SSH, 80 WebSocket (443 with TLS), 513 RLogin.
+    public func defaultPort(secure: Bool = false) -> Int {
+        switch self {
+        case .telnet, .raw: return 23
+        case .ssh: return 22
+        case .webSocket: return secure ? 443 : 80
+        case .rlogin: return 513
+        }
+    }
 }
 
 /// Whether a BBS plays the dial and handshake sound while connecting.
@@ -63,6 +82,26 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     public var terminalType: String
     /// Shows the blink attribute as a bright background (iCE colours) instead of blinking text.
     public var iceColors: Bool
+    /// SSH: a security scoped bookmark to the private key file (only valid on this Mac).
+    public var sshKeyBookmark: Data?
+    /// SSH: the key file's name, shown in the editor.
+    public var sshKeyName: String?
+    /// SSH: saves a host key seen for the first time without asking. A changed key is still refused.
+    public var sshTrustNewHostKey: Bool
+    /// WebSocket: the URL path, such as / or /ws.
+    public var webSocketPath: String
+    /// WebSocket: wss (TLS) instead of ws.
+    public var webSocketSecure: Bool
+    /// WebSocket: subprotocols for Sec-WebSocket-Protocol, separated by commas (empty sends none).
+    public var webSocketSubprotocols: String
+    /// WebSocket: the stream carries telnet (a telnet bridge), so telnet negotiation runs inside it.
+    public var webSocketTelnet: Bool
+    /// RLogin: the client user name; empty sends the username.
+    public var rloginClientUser: String
+    /// RLogin: the server user name; empty sends the username.
+    public var rloginServerUser: String
+    /// RLogin: the client user field carries the Keychain password (Synchronet style RLogin).
+    public var rloginClientIsPassword: Bool
 
     public static let standardTerminalTypes = ["ANSI", "ANSI-BBS", "VT100"]
 
@@ -99,10 +138,26 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         busyText = Self.defaultBusyText
         terminalType = "ANSI"
         iceColors = false
+        sshKeyBookmark = nil
+        sshKeyName = nil
+        sshTrustNewHostKey = false
+        webSocketPath = "/"
+        webSocketSecure = false
+        webSocketSubprotocols = ""
+        webSocketTelnet = false
+        rloginClientUser = ""
+        rloginServerUser = ""
+        rloginClientIsPassword = false
     }
 
     public var address: String {
         host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)"
+    }
+
+    /// The Keychain key for this entry's SSH key file passphrase; nil without a username.
+    public var sshPassphraseKey: CredentialKey? {
+        guard let username, !username.isEmpty, !host.isEmpty else { return nil }
+        return CredentialKey(host: host, port: port, account: "ssh-key-passphrase:" + username)
     }
 
     /// The Keychain key for this entry's password; nil without a username.
@@ -115,6 +170,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         case id, name, host, port, username, fontName, columns, rows, encoding, mode, baud, backspaceSendsDelete
         case notes, tags, lastCalled, totalCalls, captureOnConnect, captureFolderBookmark, captureFolderName
         case modemSound, macros, autoLogin, loginScript, busyText, terminalType, iceColors
+        case sshKeyBookmark, sshKeyName, sshTrustNewHostKey, webSocketPath, webSocketSecure, webSocketSubprotocols
+        case webSocketTelnet, rloginClientUser, rloginServerUser, rloginClientIsPassword
     }
 
     /// Missing or out of range fields fall back to the defaults, so older (plan 7) or hand edited books load.
@@ -147,6 +204,16 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         if let value = try? c.decode(String.self, forKey: .busyText) { busyText = value }
         if let value = try? c.decode(String.self, forKey: .terminalType), !value.isEmpty { terminalType = value }
         if let value = try? c.decode(Bool.self, forKey: .iceColors) { iceColors = value }
+        sshKeyBookmark = try? c.decode(Data.self, forKey: .sshKeyBookmark)
+        sshKeyName = try? c.decode(String.self, forKey: .sshKeyName)
+        if let value = try? c.decode(Bool.self, forKey: .sshTrustNewHostKey) { sshTrustNewHostKey = value }
+        if let value = try? c.decode(String.self, forKey: .webSocketPath), !value.isEmpty { webSocketPath = value }
+        if let value = try? c.decode(Bool.self, forKey: .webSocketSecure) { webSocketSecure = value }
+        if let value = try? c.decode(String.self, forKey: .webSocketSubprotocols) { webSocketSubprotocols = value }
+        if let value = try? c.decode(Bool.self, forKey: .webSocketTelnet) { webSocketTelnet = value }
+        if let value = try? c.decode(String.self, forKey: .rloginClientUser) { rloginClientUser = value }
+        if let value = try? c.decode(String.self, forKey: .rloginServerUser) { rloginServerUser = value }
+        if let value = try? c.decode(Bool.self, forKey: .rloginClientIsPassword) { rloginClientIsPassword = value }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -177,6 +244,16 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         try c.encode(busyText, forKey: .busyText)
         try c.encode(terminalType, forKey: .terminalType)
         try c.encode(iceColors, forKey: .iceColors)
+        try c.encodeIfPresent(sshKeyBookmark, forKey: .sshKeyBookmark)
+        try c.encodeIfPresent(sshKeyName, forKey: .sshKeyName)
+        try c.encode(sshTrustNewHostKey, forKey: .sshTrustNewHostKey)
+        try c.encode(webSocketPath, forKey: .webSocketPath)
+        try c.encode(webSocketSecure, forKey: .webSocketSecure)
+        try c.encode(webSocketSubprotocols, forKey: .webSocketSubprotocols)
+        try c.encode(webSocketTelnet, forKey: .webSocketTelnet)
+        try c.encode(rloginClientUser, forKey: .rloginClientUser)
+        try c.encode(rloginServerUser, forKey: .rloginServerUser)
+        try c.encode(rloginClientIsPassword, forKey: .rloginClientIsPassword)
     }
 
     private static func clampSize(_ value: Int) -> Int {
