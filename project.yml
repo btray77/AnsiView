@@ -1,0 +1,92 @@
+name: AnsiView
+options:
+  bundleIdPrefix: com.traynham
+  deploymentTarget:
+    macOS: "14.0"
+packages:
+  libwebp:
+    url: https://github.com/SDWebImage/libwebp-Xcode
+    exactVersion: 1.6.0
+settings:
+  base:
+    MARKETING_VERSION: "1.2.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+  configs:
+    Release:
+      CODE_SIGN_IDENTITY: "Developer ID Application"
+      DEVELOPMENT_TEAM: 47HEHK53W5
+      ENABLE_HARDENED_RUNTIME: YES
+      OTHER_CODE_SIGN_FLAGS: --timestamp
+      ARCHS: "arm64 x86_64"
+      ONLY_ACTIVE_ARCH: NO
+targets:
+  AnsiView:
+    type: application
+    platform: macOS
+    sources: [App, Shared]
+    entitlements:
+      path: App/AnsiView.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.application-groups: [47HEHK53W5.com.traynham.ansiview]
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: AnsiView
+        CFBundleIconFile: AppIcon
+        NSHumanReadableCopyright: Copyright 2026 Brad Traynham
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.graphics-design
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.traynham.ansiview.ans
+            UTTypeDescription: ANSI Art
+            UTTypeConformsTo: [public.data, public.content]
+            UTTypeTagSpecification:
+              public.filename-extension: [ans, ice, diz, nfo, asc]
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: ANSI Art
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Default
+            LSItemContentTypes: [com.traynham.ansiview.ans]
+    dependencies:
+      - target: AnsiPreview
+      - package: libwebp
+  AnsiPreview:
+    type: app-extension
+    platform: macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.Preview
+    sources: [Preview, Shared]
+    entitlements:
+      path: Preview/AnsiPreview.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-only: true
+        com.apple.security.application-groups: [47HEHK53W5.com.traynham.ansiview]
+    info:
+      path: Preview/Info.plist
+      properties:
+        CFBundleDisplayName: AnsiView Preview
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.quicklook.preview
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PreviewViewController
+          NSExtensionAttributes:
+            QLIsDataBasedPreview: false
+            QLSupportsSearchableItems: false
+            QLSupportedContentTypes: [com.traynham.ansiview.ans]
+  ansirender:
+    type: tool
+    platform: macOS
+    sources: [Tool, Shared, App/AnsiExport.swift]
+    dependencies:
+      - package: libwebp

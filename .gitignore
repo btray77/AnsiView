@@ -1,0 +1,6 @@
+build/
+dist/
+AnsiView.xcodeproj/
+.DS_Store
+*.xcuserstate
+xcuserdata/
