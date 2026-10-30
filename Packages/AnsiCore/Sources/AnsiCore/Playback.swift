@@ -96,3 +96,32 @@ public struct SpeedMemory {
         if entries.count > Self.limit { entries.removeFirst(entries.count - Self.limit) }
     }
 }
+
+/// While tall art plays, the player shows a 25 line window that follows the cursor the way a DOS
+/// terminal screen would, moving as little as possible to keep the cursor in view.
+public enum TerminalViewport {
+    public static let rows = 25
+
+    /// The top row of the window. Without a previous window the cursor sits on the bottom line
+    /// (or the window starts at row 0).
+    public static func follow(cursorRow: Int, previousTop: Int?, canvasRows: Int) -> Int {
+        let maxTop = max(0, canvasRows - rows)
+        let cursor = max(0, cursorRow)
+        var top = previousTop ?? max(0, cursor - (rows - 1))
+        if cursor < top { top = cursor }
+        if cursor >= top + rows { top = cursor - (rows - 1) }
+        return min(max(0, top), maxTop)
+    }
+}
+
+extension AnsiScreen {
+    /// Exactly `rows` rows starting at `top`, padded with blank cells past the end.
+    public func window(top: Int, rows count: Int) -> AnsiScreen {
+        let start = min(max(0, top), rows.count)
+        var slice = Array(rows[start..<min(rows.count, start + count)])
+        while slice.count < count { slice.append(Array(repeating: AnsiCell(), count: columns)) }
+        var result = self
+        result.rows = slice
+        return result
+    }
+}

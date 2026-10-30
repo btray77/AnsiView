@@ -124,12 +124,22 @@ final class AnsiPlayerViewController: NSViewController {
     }
 
     /// Size of the art in points, one point per VGA pixel.
-    var contentSize: CGSize {
+    var contentSize: CGSize { artSize(rows: analysis.canvasRows) }
+
+    private func artSize(rows: Int) -> CGSize {
         let cellWidth = renderOptions.font.width + (renderOptions.ninePixel ? 1 : 0)
         let aspect = AnsiRenderer.pixelAspect(for: analysis.finalScreen, ninePixel: renderOptions.ninePixel)
         return CGSize(width: CGFloat(source.columns * cellWidth),
-                      height: (CGFloat(analysis.canvasRows * renderOptions.font.height) * aspect).rounded())
+                      height: (CGFloat(rows * renderOptions.font.height) * aspect).rounded())
     }
+
+    /// True while tall art is mid playback: the view shows a 25 line terminal window that follows
+    /// the cursor instead of the whole canvas.
+    var isTerminalMode: Bool { analysis.canvasRows > TerminalViewport.rows && !screenIsFinal }
+    /// Rows on screen now: the terminal window during playback of tall art, else the whole canvas.
+    var displayedRows: Int { isTerminalMode ? TerminalViewport.rows : analysis.canvasRows }
+    /// Top row of the terminal window; nil until playback places it.
+    private(set) var viewportTop: Int?
 
     /// The art plus the scrub bar, for hosts that size a window to fit.
     var idealViewSize: CGSize {
@@ -260,11 +270,11 @@ final class AnsiPlayerViewController: NSViewController {
     /// Scales the art to the window, keeping its proportions. Normal screens fit entirely and are
     /// centered; scrollers fit the width and scroll vertically.
     private func fitToWindow() {
-        let art = contentSize
+        let art = artSize(rows: displayedRows)
         let available = scroll.contentSize
         guard art.width > 0, art.height > 0, available.width > 0, available.height > 0 else { return }
         let widthScale = available.width / art.width
-        let isScroller = analysis.canvasRows > Self.scrollerRows && art.height * widthScale > available.height
+        let isScroller = displayedRows > Self.scrollerRows && art.height * widthScale > available.height
         let scale = isScroller ? widthScale : min(widthScale, available.height / art.height)
         let size = CGSize(width: (art.width * scale).rounded(), height: (art.height * scale).rounded())
         if canvas.frame.size != size {
@@ -297,10 +307,8 @@ final class AnsiPlayerViewController: NSViewController {
             skipToEnd()
             return
         }
-        screen = terminal.screen(minimumRows: analysis.canvasRows)
-        screenIsFinal = false
-        redraw()
-        updateTimeline()
+        viewportTop = nil
+        showTerminal()
         Logger(subsystem: "com.traynham.ansiview", category: "playback")
             .info("Playback started at \(self.speed.baud, privacy: .public) baud")
         showHUD("\(PlaybackSpeed.label(speed.baud))  \u{00B7}  click to skip")
@@ -325,6 +333,7 @@ final class AnsiPlayerViewController: NSViewController {
             skipToEnd()
             return
         }
+        viewportTop = nil
         showTerminal()
     }
 
@@ -339,6 +348,8 @@ final class AnsiPlayerViewController: NSViewController {
     private func showTerminal() {
         screen = terminal.screen(minimumRows: analysis.canvasRows)
         screenIsFinal = false
+        viewportTop = TerminalViewport.follow(cursorRow: terminal.cursorRow, previousTop: viewportTop,
+                                              canvasRows: analysis.canvasRows)
         redraw()
         updateTimeline()
         updateBlinkTimer()
@@ -447,14 +458,20 @@ final class AnsiPlayerViewController: NSViewController {
     }
 
     private func redraw() {
-        var padded = screen
-        while padded.rows.count < analysis.canvasRows {
-            padded.rows.append(Array(repeating: AnsiCell(), count: source.columns))
-        }
         var options = renderOptions
+        var padded = screen
+        if isTerminalMode {
+            padded = screen.window(top: viewportTop ?? 0, rows: TerminalViewport.rows)
+            options.scale = AnsiRenderer.preferredScale(rows: TerminalViewport.rows)
+        } else {
+            while padded.rows.count < analysis.canvasRows {
+                padded.rows.append(Array(repeating: AnsiCell(), count: source.columns))
+            }
+        }
         options.blinkVisible = blinkVisible
         let image = AnsiRenderer.render(padded, options: options)?.image
         canvas.image = PlaybackSpeed.crtEffect ? image.flatMap { CRTFilter().apply($0) } ?? image : image
+        if isViewLoaded { fitToWindow() }
     }
 }
 

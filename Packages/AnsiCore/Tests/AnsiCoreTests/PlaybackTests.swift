@@ -139,3 +139,36 @@ func art(_ raw: [UInt8], ext: String? = nil) -> ArtFile { ArtFile(data: Data(raw
     #expect(memory.serialized == ["k=2400"])
     #expect(SpeedMemory(serialized: 7).serialized.isEmpty)
 }
+
+// MARK: Terminal viewport
+
+@Test func viewportStartsAtTop() {
+    #expect(TerminalViewport.follow(cursorRow: 3, previousTop: nil, canvasRows: 60) == 0)
+}
+
+@Test func viewportFollowsDown() {
+    #expect(TerminalViewport.follow(cursorRow: 30, previousTop: 0, canvasRows: 60) == 6)
+}
+
+@Test func viewportStaysWhileInside() {
+    #expect(TerminalViewport.follow(cursorRow: 10, previousTop: 6, canvasRows: 60) == 6)
+}
+
+@Test func viewportFollowsUp() {
+    #expect(TerminalViewport.follow(cursorRow: 2, previousTop: 6, canvasRows: 60) == 2)
+}
+
+@Test func viewportClampsToCanvas() {
+    #expect(TerminalViewport.follow(cursorRow: 999, previousTop: 0, canvasRows: 40) == 15)
+    #expect(TerminalViewport.follow(cursorRow: 5, previousTop: 50, canvasRows: 40) == 5)
+    #expect(TerminalViewport.follow(cursorRow: 5, previousTop: nil, canvasRows: 10) == 0)
+}
+
+@Test func windowPastEndIsPadded() {
+    let screen = parse(bytes("A\r\nB\r\nC"))
+    let window = screen.window(top: 2, rows: 25)
+    #expect(window.rows.count == 25)
+    #expect(window.rows[0] == screen.rows[2])
+    #expect(window.rows[1] == Array(repeating: AnsiCell(), count: screen.columns))
+    #expect(window.columns == screen.columns)
+}
