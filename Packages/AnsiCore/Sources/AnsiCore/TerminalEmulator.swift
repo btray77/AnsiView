@@ -17,6 +17,9 @@ public enum TerminalProfile: Equatable {
     case vt220
     /// The Amiga console: ISO 8859-1 text, 0x9B as CSI, LF also returns the carriage.
     case amiga
+    /// DEC VT52 with the Atari ST extensions (colours, reverse, save and restore, line erases).
+    /// No CSI sequences; ESC < switches to VT100.
+    case vt52
 
     var isDEC: Bool { self == .vt100 || self == .vt220 }
 }
@@ -77,8 +80,12 @@ public struct TerminalEmulator {
     private var bottom: Int
     private var saved: (row: Int, column: Int, attributes: TextAttributes) = (0, 0, TextAttributes())
     private var replies: [UInt8] = []
+    /// VT52 state: the row of ESC Y, which colour ESC b or c sets, graphics mode (ESC F).
+    private var vt52Row = 0
+    private var vt52Background = false
+    private var vt52Graphics = false
 
-    private enum ParseState { case ground, escape, charset, csi, controlString, controlStringEscape }
+    private enum ParseState { case ground, escape, charset, csi, controlString, controlStringEscape, vt52Row, vt52Column, vt52Colour }
     private var state = ParseState.ground
     private var parameters: [Int?] = []
     private var currentParameter: Int?
@@ -184,6 +191,20 @@ public struct TerminalEmulator {
             case 0x07, 0x18, 0x1A: state = .ground
             default: break
             }
+        case .vt52Row:
+            vt52Row = Int(byte) - 32
+            state = .vt52Column
+        case .vt52Column:
+            state = .ground
+            row = min(rows - 1, max(0, vt52Row))
+            column = min(columns - 1, max(0, Int(byte) - 32))
+            pendingWrap = false
+        case .vt52Colour:
+            state = .ground
+            // Atari ST palette order (white, red, green, yellow, blue, magenta, cyan, light grey,
+            // grey, light red, light green, light yellow, light blue, light magenta, light cyan, black).
+            let vga = [15, 4, 2, 6, 1, 5, 3, 7, 8, 12, 10, 14, 9, 13, 11, 0][Int(byte & 15)]
+            if vt52Background { attributes.bg = .rgb(Palette.vga[vga]) } else { attributes.fg = .rgb(Palette.vga[vga]) }
         case .controlStringEscape:
             if byte == UInt8(ascii: "\\") {
                 state = .ground
@@ -260,6 +281,7 @@ public struct TerminalEmulator {
 
     private mutating func escape(_ byte: UInt8) {
         state = .ground
+        if profile == .vt52 { vt52Escape(byte); return }
         switch byte {
         case UInt8(ascii: "["):
             startCSI()
@@ -276,6 +298,44 @@ public struct TerminalEmulator {
         case UInt8(ascii: "E"): pendingWrap = false; column = 0; lineFeed()
         case UInt8(ascii: "M"): pendingWrap = false; reverseIndex()
         case UInt8(ascii: "c"): reset()
+        case 0x1B: state = .escape
+        default: break
+        }
+    }
+
+    private mutating func vt52Escape(_ byte: UInt8) {
+        pendingWrap = false
+        switch byte {
+        case UInt8(ascii: "A"): row = max(0, row - 1)
+        case UInt8(ascii: "B"): row = min(rows - 1, row + 1)
+        case UInt8(ascii: "C"): column = min(columns - 1, column + 1)
+        case UInt8(ascii: "D"): column = max(0, column - 1)
+        case UInt8(ascii: "H"): row = 0; column = 0
+        case UInt8(ascii: "I"): reverseIndex()
+        case UInt8(ascii: "J"): eraseDisplay(0)
+        case UInt8(ascii: "K"): eraseLine(0)
+        case UInt8(ascii: "Y"): state = .vt52Row
+        case UInt8(ascii: "Z"): replies += [0x1B, 0x2F, 0x4B]
+        case UInt8(ascii: "F"): vt52Graphics = true
+        case UInt8(ascii: "G"): vt52Graphics = false
+        case UInt8(ascii: "<"):
+            profile = .vt100
+            vt52Graphics = false
+        // Atari ST extensions.
+        case UInt8(ascii: "E"): eraseDisplay(2)
+        case UInt8(ascii: "b"): vt52Background = false; state = .vt52Colour
+        case UInt8(ascii: "c"): vt52Background = true; state = .vt52Colour
+        case UInt8(ascii: "d"): eraseDisplay(1)
+        case UInt8(ascii: "e"): cursorVisible = true
+        case UInt8(ascii: "f"): cursorVisible = false
+        case UInt8(ascii: "j"): saved = (row, column, attributes)
+        case UInt8(ascii: "k"): row = saved.row; column = saved.column
+        case UInt8(ascii: "l"): eraseLine(2); column = 0
+        case UInt8(ascii: "o"): eraseLine(1)
+        case UInt8(ascii: "p"): attributes.inverse = true
+        case UInt8(ascii: "q"): attributes.inverse = false
+        case UInt8(ascii: "v"): autowrap = true
+        case UInt8(ascii: "w"): autowrap = false
         case 0x1B: state = .escape
         default: break
         }
@@ -435,6 +495,7 @@ public struct TerminalEmulator {
             case .vt100: replies += Array("\u{1B}[?1;2c".utf8)
             case .vt220: replies += Array("\u{1B}[?62;1;6c".utf8)
             case .ansiBBS, .amiga: replies += Array("\u{1B}[?1;0c".utf8)
+            case .vt52: break
             }
         default:
             break
@@ -540,6 +601,16 @@ public struct TerminalEmulator {
     /// Cursor keys follow DECCKM; everything else is the ANSI-BBS keyboard.
     public func bytes(for key: TerminalKey, backspaceSendsDelete: Bool) -> [UInt8] {
         if doorwayMode, let scan = Self.doorwayScanCode(key) { return [0x00, scan] }
+        if profile == .vt52 {
+            switch key {
+            case .up: return [0x1B, 0x41]
+            case .down: return [0x1B, 0x42]
+            case .right: return [0x1B, 0x43]
+            case .left: return [0x1B, 0x44]
+            case .home: return [0x1B, 0x48]
+            default: break
+            }
+        }
         if applicationCursorKeys {
             switch key {
             case .up: return [0x1B, 0x4F, 0x41]
@@ -599,6 +670,9 @@ public struct TerminalEmulator {
                 let latin = Unicode.Scalar(code)
                 code = CP437.code(for: latin) ?? 0x3F
             }
+        }
+        if profile == .vt52, vt52Graphics, scalar == nil, let mapped = DECGraphics.map(code) {
+            (code, scalar) = mapped
         }
         if profile.isDEC, scalar == nil {
             switch charsets[shiftedOut ? 1 : 0] {

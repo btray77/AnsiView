@@ -81,6 +81,7 @@ public enum TerminalEngines {
         switch emulation {
         case .vt100: t.profile = .vt100
         case .vt220: t.profile = .vt220
+        case .vt52: t.profile = .vt52
         case .amiga: t.profile = .amiga
         default: break
         }
