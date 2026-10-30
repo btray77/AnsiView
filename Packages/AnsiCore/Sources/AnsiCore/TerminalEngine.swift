@@ -64,6 +64,8 @@ public enum TerminalEngines {
         case .petscii64: return PETSCIITerminal(model: .c64, columns: columns, rows: rows)
         case .petscii128: return PETSCIITerminal(model: .c128, columns: columns, rows: rows)
         case .atascii: return ATASCIITerminal(columns: columns, rows: rows)
+        case .viewdata: return TeletextTerminal(flavour: .viewdata, columns: columns, rows: rows)
+        case .mode7: return TeletextTerminal(flavour: .mode7, columns: columns, rows: rows)
         default: break
         }
         var t = TerminalEmulator(columns: columns, rows: rows, encoding: encoding)
