@@ -149,8 +149,8 @@ public struct ArtProject: Equatable {
         guard let frame = file.frames.first, !frame.layers.isEmpty else { throw ProjectError.damaged("no layers") }
         var result: [CanvasLayer] = []
         for layer in frame.layers {
-            guard let bytes = Data(base64Encoded: layer.cells), let region = CanvasEditor.decode(bytes),
-                  region.width == min(EditCanvas.maxColumns, max(1, file.columns)) else {
+            // A layer narrower or wider than the canvas is padded or clipped, not refused.
+            guard let bytes = Data(base64Encoded: layer.cells), let region = CanvasEditor.decode(bytes) else {
                 throw ProjectError.damaged("layer \"\(layer.name)\" has unreadable cells")
             }
             var canvas = EditCanvas(columns: file.columns, height: region.height)

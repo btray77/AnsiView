@@ -126,7 +126,7 @@ public enum EditorAction: String, CaseIterable {
         case .toolText: return "Click to place the cursor and type."
         case .toolBrush: return "Paint the brush character, or colours only, under the mouse."
         case .toolEyedropper: return "Click a cell to take its colours (Option-click also takes its character)."
-        case .swapColours: return "Swaps the drawing colours (outside the Text tool)."
+        case .swapColours: return "Swaps the foreground and background drawing colours."
         case .toggleInsert: return "Insert shifts the row right as you type; overwrite replaces."
         case .insertLine: return "Inserts a blank row at the cursor."
         case .deleteLine: return "Deletes the cursor's row."
@@ -153,7 +153,7 @@ public enum EditorAction: String, CaseIterable {
         case .toolText: return KeyCombo("t", control: true)
         case .toolBrush: return KeyCombo("r", control: true)
         case .toolEyedropper: return KeyCombo("e", control: true)
-        case .swapColours: return KeyCombo("x")
+        case .swapColours: return KeyCombo("x", control: true)
         case .toggleInsert: return KeyCombo("insert")
         case .insertLine: return KeyCombo("n", control: true)
         case .deleteLine: return KeyCombo("y", control: true)

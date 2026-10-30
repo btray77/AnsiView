@@ -237,7 +237,11 @@ final class EditorCanvasView: NSView {
             return
         }
         if value == 0x20, tool != .text {
-            if !event.isARepeat { spaceHeld = true; window?.invalidateCursorRects(for: self) }
+            if !event.isARepeat {
+                spaceHeld = true
+                spacePanned = false
+                window?.invalidateCursorRects(for: self)
+            }
             return
         }
         if (NSF1FunctionKey...NSF10FunctionKey).contains(value) {
@@ -287,6 +291,11 @@ final class EditorCanvasView: NSView {
         if event.charactersIgnoringModifiers == " ", spaceHeld {
             spaceHeld = false
             window?.invalidateCursorRects(for: self)
+            // Pressed and released without a drag: it was typing.
+            if !spacePanned, editor.floating == nil {
+                editor.type(" ")
+                scrollCursorVisible()
+            }
         }
     }
 
@@ -333,8 +342,48 @@ final class EditorCanvasView: NSView {
         super.scrollWheel(with: event)
     }
 
+    /// Ends a stroke, shape drag or pan in progress (a tool change or lost focus mid-drag), so no
+    /// preview stays on screen and every stroke gets its undo step (review I1).
+    func endInteraction() {
+        if shapeAnchor != nil {
+            shapeAnchor = nil
+            editor.setPreview(nil)
+            controller?.transientHint = nil
+        }
+        if lastPixel != nil || lastCell != nil { editor.endStroke() }
+        lastPixel = nil
+        lastCell = nil
+        dragAnchor = nil
+        floatDrag = nil
+        panStart = nil
+    }
+
+    /// Space held without panning types a space when released (plan 6 typing still works).
+    private var spacePanned = false
+
+    override func resignFirstResponder() -> Bool {
+        spaceHeld = false
+        endInteraction()
+        return super.resignFirstResponder()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
+        if let window {
+            NotificationCenter.default.addObserver(self, selector: #selector(windowResignedKey(_:)),
+                                                   name: NSWindow.didResignKeyNotification, object: window)
+        }
+    }
+
+    @objc private func windowResignedKey(_ note: Notification) {
+        spaceHeld = false
+        window?.invalidateCursorRects(for: self)
+    }
+
     private func startPan(_ event: NSEvent) {
         guard let clip = enclosingScrollView?.contentView else { return }
+        spacePanned = true
         panStart = (event.locationInWindow, clip.bounds.origin)
         NSCursor.closedHand.set()
     }
@@ -838,14 +887,20 @@ final class EditorViewController: NSViewController {
     private var root = NSView()
     private var chrome: [NSView] = []
     private var shortcutObserver: NSObjectProtocol?
-    private(set) lazy var characterPanel: CharacterPickerPanel = {
+    private var loadedCharacterPanel: CharacterPickerPanel?
+    var characterPanel: CharacterPickerPanel {
+        if let loadedCharacterPanel { return loadedCharacterPanel }
         let panel = CharacterPickerPanel()
         panel.picker.onChoose = { [weak self] code in
             self?.editor.brushCharacter = code
             self?.view.window?.makeFirstResponder(self?.canvasView)
         }
+        loadedCharacterPanel = panel
         return panel
-    }()
+    }
+
+    /// The editor window is closing: its floating panel goes too (review M8).
+    func closePanels() { loadedCharacterPanel?.orderOut(nil) }
 
     /// The hint under the mouse (a control's tooltip), and one for a drag in progress.
     var hoverHint: String? { didSet { updateHint() } }
@@ -983,6 +1038,7 @@ final class EditorViewController: NSViewController {
     // MARK: Tools
 
     func setTool(_ tool: EditorTool) {
+        canvasView.endInteraction()
         if editor.floating != nil, tool != canvasView.tool { editor.stampFloating() }
         canvasView.tool = tool
         toolChanged()
@@ -1241,6 +1297,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// Tools > Save Project...: keeps the layers. The art files themselves always flatten.
     @discardableResult
     func saveProject() -> Bool {
+        guard refuseWhileFloating() else { return false }
         var url = projectURL
         if url == nil {
             let panel = NSSavePanel()
@@ -1415,6 +1472,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        editorController.closePanels()
         Self.open.remove(self)
     }
 
@@ -1427,7 +1485,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     @discardableResult
     func saveAs() -> Bool {
-        guard let window else { return false }
+        guard let window, refuseWhileFloating() else { return false }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "\(fileURL?.deletingPathExtension().lastPathComponent ?? name).\(format.fileExtension)"
         panel.allowedContentTypes = [Self.contentType(format)]
@@ -1459,7 +1517,19 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     /// Plain art files hold the visible layers flattened (ruling 10); anything the format cannot
     /// hold is reported first and the user may cancel (ruling 12).
+    /// A floating block is not part of the art until placed: saving asks for it to be placed or
+    /// cancelled first (review I3). True when nothing floats.
+    private func refuseWhileFloating() -> Bool {
+        guard editor.floating != nil else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Place or cancel the floating block first"
+        alert.informativeText = "Press Return to place it, or Escape to cancel, then save again."
+        alert.runModal()
+        return false
+    }
+
     private func write(to url: URL, format: SaveFormat) -> Bool {
+        guard refuseWhileFloating() else { return false }
         let flat = editor.flattenedCanvas
         var notes = SaucePreservation.saveReport(flat, format: format)
         if editor.layers.count > 1 {

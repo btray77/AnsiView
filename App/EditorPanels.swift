@@ -159,6 +159,7 @@ final class LayersPanelView: NSStackView {
     var onRename: ((Int) -> Void)?
     private let list = NSStackView()
     private var signature = ""
+    private var eyes: [NSButton] = []
 
     init(editor: CanvasEditor) {
         self.editor = editor
@@ -204,15 +205,19 @@ final class LayersPanelView: NSStackView {
     func refresh() {
         guard let editor else { return }
         let layers = editor.layers
+        // A checkbox the editor refused to apply (a block floating) shows the real state again (review I5).
+        for eye in eyes where layers.indices.contains(eye.tag) { eye.state = layers[eye.tag].visible ? .on : .off }
         let key = layers.map { "\($0.name)|\($0.visible)" }.joined(separator: ",") + "#\(editor.activeLayer)"
         guard key != signature else { return }
         signature = key
+        eyes = []
         for view in list.arrangedSubviews { view.removeFromSuperview() }
         for index in layers.indices.reversed() {
             let layer = layers[index]
             let eye = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleVisible(_:)))
             eye.state = layer.visible ? .on : .off
             eye.tag = index
+            eyes.append(eye)
             eye.toolTip = "Show or hide \"\(layer.name)\" (hidden layers are not saved in plain files)"
             let name = NSButton(title: layer.name, target: self, action: #selector(choose(_:)))
             name.tag = index
@@ -235,7 +240,10 @@ final class LayersPanelView: NSStackView {
     @objc private func flatten(_ sender: Any?) { editor?.flatten() }
     @objc private func rename(_ sender: Any?) { if let editor { onRename?(editor.activeLayer) } }
     @objc private func choose(_ sender: NSButton) { editor?.selectLayer(sender.tag) }
-    @objc private func toggleVisible(_ sender: NSButton) { editor?.setLayerVisible(sender.tag, sender.state == .on) }
+    @objc private func toggleVisible(_ sender: NSButton) {
+        editor?.setLayerVisible(sender.tag, sender.state == .on)
+        refresh()
+    }
 }
 
 // MARK: Shortcuts preferences (ruling 13)
@@ -251,10 +259,11 @@ final class KeyRecorderView: NSView {
     override func resignFirstResponder() -> Bool { needsDisplay = true; return true }
 
     override func keyDown(with event: NSEvent) {
-        guard let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first else { return }
-        let flags = event.modifierFlags
-        onRecord?(KeyCombo(KeyCombo.keyName(scalar: scalar.value), control: flags.contains(.control), option: flags.contains(.option),
-                           shift: flags.contains(.shift), command: flags.contains(.command)))
+        // The same mapping the canvas uses (Help counts as Insert). Command combinations belong
+        // to the menus and never reach the editor's shortcuts, so they are not recorded (review M7).
+        guard !event.modifierFlags.contains(.command) else { NSSound.beep(); text = "Command keys belong to the menus"; return }
+        guard let combo = EditorCanvasView.combo(for: event) else { return }
+        onRecord?(combo)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {

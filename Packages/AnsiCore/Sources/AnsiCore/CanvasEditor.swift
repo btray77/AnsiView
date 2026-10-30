@@ -231,6 +231,8 @@ public final class CanvasEditor {
         public var liftedFrom: CellRect? = nil
         /// A lifted block that leaves the original in place (Option-drag, or the setting).
         public var leavesCopy = false
+        /// Option-drag (named Duplicate in Undo); the setting alone still makes a Move.
+        public var isDuplicate = false
     }
 
     /// The block being placed, shown over the canvas until it is stamped or cancelled.
@@ -261,18 +263,17 @@ public final class CanvasEditor {
     }
 
     private var activeWithFloating: EditCanvas {
-        if let preview {
-            var shown = canvas
-            preview(&shown)
-            return shown
-        }
-        guard let floating else { return canvas }
+        guard floating != nil || preview != nil else { return canvas }
         var shown = canvas
-        if let source = floating.liftedFrom, !floating.leavesCopy {
-            let vacated = vacatedCell
-            shown.fill(source) { _ in vacated }
+        if let floating {
+            if let source = floating.liftedFrom, !floating.leavesCopy {
+                let vacated = vacatedCell
+                shown.fill(source) { _ in vacated }
+            }
+            shown.paste(floating.region, x: floating.x, y: floating.y, transparent: transparentPaste)
         }
-        shown.paste(floating.region, x: floating.x, y: floating.y, transparent: transparentPaste)
+        // A shape being dragged shows with (not instead of) a floating block.
+        preview?(&shown)
         return shown
     }
 
@@ -316,9 +317,15 @@ public final class CanvasEditor {
     public func stampFloating() {
         guard let block = floating else { return }
         floating = nil
+        // A lifted block put down where it came from changes nothing (a click in a selection).
+        if let source = block.liftedFrom, source.x == block.x, source.y == block.y {
+            selection = source
+            changed()
+            return
+        }
         let transparent = transparentPaste
         let vacated = vacatedCell
-        let name = block.liftedFrom == nil ? "Paste" : (block.leavesCopy ? "Duplicate" : "Move")
+        let name = block.liftedFrom == nil ? "Paste" : (block.isDuplicate ? "Duplicate" : "Move")
         perform(name) { editor in
             if let source = block.liftedFrom, !block.leavesCopy { editor.canvas.fill(source) { _ in vacated } }
             editor.canvas.paste(block.region, x: block.x, y: block.y, transparent: transparent)
@@ -346,7 +353,7 @@ public final class CanvasEditor {
     public func liftSelection(duplicate: Bool = false) -> Bool {
         guard floating == nil, let rect = selection else { return false }
         floating = FloatingPaste(region: canvas.region(rect), x: rect.x, y: rect.y, liftedFrom: rect,
-                                 leavesCopy: duplicate || leaveCopyWhenMoving)
+                                 leavesCopy: duplicate || leaveCopyWhenMoving, isDuplicate: duplicate)
         changed()
         return true
     }
@@ -384,7 +391,10 @@ public final class CanvasEditor {
     /// Replaces the canvas (every layer) with the selection.
     public func cropToSelection() {
         guard floating == nil, let rect = selection else { return }
-        perform("Crop to Selection") { editor in editor.forEachLayer { $0.crop(to: rect) } }
+        perform("Crop to Selection") { editor in
+            editor.equalizeLayerHeights()
+            editor.forEachLayer { $0.crop(to: rect) }
+        }
         selection = canvas.clip(CellRect(x: 0, y: 0, width: rect.width, height: rect.height))
         cursor = (0, 0)
         changed()
@@ -672,6 +682,10 @@ public final class CanvasEditor {
     }
 
     private func restore(_ state: Snapshot, redo: Snapshot, name: String) {
+        // Undo while a lifted selection floats puts it back first: it was lifted from the canvas
+        // being replaced. A pasted block (clipboard cells) stays, clamped (copy and paste ruling 5).
+        if floating?.liftedFrom != nil { floating = nil }
+        preview = nil
         canvas = state.canvas
         layerStore = state.layers
         activeLayer = state.activeLayer
@@ -700,10 +714,23 @@ public final class CanvasEditor {
     func place(x: Int, y: Int) {
         let row = min(AnsiTerminal.maxRows - 1, max(0, y))
         canvas.ensureHeight(row + 1)
+        equalizeLayerHeights()
         cursor = (min(canvas.columns - 1, max(0, x)), row)
     }
 
+    /// Every layer has the height of the tallest one, so layers stay aligned (crop, project files).
+    func equalizeLayerHeights() {
+        guard layerStore.count > 1 else { return }
+        var tallest = canvas.height
+        for index in layerStore.indices where index != activeLayer { tallest = max(tallest, layerStore[index].canvas.height) }
+        canvas.ensureHeight(tallest)
+        for index in layerStore.indices where index != activeLayer && layerStore[index].canvas.height < tallest {
+            layerStore[index].canvas.ensureHeight(tallest)
+        }
+    }
+
     func clampToCanvas() {
+        equalizeLayerHeights()
         cursor = (min(canvas.columns - 1, max(0, cursor.x)), min(canvas.height - 1, max(0, cursor.y)))
         if let rect = selection { selection = canvas.clip(rect) }
         if let block = floating, block.x >= canvas.columns { floating?.x = canvas.columns - 1 }

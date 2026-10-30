@@ -156,7 +156,7 @@ The editor has a tool palette on the left. Every tool and control has a tooltip,
 status bar shows a hint for whatever is under the mouse (or the current tool). Every key below
 can be changed in **Tools > Editor Shortcuts...**, which lists all actions, shows two actions
 sharing a key in red, and resets to the defaults. Control keys work in every tool; plain letter
-keys (such as X) work outside the Text tool.
+keys you assign yourself work outside the Text tool.
 
 - **Tools.** Draw (half block pixels, Control D), Select (Control S), Line (Control L), Box
   (Control B), Fill (Control F), Text (Control T), Brush (Control R), Eyedropper (Control E).
@@ -184,7 +184,7 @@ keys (such as X) work outside the Text tool.
   or both. **Tools > Replace...** changes a character and/or colours everywhere in the selection
   (or the whole canvas).
 - **Colours.** Click a swatch for the foreground, Option-click or right-click for the
-  background; the Aa box shows the current pair. X swaps them. The Eyedropper takes a cell's
+  background; the Aa box shows the current pair. Control X swaps them. The Eyedropper takes a cell's
   colours (Option-click also takes its character). Tools > Swap Colours in Selection swaps each
   cell's colours.
 - **Insert and overwrite.** The Insert key (or Help on older Mac keyboards, or Tools > Insert
@@ -210,7 +210,7 @@ keys (such as X) work outside the Text tool.
   `docs/superpowers/plans/2026-10-30-ansiview-2.0-editor-tools.md`, ruling 11) that keeps them,
   and **Tools > Open Project...** opens one.
 - **View.** Control ' shows a grid; Command = / Command - zoom (or pinch, or Control-scroll);
-  scroll, hold Space and drag (outside the Text tool), or drag with the middle button to pan.
+  scroll, hold Space and drag (outside the Text tool; a Space pressed and released without dragging still types), or drag with the middle button to pan.
   Tools > Full Screen Editing; Tools > Retro Theme switches to DOS style blue chrome.
 - **What is kept.** Editing an opened file keeps its SAUCE title, author, group, comments
   (with their indentation), font name, flags, date and TInfo3/4. Anything that cannot be kept

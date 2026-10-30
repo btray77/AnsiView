@@ -11,7 +11,7 @@ import Testing
             #expect(shortcuts.combo(for: action) == action.defaultCombo)
             #expect(shortcuts.action(for: action.defaultCombo) == action)
         }
-        #expect(EditorAction.swapColours.defaultCombo == KeyCombo("x"))
+        #expect(EditorAction.swapColours.defaultCombo == KeyCombo("x", control: true))
         #expect(EditorAction.toggleInsert.defaultCombo == KeyCombo("insert"))
         #expect(EditorAction.toolLine.defaultCombo == KeyCombo("l", control: true))
     }

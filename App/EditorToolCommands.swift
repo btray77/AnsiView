@@ -20,7 +20,7 @@ struct EditorToolCommands: Commands {
             Divider()
             Button("Character Picker...") { send(#selector(EditorCanvasView.showCharacterPicker(_:))) }
             Button("Swap Foreground and Background") { send(#selector(EditorCanvasView.swapColours(_:))) }
-            Button("Insert Mode") { send(#selector(EditorCanvasView.toggleInsertMode(_:))) }
+            Button("Toggle Insert Mode") { send(#selector(EditorCanvasView.toggleInsertMode(_:))) }
             Divider()
             Button("Insert Line") { send(#selector(EditorCanvasView.insertLine(_:))) }
             Button("Delete Line") { send(#selector(EditorCanvasView.deleteLine(_:))) }
@@ -40,8 +40,8 @@ struct EditorToolCommands: Commands {
             Button("Merge Layer Down") { send(#selector(EditorCanvasView.mergeLayerDown(_:))) }
             Button("Flatten Layers") { send(#selector(EditorCanvasView.flattenLayers(_:))) }
             Divider()
-            Button("Show Grid") { send(#selector(EditorCanvasView.toggleGrid(_:))) }
-            Button("Retro Theme") { send(#selector(EditorCanvasView.toggleRetroTheme(_:))) }
+            Button("Toggle Grid") { send(#selector(EditorCanvasView.toggleGrid(_:))) }
+            Button("Toggle Retro Theme") { send(#selector(EditorCanvasView.toggleRetroTheme(_:))) }
             Button("Full Screen Editing") { send(#selector(NSWindow.toggleFullScreen(_:))) }
             Button("Editor Shortcuts...") { ShortcutsWindowController.shared.showWindow(nil) }
             Divider()
