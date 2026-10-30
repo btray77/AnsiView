@@ -65,6 +65,10 @@ public enum BBSConnectionError: Error, Equatable {
     case hostKeyChanged(String, String, String)
     /// SSH: the user did not trust a new host key.
     case hostKeyNotTrusted(String)
+    /// Telnet over TLS: the certificate is not the one saved for this BBS (host, saved, offered).
+    case certificateChanged(String, String, String)
+    /// Telnet over TLS: the user did not trust the certificate.
+    case certificateNotTrusted(String)
     /// SSH: no key exchange, host key or cipher in common (host, what failed).
     case algorithmMismatch(String, String)
     /// WebSocket over TLS: the secure connection failed (host, what failed).
@@ -94,6 +98,10 @@ public enum BBSConnectionError: Error, Equatable {
             return "The SSH server did not accept the login. \(detail)"
         case .hostKeyChanged(let host, let saved, let offered):
             return "WARNING: the SSH host key of \(host) has changed, so AnsiView did not connect. Saved key: \(saved). Key offered now: \(offered). Someone may be pretending to be this BBS, or the sysop replaced the key. Ask the sysop before you forget the saved key."
+        case .certificateChanged(let host, let saved, let offered):
+            return "WARNING: the TLS certificate of \(host) has changed, so AnsiView did not connect. Saved certificate: \(saved). Certificate offered now: \(offered). Someone may be pretending to be this BBS, or the sysop replaced the certificate. Ask the sysop before you forget the saved one."
+        case .certificateNotTrusted(let host):
+            return "The TLS certificate of \(host) was not trusted, so AnsiView did not connect."
         case .hostKeyNotTrusted(let host):
             return "The host key of \(host) was not trusted, so AnsiView did not connect."
         case .algorithmMismatch(let host, let detail):
@@ -159,6 +167,9 @@ public final class BBSClient {
     public var onReceived: (([UInt8]) -> Void)?
     /// Every byte written to the transport (data and negotiation), on `queue`.
     public var onSent: (([UInt8]) -> Void)?
+
+    /// Asks about TLS certificates macOS does not trust (telnet over TLS).
+    public weak var certificateVerifier: CertificateVerifying?
 
     public private(set) var state = BBSClientState.idle
     public private(set) var telnet: TelnetSession
@@ -249,7 +260,8 @@ public final class BBSClient {
     private func makeTransport() -> BBSTransport? {
         switch settings.mode {
         case .telnet, .raw:
-            return TCPTransport(host: host, port: port, connectTimeout: connectTimeout, queue: queue)
+            return TCPTransport(host: host, port: port, connectTimeout: connectTimeout, queue: queue,
+                                tls: settings.mode == .telnet && settings.telnetSecure, verifier: certificateVerifier)
         case .rlogin:
             return RLoginTransport(host: host, port: port, settings: settings, connectTimeout: connectTimeout, queue: queue)
         case .webSocket:

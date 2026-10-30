@@ -380,7 +380,11 @@ final class DialingDirectoryViewController: NSViewController {
         guard case .edit(let form, let draft, let original) = mode else { return }
         switch event {
         case .done: save(form: form, draft: draft, original: original)
-        case .changed(let id) where id == "mode" || id == "wsSecure":
+        case .changed(let id) where id == "emulation":
+            // Size and the name sent follow the terminal type.
+            rebuild(entry: EntryForm.changingEmulation(form, draft: draft), password: EntryForm.apply(form, to: draft).password,
+                    original: original, selecting: id, from: form)
+        case .changed(let id) where id == "mode" || id == "wsSecure" || id == "telnetSecure":
             // The protocol's own fields appear at once, and a default port follows the protocol.
             rebuild(entry: EntryForm.changingProtocol(form, draft: draft), password: EntryForm.apply(form, to: draft).password,
                     original: original, selecting: id, from: form)
@@ -388,6 +392,16 @@ final class DialingDirectoryViewController: NSViewController {
             let applied = EntryForm.apply(form, to: draft)
             if action == "chooseKey" {
                 chooseKeyFile(applied.entry, password: applied.password, form: form, original: original)
+                return
+            }
+            if action == "forgetCertificate" {
+                let entry = applied.entry
+                let had = CertificatePrompt().forget(host: entry.host, port: entry.port)
+                var shown = form
+                shown.info = had ? "Forgot the saved certificate of \(entry.host):\(entry.port). The next call asks about it."
+                    : "No certificate is saved for \(entry.host):\(entry.port)."
+                mode = .edit(form: shown, draft: draft, original: original)
+                refresh()
                 return
             }
             if action == "forgetHostKey" {

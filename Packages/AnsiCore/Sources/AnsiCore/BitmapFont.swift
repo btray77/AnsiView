@@ -14,6 +14,14 @@ public struct BitmapFont {
         glyphs[Int(code)]
     }
 
+    /// Platform fonts (PETSCII, teletext, ...) may hold more than 256 glyphs, addressed by `AnsiCell.glyph`.
+    public var glyphCount: Int { declaredCount ?? glyphs.count }
+
+    /// A glyph by index; out of range gives a blank glyph.
+    public func pixels(glyph index: Int) -> [Bool] {
+        glyphs.indices.contains(index) ? glyphs[index] : Array(repeating: false, count: width * height)
+    }
+
     /// The extra 9th column VGA hardware drew in 9 pixel mode: line drawing characters
     /// (0xC0-0xDF) repeat their 8th column so lines join; everything else is blank.
     public func ninthColumn(for code: UInt8) -> [Bool] {
@@ -37,12 +45,20 @@ public struct BitmapFont {
         }
     }
 
-    private init(name: String, width: Int, height: Int, glyphs: [[Bool]]) {
+    /// A font from glyph bitmaps (`width * height` pixels each). Fewer than 256 glyphs are padded
+    /// with blanks so every byte code can be drawn.
+    public init(name: String, width: Int, height: Int, glyphs: [[Bool]]) {
         self.name = name
         self.width = width
         self.height = height
-        self.glyphs = glyphs
+        let blank = [Bool](repeating: false, count: width * height)
+        var all = glyphs.map { $0.count == width * height ? $0 : blank }
+        while all.count < 256 { all.append(blank) }
+        self.glyphs = all
+        self.declaredCount = glyphs.count
     }
+
+    private var declaredCount: Int?
 
     // MARK: Bundled fonts
 

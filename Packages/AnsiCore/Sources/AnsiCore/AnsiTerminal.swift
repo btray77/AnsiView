@@ -8,6 +8,9 @@ public struct AnsiCell: Equatable {
     public var blink = false
     /// Set only for UTF-8 characters with no CP437 equivalent; `code` is then "?".
     public var scalar: Unicode.Scalar?
+    /// A platform font glyph (PETSCII, teletext, ...) drawn instead of `code`, which then holds
+    /// the nearest readable character for copying. Nil for PC text.
+    public var glyph: UInt16?
 
     public init(code: UInt8 = 0x20, fg: RGB = Palette.vga[7], bg: RGB = Palette.vga[0], blink: Bool = false,
                 scalar: Unicode.Scalar? = nil) {

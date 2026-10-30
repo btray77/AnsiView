@@ -20,9 +20,11 @@ public enum EntryForm {
         fields += transportFields(e, passphrase: passphrase)
 
         let terminal = "Terminal"
-        var types = BBSEntry.standardTerminalTypes
+        fields.append(.choice("emulation", section: terminal, label: "Terminal type", hint: "What the BBS expects: ANSI-BBS suits PC boards. Pick PETSCII, ATASCII, Viewdata, Apple II or Amiga for boards made for those computers. Size and font follow.", options: TerminalEmulation.allCases.map(\.label), index: TerminalEmulation.allCases.firstIndex(of: e.emulation) ?? 0))
+        var types = e.emulation.terminalNames
+        for name in BBSEntry.standardTerminalTypes where !types.contains(name) { types.append(name) }
         if !types.contains(e.terminalType) { types.append(e.terminalType) }
-        fields.append(.choice("terminalType", section: terminal, label: "Terminal type", hint: "The name AnsiView gives first when the BBS asks what terminal you have. ANSI suits almost every BBS; the others are offered if it asks again.", options: types, index: types.firstIndex(of: e.terminalType) ?? 0))
+        fields.append(.choice("terminalType", section: terminal, label: "Terminal name sent", hint: "The name AnsiView gives first when the BBS asks what terminal you have (telnet TERMINAL-TYPE). It follows the terminal type; the others are offered if the BBS asks again.", options: types, index: types.firstIndex(of: e.terminalType) ?? 0))
         fields.append(.number("columns", section: terminal, label: "Columns", hint: "Screen width in characters. BBSes expect 80, a few support 132. The BBS is told the size when it asks (telnet NAWS).", value: e.columns, range: TerminalEmulator.sizeRange))
         fields.append(.number("rows", section: terminal, label: "Rows", hint: "Screen height in lines. 25 is the DOS standard; some BBSes use more lines when you offer them.", value: e.rows, range: TerminalEmulator.sizeRange))
         var fontNames = fonts
@@ -47,6 +49,7 @@ public enum EntryForm {
         fields.append(.text("username", section: login, label: "Username", hint: "Your name or handle on this BBS. The login script and Terminal > Send Username type it.", value: e.username ?? "", maxLength: 80))
         fields.append(.secret("password", section: login, label: "Password", hint: "Saved only in your Mac's Keychain, never in the directory or an export. Needs a username. Terminal > Send Password types it.", value: password, maxLength: 120))
         fields.append(.toggle("showPassword", section: login, label: "Show password", hint: "Shows the password on screen while you check it. It is hidden again the next time the editor opens.", isOn: false, revealsSecrets: true))
+        fields.append(.toggle("iemsi", section: login, label: "IEMSI login", hint: "Answers a BBS that asks for IEMSI (an automatic login some RemoteAccess, Maximus and Mystic boards offer) with your username and saved password.", isOn: e.iemsi))
         fields.append(.toggle("autoLogin", section: login, label: "Log in automatically", hint: "Runs the login script below as soon as the BBS answers. Terminal > Log In runs it again at any time.", isOn: e.autoLogin))
         fields.append(.text("busyText", section: login, label: "Busy text", hint: "Text that means the BBS is full, such as: all nodes are busy. Seen in the first 30 seconds, it hangs up and dials the next BBS. Separate choices with |.", value: e.busyText, maxLength: 200))
 
@@ -98,7 +101,9 @@ public enum EntryForm {
         if let f = form.field("rloginClientIsPassword") { e.rloginClientIsPassword = f.isOn }
         if let v = text("tags") { e.tags = v.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
         if let v = text("notes") { e.notes = v }
+        if let f = choice("emulation") { e.emulation = TerminalEmulation.allCases[safe: f.index] ?? .ansiBBS }
         if let f = choice("terminalType") { e.terminalType = f.choiceValue }
+        if let f = form.field("telnetSecure") { e.telnetSecure = f.isOn }
         if let f = form.field("columns") { e.columns = f.number }
         if let f = form.field("rows") { e.rows = f.number }
         if let f = choice("font") { e.fontName = f.choiceValue }
@@ -113,6 +118,7 @@ public enum EntryForm {
             e.username = trimmed.isEmpty ? nil : trimmed
         }
         if let f = form.field("autoLogin") { e.autoLogin = f.isOn }
+        if let f = form.field("iemsi") { e.iemsi = f.isOn }
         if let v = text("busyText") { e.busyText = v }
         for i in e.loginScript.indices {
             if let v = text("step.\(i).expect") { e.loginScript[i].expect = v }
@@ -162,8 +168,21 @@ public enum EntryForm {
     public static func changingProtocol(_ form: TextForm, draft: BBSEntry) -> BBSEntry {
         let old = draft
         var e = apply(form, to: draft).entry
-        if e.port == old.mode.defaultPort(secure: old.webSocketSecure) {
-            e.port = e.mode.defaultPort(secure: e.webSocketSecure)
+        if e.port == old.mode.defaultPort(secure: old.isSecure) {
+            e.port = e.mode.defaultPort(secure: e.isSecure)
+        }
+        return e
+    }
+
+    /// The draft with the form applied after the terminal type changed: the size and the name sent
+    /// follow the new type when they still held the old type's defaults; values the user chose stay.
+    public static func changingEmulation(_ form: TextForm, draft: BBSEntry) -> BBSEntry {
+        let old = draft
+        var e = apply(form, to: draft).entry
+        if e.columns == old.emulation.defaultColumns { e.columns = e.emulation.defaultColumns }
+        if e.rows == old.emulation.defaultRows { e.rows = e.emulation.defaultRows }
+        if e.terminalType.caseInsensitiveCompare(old.emulation.terminalNames[0]) == .orderedSame {
+            e.terminalType = e.emulation.terminalNames[0]
         }
         return e
     }
@@ -172,7 +191,11 @@ public enum EntryForm {
     static func transportFields(_ e: BBSEntry, passphrase: String) -> [FormField] {
         var fields: [FormField] = []
         switch e.mode {
-        case .telnet, .raw:
+        case .telnet:
+            let telnet = "Telnet"
+            fields.append(.toggle("telnetSecure", section: telnet, label: "Secure (TLS)", hint: "Wraps telnet in TLS (telnets), which many Synchronet boards offer on port 992. Self signed certificates are shown once for you to trust.", isOn: e.telnetSecure))
+            fields.append(.action("forgetCertificate", section: telnet, label: "Saved certificate", hint: "Forgets the TLS certificate saved for this address, for when the sysop says it really changed. The next call asks again.", caption: "Forget"))
+        case .raw:
             break
         case .ssh:
             let ssh = "SSH"

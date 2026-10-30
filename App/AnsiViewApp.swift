@@ -328,6 +328,13 @@ struct AnsiViewApp: App {
                             }
                         }
                     }
+                    Menu("Terminal Type") {
+                        ForEach(TerminalEmulation.allCases, id: \.self) { emulation in
+                            Button(emulation.label) { TerminalWindowController.focused?.switchEmulation(to: emulation) }
+                        }
+                    }
+                    Button("Reveal Concealed Text") { TerminalWindowController.focused?.toggleReveal() }
+                        .help("Teletext and Viewdata: shows or hides text the page conceals, such as quiz answers.")
                     Menu("Size") {
                         ForEach(TerminalViewController.sizes.indices, id: \.self) { index in
                             let size = TerminalViewController.sizes[index]
