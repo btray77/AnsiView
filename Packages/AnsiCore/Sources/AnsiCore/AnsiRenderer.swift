@@ -3,25 +3,25 @@ import CoreText
 import Foundation
 
 /// A rendered screen: a bitmap at `scale` pixels per VGA pixel.
-struct RenderedAnsi {
-    let image: CGImage
-    let columns: Int
-    let rows: Int
-    let scale: Int
+public struct RenderedAnsi {
+    public let image: CGImage
+    public let columns: Int
+    public let rows: Int
+    public let scale: Int
 
     /// Size in points, one point per VGA pixel (8x16 per cell).
-    var pointSize: CGSize {
+    public var pointSize: CGSize {
         CGSize(width: columns * AnsiRenderer.cellWidth, height: rows * AnsiRenderer.cellHeight)
     }
 }
 
 /// Draws an AnsiScreen as a VGA text mode bitmap.
-enum AnsiRenderer {
-    static let cellWidth = 8
-    static let cellHeight = 16
+public enum AnsiRenderer {
+    public static let cellWidth = 8
+    public static let cellHeight = 16
 
     /// Standard VGA text mode palette, RGB.
-    static let palette: [(UInt8, UInt8, UInt8)] = [
+    public static let palette: [(UInt8, UInt8, UInt8)] = [
         (0x00, 0x00, 0x00), (0x00, 0x00, 0xAA), (0x00, 0xAA, 0x00), (0x00, 0xAA, 0xAA),
         (0xAA, 0x00, 0x00), (0xAA, 0x00, 0xAA), (0xAA, 0x55, 0x00), (0xAA, 0xAA, 0xAA),
         (0x55, 0x55, 0x55), (0x55, 0x55, 0xFF), (0x55, 0xFF, 0x55), (0x55, 0xFF, 0xFF),
@@ -29,13 +29,13 @@ enum AnsiRenderer {
     ]
 
     /// Scale used for a screen of this height: 2x normally, 1x for very tall files to bound memory.
-    static func preferredScale(rows: Int) -> Int {
+    public static func preferredScale(rows: Int) -> Int {
         rows <= 250 ? 2 : 1
     }
 
     /// Renders the screen. Blinking cells show only their background when `blinkVisible` is false.
     /// Pass a shared `atlas` when rendering many frames at the same scale.
-    static func render(
+    public static func render(
         _ screen: AnsiScreen, scale requestedScale: Int? = nil,
         blinkVisible: Bool = true, atlas sharedAtlas: GlyphAtlas? = nil
     ) -> RenderedAnsi? {
@@ -106,18 +106,18 @@ enum AnsiRenderer {
 /// Coverage masks (0-255, top row first) for each CP437 code at a given scale.
 /// Blocks, shades and box drawing are drawn pixel exact so art tiles without gaps;
 /// everything else is rasterized from Menlo.
-final class GlyphAtlas {
-    let scale: Int
+public final class GlyphAtlas {
+    public let scale: Int
     private var cache: [[UInt8]?] = Array(repeating: nil, count: 256)
     private let font: CTFont
 
-    init(scale: Int) {
+    public init(scale: Int) {
         self.scale = scale
         let targetHeight = CGFloat(AnsiRenderer.cellHeight * scale)
         self.font = CTFontCreateWithName("Menlo-Regular" as CFString, targetHeight / 1.2, nil)
     }
 
-    func mask(for code: UInt8) -> [UInt8] {
+    public func mask(for code: UInt8) -> [UInt8] {
         if let cached = cache[Int(code)] { return cached }
         let built = Self.vgaPixels(for: code).map(upscale) ?? rasterize(code)
         cache[Int(code)] = built
@@ -262,8 +262,8 @@ final class GlyphAtlas {
 }
 
 /// Code page 437 to Unicode, including the graphic glyphs DOS shows for control codes.
-enum CP437 {
-    static let unicode: [Unicode.Scalar] = Array((
+public enum CP437 {
+    public static let unicode: [Unicode.Scalar] = Array((
         "\u{0020}☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼"
         + " !\"#$%&'()*+,-./0123456789:;<=>?"
         + "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_"

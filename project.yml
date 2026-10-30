@@ -4,13 +4,15 @@ options:
   deploymentTarget:
     macOS: "14.0"
 packages:
+  AnsiCore:
+    path: Packages/AnsiCore
   libwebp:
     url: https://github.com/SDWebImage/libwebp-Xcode
     exactVersion: 1.6.0
 settings:
   base:
-    MARKETING_VERSION: "1.2.1"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "2.0.0"
+    CURRENT_PROJECT_VERSION: "2"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -57,6 +59,7 @@ targets:
             LSItemContentTypes: [com.traynham.ansiview.ans]
     dependencies:
       - target: AnsiPreview
+      - package: AnsiCore
       - package: libwebp
   AnsiPreview:
     type: app-extension
@@ -65,6 +68,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.Preview
     sources: [Preview, Shared]
+    dependencies:
+      - package: AnsiCore
     entitlements:
       path: Preview/AnsiPreview.entitlements
       properties:
@@ -89,4 +94,5 @@ targets:
     platform: macOS
     sources: [Tool, Shared, App/AnsiExport.swift]
     dependencies:
+      - package: AnsiCore
       - package: libwebp

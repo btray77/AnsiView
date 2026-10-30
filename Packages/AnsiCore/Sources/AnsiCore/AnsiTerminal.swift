@@ -1,32 +1,45 @@
 import Foundation
 
 /// One character cell on the virtual DOS screen. Colors are VGA attribute indexes (0-15).
-struct AnsiCell: Equatable {
-    var code: UInt8 = 0x20
-    var fg: UInt8 = 7
-    var bg: UInt8 = 0
-    var blink = false
+public struct AnsiCell: Equatable {
+    public var code: UInt8 = 0x20
+    public var fg: UInt8 = 7
+    public var bg: UInt8 = 0
+    public var blink = false
+
+    public init(code: UInt8 = 0x20, fg: UInt8 = 7, bg: UInt8 = 0, blink: Bool = false) {
+        self.code = code
+        self.fg = fg
+        self.bg = bg
+        self.blink = blink
+    }
 }
 
 /// A snapshot of the virtual screen.
-struct AnsiScreen {
-    var columns: Int
-    var rows: [[AnsiCell]]
-    var title: String?
+public struct AnsiScreen {
+    public var columns: Int
+    public var rows: [[AnsiCell]]
+    public var title: String?
 
-    var hasBlink: Bool { rows.contains { $0.contains { $0.blink } } }
+    public var hasBlink: Bool { rows.contains { $0.contains { $0.blink } } }
+
+    public init(columns: Int, rows: [[AnsiCell]], title: String? = nil) {
+        self.columns = columns
+        self.rows = rows
+        self.title = title
+    }
 }
 
 /// File contents with any SAUCE record removed, plus the display settings it implies.
-struct AnsiSource {
-    static let defaultColumns = 80
+public struct AnsiSource {
+    public static let defaultColumns = 80
 
-    let bytes: [UInt8]
-    let columns: Int
-    let iceColors: Bool
-    let title: String?
+    public let bytes: [UInt8]
+    public let columns: Int
+    public let iceColors: Bool
+    public let title: String?
 
-    init(data: Data, fileExtension: String? = nil) {
+    public init(data: Data, fileExtension: String? = nil) {
         var bytes = [UInt8](data)
         var columns = Self.defaultColumns
         // iCE files use the blink bit for bright backgrounds instead of blinking.
@@ -58,14 +71,14 @@ struct AnsiSource {
 }
 
 /// Facts about a whole file, found by playing it through once.
-struct AnsiAnalysis {
-    let finalScreen: AnsiScreen
+public struct AnsiAnalysis {
+    public let finalScreen: AnsiScreen
     /// Rows needed to show every frame without the canvas changing size.
-    let canvasRows: Int
+    public let canvasRows: Int
     /// True when the file redraws over itself, so its last frame does not show everything.
-    let isAnimated: Bool
+    public let isAnimated: Bool
 
-    init(_ source: AnsiSource) {
+    public init(_ source: AnsiSource) {
         var terminal = AnsiTerminal(source)
         terminal.runToEnd()
         finalScreen = terminal.screen()
@@ -76,29 +89,29 @@ struct AnsiAnalysis {
     }
 }
 
-enum AnsiParser {
+public enum AnsiParser {
     /// The final state of the screen after the whole file has been played.
-    static func parse(_ data: Data, fileExtension: String? = nil) -> AnsiScreen {
+    public static func parse(_ data: Data, fileExtension: String? = nil) -> AnsiScreen {
         AnsiAnalysis(AnsiSource(data: data, fileExtension: fileExtension)).finalScreen
     }
 }
 
 /// Plays an ANSI.SYS style byte stream (CP437 text plus CSI escape sequences) onto a cell grid.
 /// Can be advanced a few bytes at a time to reproduce how the art drew over a modem.
-struct AnsiTerminal {
-    static let maxRows = 1500
+public struct AnsiTerminal {
+    public static let maxRows = 1500
 
     // ANSI color order (black, red, green, yellow, blue, magenta, cyan, white) to VGA attribute order.
     private static let ansiToVGA: [UInt8] = [0, 4, 2, 6, 1, 5, 3, 7]
 
-    let source: AnsiSource
-    private(set) var position = 0
-    private(set) var highestRow = -1
-    private(set) var writes = 0
-    private(set) var overwrites = 0
-    private(set) var clearsAfterDrawing = 0
+    public let source: AnsiSource
+    public private(set) var position = 0
+    public private(set) var highestRow = -1
+    public private(set) var writes = 0
+    public private(set) var overwrites = 0
+    public private(set) var clearsAfterDrawing = 0
 
-    var isFinished: Bool { position >= source.bytes.count }
+    public var isFinished: Bool { position >= source.bytes.count }
 
     private var columns: Int { source.columns }
     private var rows: [[AnsiCell]] = []
@@ -115,16 +128,16 @@ struct AnsiTerminal {
     private var brightFG = false
     private var brightBG = false
 
-    init(_ source: AnsiSource) {
+    public init(_ source: AnsiSource) {
         self.source = source
     }
 
-    mutating func runToEnd() {
+    public mutating func runToEnd() {
         advance(byteCount: source.bytes.count)
     }
 
     /// Consumes at least `byteCount` bytes, finishing any escape sequence it starts.
-    mutating func advance(byteCount: Int) {
+    public mutating func advance(byteCount: Int) {
         let bytes = source.bytes
         let n = bytes.count
         let target = min(n, position + byteCount)
@@ -141,7 +154,8 @@ struct AnsiTerminal {
                 while j < n {
                     let c = bytes[j]
                     if (0x30...0x39).contains(c) {
-                        current = (current ?? 0) * 10 + Int(c - 0x30)
+                        // Clamp so absurd parameters cannot overflow; no real sequence needs more.
+                        current = min(9999, (current ?? 0) * 10 + Int(c - 0x30))
                     } else if c == 0x3B {
                         params.append(current)
                         current = nil
@@ -180,7 +194,7 @@ struct AnsiTerminal {
     }
 
     /// The current screen with trailing empty rows removed, padded to at least `minimumRows`.
-    func screen(minimumRows: Int = 0) -> AnsiScreen {
+    public func screen(minimumRows: Int = 0) -> AnsiScreen {
         var result = rows
         let empty = AnsiCell()
         while let last = result.last, last.allSatisfy({ $0 == empty }) {

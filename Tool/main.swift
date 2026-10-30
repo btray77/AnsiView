@@ -1,3 +1,4 @@
+import AnsiCore
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers

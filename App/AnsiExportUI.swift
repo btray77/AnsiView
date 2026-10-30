@@ -1,3 +1,4 @@
+import AnsiCore
 import AppKit
 import UniformTypeIdentifiers
 
