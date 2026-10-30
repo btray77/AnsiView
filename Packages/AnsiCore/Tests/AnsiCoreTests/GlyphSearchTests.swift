@@ -69,7 +69,7 @@ private func search(ice: Bool = true, extended: Bool = false) -> GlyphSearch {
         let linear = Palette.vga.map { OKLab.linear($0) }
         for _ in 0..<50 {
             let pixels = (0..<32).map { _ in OKLab.linear(RGB(r: next(), g: next(), b: next())) }
-            let labs = pixels.map { OKLab.lab(linear: $0) }
+            let labs = pixels.map { OKLab.match(linear: $0) }
             var best = Float.greatestFiniteMagnitude
             for code in s.glyphCodes {
                 let coverage = s.coverage(code)
@@ -77,7 +77,7 @@ private func search(ice: Bool = true, extended: Bool = false) -> GlyphSearch {
                     for bg in 0..<16 {
                         var e: Float = 0
                         for i in 0..<32 {
-                            let d = labs[i] - OKLab.lab(linear: linear[fg] * coverage[i] + linear[bg] * (1 - coverage[i]))
+                            let d = labs[i] - OKLab.match(linear: linear[fg] * coverage[i] + linear[bg] * (1 - coverage[i]))
                             e += (d * d).sum()
                         }
                         best = min(best, e)
@@ -97,5 +97,21 @@ private func search(ice: Bool = true, extended: Bool = false) -> GlyphSearch {
         for y in 0..<16 { for x in 0..<8 where line[y * 8 + x] { pixels[(y / 2) * 4 + x / 2] += OKLab.linear(Palette.vga[15]) * 0.25 } }
         #expect(search(extended: true).best(cell: pixels).code == 196)
         #expect(search(extended: false).best(cell: pixels).code != 196)
+    }
+
+    /// Anti-aliased grey edges stay grey: chroma counts double when matching (OKLab.chromaWeight).
+    @Test func greysStayGrey() {
+        let s = search(extended: true)
+        for level in Swift.stride(from: 20, through: 240, by: 10) {
+            for split in [0, 2, 4, 6] {
+                let pixels = (0..<32).map { i -> SIMD3<Float> in
+                    i / 4 < split ? OKLab.linear(Palette.vga[15]) : OKLab.linear(RGB(r: UInt8(level), g: UInt8(level), b: UInt8(level)))
+                }
+                let match = s.best(cell: pixels)
+                let greys: Set<Int> = [0, 7, 8, 15]
+                #expect(greys.contains(match.fg) || match.code == 32, "\(level) \(split) \(match)")
+                #expect(greys.contains(match.bg) || match.code == 219, "\(level) \(split) \(match)")
+            }
+        }
     }
 }

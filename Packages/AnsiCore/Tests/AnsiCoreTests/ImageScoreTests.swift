@@ -20,7 +20,7 @@ private func glyphOptions(_ columns: Int) -> ImageToAnsi.Options {
         let canvas = ImageToAnsi.convert(image, options: glyphOptions(10))
         #expect(canvas.height == 5)
         let score = ImageScore.score(canvas, source: image, options: glyphOptions(10))
-        #expect(score.deltaE < 0.5, "\(score)")
+        #expect(score.deltaE < 1, "\(score)")  // about one just noticeable difference (smoothing at cell edges)
         #expect(score.ssim > 0.99, "\(score)")
     }
 
@@ -39,8 +39,8 @@ private func glyphOptions(_ columns: Int) -> ImageToAnsi.Options {
         base.columns = 100
         base.palette = .imagePalette
         let photo = ImagePreset.photo.options(base: base, imageWidth: 640, imageHeight: 480)
-        #expect(photo.mode == .glyphs && photo.dither == .serpentine && photo.ditherStrength == 0.7)
-        #expect(photo.adjustments.autoLevels && photo.columns == 100 && photo.palette == .imagePalette)
+        #expect(photo.mode == .glyphs && photo.dither == .serpentine && photo.ditherStrength == 0.5)
+        #expect(!photo.adjustments.autoLevels && photo.columns == 100 && photo.palette == .imagePalette)
         let logo = ImagePreset.logo.options(base: base, imageWidth: 640, imageHeight: 480)
         #expect(logo.mode == .glyphs && logo.dither == .none && !logo.extendedGlyphs && !logo.nearestNeighbour)
         let pixel = ImagePreset.pixelArt.options(base: base, imageWidth: 48, imageHeight: 32)

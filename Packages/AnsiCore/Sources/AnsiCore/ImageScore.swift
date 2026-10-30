@@ -33,9 +33,10 @@ public enum ImageScore {
     }
 
     /// Compares two images of any size at the first one's size.
-    public static func compare(rendered: CGImage, source: CGImage) -> Result {
+    /// `nearest` scales the source without smoothing (pixel art).
+    public static func compare(rendered: CGImage, source: CGImage, nearest: Bool = false) -> Result {
         let a = PixelGrid.sample(rendered, width: rendered.width, height: rendered.height, crop: nil, nearest: true)
-        let b = PixelGrid.sample(source, width: rendered.width, height: rendered.height, crop: nil, nearest: false)
+        let b = PixelGrid.sample(source, width: rendered.width, height: rendered.height, crop: nil, nearest: nearest)
         return compare(a, b)
     }
 

@@ -32,10 +32,9 @@ public enum ImagePreset: String, CaseIterable, Codable {
         case .photo:
             o.mode = .glyphs
             o.dither = .serpentine
-            o.ditherStrength = 0.7
+            o.ditherStrength = 0.5
             o.extendedGlyphs = false
             o.nearestNeighbour = false
-            o.adjustments.autoLevels = true
         case .logo:
             o.mode = .glyphs
             o.dither = .none
@@ -82,7 +81,7 @@ extension ImageToAnsi {
             return o
         }
         return [
-            ("Best character, serpentine dither", with(.glyphs, .serpentine, 0.7)),
+            ("Best character, serpentine dither", with(.glyphs, .serpentine, 0.5)),
             ("Best character, no dither", with(.glyphs, .none, 1)),
             ("Best character with lines, no dither", with(.glyphs, .none, 1, extended: true)),
             ("Half blocks, Floyd-Steinberg", with(.halfBlocks, .floydSteinberg, 1)),

@@ -55,6 +55,21 @@ public enum OKLab {
         RGB(r: byte(srgb: srgb(linear: c.x)), g: byte(srgb: srgb(linear: c.y)), b: byte(srgb: srgb(linear: c.z)))
     }
 
+    /// How much more a hue or colourfulness error counts than a lightness error when choosing
+    /// palette colours. With only 16 colours and four greys, plain OKLab often trades hue for
+    /// lightness (a mid grey becoming cyan, skin becoming grey); weighting a and b keeps hues.
+    /// Measured on the generated test images (image import plan, Task 10): 2 removes the cyan and
+    /// brown specks on grey anti-aliasing at almost no cost in delta E.
+    static let chromaWeight: Float = 2
+
+    /// OKLab with a and b scaled by `chromaWeight`: the space colour matching measures in.
+    public static func match(linear c: SIMD3<Float>) -> SIMD3<Float> {
+        var v = lab(linear: c)
+        v.y *= chromaWeight
+        v.z *= chromaWeight
+        return v
+    }
+
     /// The 16 VGA colours in OKLab.
     public static let vga: [SIMD3<Float>] = Palette.vga.map { lab($0) }
 

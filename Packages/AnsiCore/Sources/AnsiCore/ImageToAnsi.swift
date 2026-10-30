@@ -69,7 +69,7 @@ public enum ImageToAnsi {
         public var palette = PaletteChoice.vga16
         public var dither = Dither.serpentine
         /// 0 to 1: how much of the error dithering spreads (or how strong the ordered pattern is).
-        public var ditherStrength: Float = 0.7
+        public var ditherStrength: Float = 0.5
         public var iceColors = true
         /// Compensates for the 8x16 character cell so the picture keeps its proportions.
         public var aspectCorrection = true
@@ -177,7 +177,7 @@ public enum ImageToAnsi {
         if options.dither == .ordered { applyOrdered(&grid, strength: strength) }
         var values = grid.linear
         let paletteLinear = palette.map { OKLab.linear($0) }
-        let paletteLab = palette.map { OKLab.lab($0) }
+        let paletteLab = palette.map { OKLab.match(linear: OKLab.linear($0)) }
         let one = SIMD3<Float>(repeating: 1)
 
         switch options.mode {
@@ -220,7 +220,7 @@ public enum ImageToAnsi {
                     allowed = 0...7
                     sameAs = chosen[index - gridWidth]
                 }
-                let lab = OKLab.lab(linear: target)
+                let lab = OKLab.match(linear: target)
                 var pick = OKLab.nearest(lab, in: paletteLab, allowed: allowed)
                 if let sameAs {
                     let a = lab - paletteLab[pick], b = lab - paletteLab[sameAs]
@@ -251,7 +251,7 @@ public enum ImageToAnsi {
             let diffusion = kernel ?? DitherKernel(taps: [], serpentine: false)
             let finished = diffusion.run(width: gridWidth, height: gridHeight, values: &values, cancel: cancel) { index, value in
                 let target = value.clamped(lowerBound: .zero, upperBound: one)
-                let pick = OKLab.nearest(OKLab.lab(linear: target), in: choiceLab, allowed: 0...(choices.count - 1))
+                let pick = OKLab.nearest(OKLab.match(linear: target), in: choiceLab, allowed: 0...(choices.count - 1))
                 chosen[index] = pick
                 return kernel == nil ? .zero : (target - choices[pick].linear) * strength
             }
@@ -322,7 +322,7 @@ public enum ImageToAnsi {
         let linear = palette.map { OKLab.linear($0) }
         var out: [Shade] = []
         func add(_ code: UInt8, _ fg: Int, _ bg: Int, _ mix: SIMD3<Float>) {
-            out.append(Shade(code: code, fg: fg, bg: bg, linear: mix, lab: OKLab.lab(linear: mix)))
+            out.append(Shade(code: code, fg: fg, bg: bg, linear: mix, lab: OKLab.match(linear: mix)))
         }
         for bg in backgrounds { add(0x20, 7, bg, linear[bg]) }
         for fg in palette.indices { add(EditCanvas.blockFull, fg, 0, linear[fg]) }

@@ -75,12 +75,13 @@ struct GlyphSearch {
         mixLab.reserveCapacity(palette.count * palette.count * levels.count)
         for fg in 0..<palette.count {
             for bg in 0..<palette.count {
-                for k in levels { mixLab.append(OKLab.lab(linear: linear[fg] * k + linear[bg] * (1 - k))) }
+                for k in levels { mixLab.append(OKLab.match(linear: linear[fg] * k + linear[bg] * (1 - k))) }
             }
         }
         self.mixLab = mixLab
         mixNorm = mixLab.map { ($0 * $0).sum() }
     }
+
 
     /// A glyph's coverage per sub pixel (row major), for tests.
     func coverage(_ code: UInt8) -> [Float] {
@@ -90,7 +91,7 @@ struct GlyphSearch {
     /// The best glyph and pair for `cell`: `subWidth * subHeight` linear RGB sub pixels, row major.
     /// Ties keep the earlier glyph, then the lower fg, then the lower bg.
     func best(cell: [SIMD3<Float>]) -> Match {
-        let labs = cell.map { OKLab.lab(linear: $0) }
+        let labs = cell.map { OKLab.match(linear: $0) }
         let total = labs.reduce(Float(0)) { $0 + ($1 * $1).sum() }
         let levelCount = levels.count
         var bestError = Float.greatestFiniteMagnitude
