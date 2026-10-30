@@ -56,6 +56,13 @@ public enum TerminalEngines {
     /// A fresh engine for an emulation and screen size.
     public static func make(_ emulation: TerminalEmulation, columns: Int, rows: Int, encoding: TextEncoding,
                             iceColors: Bool) -> any TerminalEngine {
+        switch emulation {
+        case .avatar:
+            var a = AvatarTerminal(columns: columns, rows: rows, encoding: encoding)
+            a.iceColors = iceColors
+            return a
+        default: break
+        }
         var t = TerminalEmulator(columns: columns, rows: rows, encoding: encoding)
         t.iceColors = iceColors
         switch emulation {

@@ -454,6 +454,30 @@ public struct TerminalEmulator {
         return TerminalInput.bytes(for: key, backspaceSendsDelete: backspaceSendsDelete)
     }
 
+    // MARK: Avatar helpers
+
+    /// Avatar insert mode (AVT/0+ ^V^I, ended by any other Avatar command).
+    mutating func setInsertMode(_ on: Bool) { insertMode = on }
+
+    /// Scrolls a rectangle (1 based, inclusive) up or down by `lines`, filling with blanks.
+    mutating func scrollArea(up: Bool, lines: Int, top t: Int, left l: Int, bottom b: Int, right r: Int) {
+        let top = max(0, t - 1), bottom = min(rows - 1, b - 1), left = max(0, l - 1), right = min(columns - 1, r - 1)
+        guard top <= bottom, left <= right else { return }
+        let height = bottom - top + 1
+        let n = lines <= 0 || lines > height ? height : lines
+        let blank = blankCell
+        if up {
+            for y in top...bottom {
+                for x in left...right { grid[y][x] = y + n <= bottom ? grid[y + n][x] : blank }
+            }
+        } else {
+            for y in stride(from: bottom, through: top, by: -1) {
+                for x in left...right { grid[y][x] = y - n >= top ? grid[y - n][x] : blank }
+            }
+        }
+        changeCount &+= 1
+    }
+
     // MARK: Screen operations
 
     private var blankCell: AnsiCell {
