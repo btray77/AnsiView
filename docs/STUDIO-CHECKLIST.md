@@ -22,7 +22,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Playback speed / baud | `Playback.swift` | 300 to 115200 and unlimited |
 | Export | PNG, JPEG, WebP, GIF, APNG, MP4, HTML, text, modern ANSI | |
 | File transfers | none | |
-| ANSI music | `AnsiMusic.swift`, `PlayString.swift`, synth, `App/Music*` | merged; viewer playback integration pending |
+| ANSI music | `AnsiMusic.swift`, `PlayString.swift`, `MusicScheduler.swift`, synth, `App/Music*`, `App/ViewerMusic.swift`, `App/TerminalMusic.swift` | engine and editor merged; playback in viewer, terminal and MP4 export on branch `ansiview-2.0-music-playback` |
 | TDF fonts | none | |
 | Screen designer / templates | none | |
 
@@ -57,7 +57,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 |---|---|---|
 | Research historical syntax (BASIC PLAY strings after `ESC[M`, `ESC[MF`/`MB`, `ESC[N`, SyncTERM `ESC[\|`, terminated by 0x0E) | done (harness; live sound check needs owner) | music core |
 | Parser and playback (square-wave PC speaker style synth) | done (harness; live sound check needs owner) | music core |
-| Playback during viewing and in the terminal | planned (viewer now hides PLAY text; sound integration next) | music integration |
+| Playback during viewing and in the terminal | done (harness: viewer at 2400 baud holds during MF and draws during MB, terminal in split chunks, MP4 sound track measured; Quick Look silent; live sound check needs owner) | music playback (`2026-10-30-ansiview-2.0-music-playback.md`) |
 | Visual piano roll / timeline editor, keyboard entry | done (harness; live sound check needs owner) | music core |
 | Text command editing, two-way conversion | done (harness; live sound check needs owner) | music core |
 | Import from and embed into ANSI files, extract | done (harness; live sound check needs owner) | music core |
