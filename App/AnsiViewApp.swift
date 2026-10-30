@@ -35,6 +35,8 @@ private func send(_ action: Selector) {
 struct AnsiViewApp: App {
     @AppStorage(PlaybackSpeed.defaultsKey, store: PlaybackSpeed.defaults)
     private var baud = PlaybackSpeed.defaultBaud
+    @AppStorage(PlaybackSpeed.crtEffectKey, store: PlaybackSpeed.defaults)
+    private var crtEffect = false
 
     var body: some Scene {
         DocumentGroup(viewing: AnsiDocument.self) { file in
@@ -48,6 +50,11 @@ struct AnsiViewApp: App {
                     .keyboardShortcut("e")
                 Button("Export Animation...") { send(#selector(AnsiCanvasView.exportAnimation(_:))) }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
+            }
+            CommandGroup(before: .toolbar) {
+                Toggle("CRT Effect", isOn: $crtEffect)
+                    .keyboardShortcut("k", modifiers: [.command, .shift])
+                Divider()
             }
             CommandMenu("Playback") {
                 Button("Play / Pause") { send(#selector(AnsiCanvasView.togglePausePlayback(_:))) }

@@ -18,6 +18,10 @@ enum PlaybackSpeed {
         set { defaults.set(newValue, forKey: defaultsKey) }
     }
 
+    /// Optional CRT look (scanlines, glow, curvature), shared with Quick Look.
+    static let crtEffectKey = "crtEffect"
+    static var crtEffect: Bool { defaults.bool(forKey: crtEffectKey) }
+
     static func label(_ baud: Int) -> String {
         baud == 0 ? "Instant" : "\(baud) baud"
     }
@@ -50,6 +54,7 @@ final class AnsiPlayerViewController: NSViewController {
     private var lastFrameTime: TimeInterval = 0
     private var byteCredit: Double = 0
     private var shownBaud = PlaybackSpeed.current
+    private var shownCRT = PlaybackSpeed.crtEffect
     private var defaultsObserver: NSObjectProtocol?
 
     init(source: ArtFile) {
@@ -250,6 +255,10 @@ final class AnsiPlayerViewController: NSViewController {
     }
 
     private func speedMayHaveChanged() {
+        if PlaybackSpeed.crtEffect != shownCRT {
+            shownCRT = PlaybackSpeed.crtEffect
+            redraw()
+        }
         let baud = PlaybackSpeed.current
         guard baud != shownBaud else { return }
         shownBaud = baud
@@ -302,7 +311,8 @@ final class AnsiPlayerViewController: NSViewController {
         }
         var options = renderOptions
         options.blinkVisible = blinkVisible
-        canvas.image = AnsiRenderer.render(padded, options: options)?.image
+        let image = AnsiRenderer.render(padded, options: options)?.image
+        canvas.image = PlaybackSpeed.crtEffect ? image.flatMap { CRTFilter().apply($0) } ?? image : image
     }
 }
 
