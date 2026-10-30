@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // ansirender --still png|jpeg|webp <scale> <input> <output>
 // ansirender --animate gif|webp|mp4 <baud> <scale> <input> <output>
 // ansirender --stats <input>...
-// ansirender --convert ansi|ansi256|text|utf8 <input> [output]   (stdout when output is - or missing)
+// ansirender --convert html|ansi|ansi256|text|utf8 [--inline] [--no-font] <input> [output]   (stdout when output is - or missing)
 // ansirender --roundtrip <input>...   (checks that ANSI conversion reads back as the same cells)
 let args = CommandLine.arguments
 func fail(_ message: String, _ code: Int32) -> Never {
@@ -40,20 +40,17 @@ func loadArt(_ path: String) -> ArtFile {
 }
 
 if args[1] == "--convert", args.count >= 4, let format = TextFormat(rawValue: args[2]) {
-    let screen = AnsiAnalysis(loadArt(args[3])).finalScreen
-    let data: Data
-    switch format {
-    case .ansi: data = Data(TextConvert.modernANSI(screen, colors: .trueColor).utf8)
-    case .ansi256: data = Data(TextConvert.modernANSI(screen, colors: .xterm256).utf8)
-    case .text: data = Data(TextConvert.cp437Text(screen))
-    case .utf8: data = Data(TextConvert.utf8Text(screen).utf8)
-    case .html: fail("html is not available yet", 2)
-    }
-    if args.count < 5 || args[4] == "-" {
+    var rest = Array(args.dropFirst(3))
+    let inline = rest.contains("--inline"), noFont = rest.contains("--no-font")
+    rest.removeAll { $0 == "--inline" || $0 == "--no-font" }
+    guard let inputPath = rest.first else { fail("usage: ansirender --convert <format> [--inline] [--no-font] <input> [output]", 2) }
+    let screen = AnsiAnalysis(loadArt(inputPath)).finalScreen
+    let data = TextConvert.data(screen, format: format, htmlStyle: inline ? .inline : .classes, embedFont: !noFont)
+    if rest.count < 2 || rest[1] == "-" {
         FileHandle.standardOutput.write(data)
     } else {
-        do { try data.write(to: URL(fileURLWithPath: args[4])) } catch { fail("could not write \(args[4])", 1) }
-        print("wrote \(args[4]): \(data.count) bytes")
+        do { try data.write(to: URL(fileURLWithPath: rest[1])) } catch { fail("could not write \(rest[1])", 1) }
+        print("wrote \(rest[1]): \(data.count) bytes")
     }
     exit(0)
 }

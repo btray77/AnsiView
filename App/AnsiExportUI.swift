@@ -13,6 +13,11 @@ extension AnsiCanvasView {
         guard let player, let window else { return }
         ExportController.exportAnimation(from: player, in: window)
     }
+
+    @objc func exportText(_ sender: Any?) {
+        guard let player, let window else { return }
+        ExportController.exportText(from: player, in: window)
+    }
 }
 
 @MainActor
@@ -73,6 +78,36 @@ enum ExportController {
                                                      progress: report)
                 }
             }
+        }
+    }
+
+    /// File > Export Text: the frame on screen as HTML, terminal ANSI or plain text.
+    static func exportText(from player: AnsiPlayerViewController, in window: NSWindow) {
+        let panel = NSSavePanel()
+        let formats = TextFormat.allCases
+        let format = popup(formats.map(\.label), selected: 0)
+        panel.accessoryView = accessory([("Format:", format)])
+        panel.nameFieldStringValue = baseName(window) + "." + formats[0].fileExtension
+        panel.allowedContentTypes = [contentType(formats[0])]
+        panel.isExtensionHidden = false
+        retarget(panel, format) { contentType(formats[$0]) }
+
+        let screen = player.screen
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try TextConvert.data(screen, format: formats[format.indexOfSelectedItem]).write(to: url)
+            } catch {
+                NSAlert(error: error).beginSheetModal(for: window)
+            }
+        }
+    }
+
+    static func contentType(_ format: TextFormat) -> UTType {
+        switch format {
+        case .html: return .html
+        case .ansi, .ansi256: return UTType(filenameExtension: "ans") ?? .plainText
+        case .text, .utf8: return .plainText
         }
     }
 
