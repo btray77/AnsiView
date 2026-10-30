@@ -198,6 +198,8 @@ struct AnsiViewApp: App {
                 Divider()
                 Button("Get Info") { send(#selector(AnsiPlayerViewController.showArtInfo(_:))) }
                     .keyboardShortcut("i")
+                Button("Compare With...") { send(#selector(AnsiCanvasView.compareWithFile(_:))) }
+                    .help("Shows this piece next to another one with the cells that differ tinted red.")
                 Divider()
                 ForEach(ArtEditor.all, id: \.bundleIdentifier) { editor in
                     Button(editor.menuTitle) { EditorHandoff.open(in: editor) }

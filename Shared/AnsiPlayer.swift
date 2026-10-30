@@ -946,6 +946,42 @@ final class CenteringClipView: NSClipView {
     }
 }
 
+/// Outlines of search matches over the art (app windows only). Lets every click through.
+final class CellHighlightView: NSView {
+    var cells: (rects: [CellRect], current: Int?, columns: Int, rows: Int)? {
+        didSet { needsDisplay = true; isHidden = cells == nil }
+    }
+
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// Where a cell rect is drawn, in this view's top down points.
+    func area(_ rect: CellRect) -> CGRect {
+        guard let cells else { return .zero }
+        return CellGrid.rect(for: rect, in: bounds.size, columns: cells.columns, rows: cells.rows).insetBy(dx: -1, dy: -1)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let cells else { return }
+        for (index, rect) in cells.rects.enumerated() {
+            let box = area(rect)
+            guard box.intersects(dirtyRect) else { continue }
+            let path = NSBezierPath(rect: box.insetBy(dx: 0.75, dy: 0.75))
+            if index == cells.current {
+                NSColor.systemOrange.withAlphaComponent(0.5).setFill()
+                NSColor.white.setStroke()
+                path.lineWidth = 2
+            } else {
+                NSColor.systemYellow.withAlphaComponent(0.22).setFill()
+                NSColor.systemYellow.setStroke()
+                path.lineWidth = 1.5
+            }
+            path.fill()
+            path.stroke()
+        }
+    }
+}
+
 /// Displays one rendered frame with crisp, unsmoothed pixels.
 final class AnsiCanvasView: NSView {
     var onClick: (() -> Void)?
@@ -1010,53 +1046,22 @@ final class AnsiCanvasView: NSView {
     }
 
     /// Search match outlines, created only when the app first shows some (never in Quick Look).
-    private var highlightLayer: CAShapeLayer?
-    private var currentLayer: CAShapeLayer?
-    private var highlightCells: (rects: [CellRect], current: Int?, columns: Int, rows: Int)?
+    /// A flipped subview that draws in view points, so it lines up with the cells however the
+    /// layer tree is flipped.
+    private var highlightView: CellHighlightView?
 
     func showHighlights(_ rects: [CellRect], current: Int?, columns: Int, rows: Int) {
-        highlightCells = rects.isEmpty ? nil : (rects, current, columns, rows)
-        if highlightLayer == nil, !rects.isEmpty {
-            let all = CAShapeLayer(), now = CAShapeLayer()
-            all.fillColor = NSColor.systemYellow.withAlphaComponent(0.22).cgColor
-            all.strokeColor = NSColor.systemYellow.cgColor
-            all.lineWidth = 1.5
-            now.fillColor = NSColor.systemOrange.withAlphaComponent(0.5).cgColor
-            now.strokeColor = NSColor.white.cgColor
-            now.lineWidth = 2
-            for shape in [all, now] {
-                shape.actions = ["path": NSNull(), "hidden": NSNull(), "position": NSNull(), "bounds": NSNull()]
-                layer?.insertSublayer(shape, below: marquee)
-            }
-            highlightLayer = all
-            currentLayer = now
+        if highlightView == nil, !rects.isEmpty {
+            let overlay = CellHighlightView(frame: bounds)
+            overlay.autoresizingMask = [.width, .height]
+            addSubview(overlay)
+            highlightView = overlay
         }
-        layoutHighlights()
+        highlightView?.cells = rects.isEmpty ? nil : (rects, current, columns, rows)
     }
 
     private func layoutHighlights() {
-        guard let all = highlightLayer, let now = currentLayer else { return }
-        guard let cells = highlightCells else { all.isHidden = true; now.isHidden = true; return }
-        let flip = !(layer?.isGeometryFlipped ?? false)
-        func area(_ rect: CellRect) -> CGRect {
-            var r = CellGrid.rect(for: rect, in: bounds.size, columns: cells.columns, rows: cells.rows)
-            if flip { r.origin.y = bounds.height - r.maxY }
-            return r.insetBy(dx: -1, dy: -1)
-        }
-        let path = CGMutablePath()
-        for rect in cells.rects { path.addRect(area(rect)) }
-        for shape in [all, now] {
-            shape.frame = bounds
-            shape.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-        }
-        all.path = path
-        all.isHidden = false
-        if let index = cells.current, cells.rects.indices.contains(index) {
-            now.path = CGPath(rect: area(cells.rects[index]), transform: nil)
-            now.isHidden = false
-        } else {
-            now.isHidden = true
-        }
+        highlightView?.frame = bounds
     }
 
     @available(*, unavailable)
