@@ -42,8 +42,8 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Box drawing, single/double, auto-joining | planned | item 60 |
 | Flood fill, colour replace, character replace | partial: fill selection | editor v2 |
 | Text insertion | done | plan 6 |
-| Select, copy, cut, paste | running | copy and paste |
-| Move and resize selection | running (floating paste) / planned (resize) | copy and paste, editor v2 |
+| Select, copy, cut, paste (cells, text, ANSI, image; editor and viewer; Copy As; floating and transparent paste; paste images) | done (harness verified; live check needs owner) | copy and paste, merged 39ef769 |
+| Move and resize selection | partial: move via floating paste; resize planned | editor v2 |
 | Mirror, flip, rotate (with box-character remapping) | planned | editor v2 |
 | Block operations | partial | editor v2 |
 | Undo / redo | done | plan 6 |
@@ -139,7 +139,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 
 ## Running right now
 
-- Copy and paste with selection (`ansiview-2.0-copy-paste`)
+- Editor v2: TheDraw-class tools (`ansiview-2.0-editor-tools`)
 - Image import v2 with live preview (`ansiview-2.0-image-import`)
 - Dialing directory (`ansiview-2.0-dialing-directory`)
 - File transfer protocol engines (`ansiview-2.0-transfers-core`)
