@@ -41,7 +41,7 @@ public struct TerminalEmulator {
     private var saved: (row: Int, column: Int, attributes: TextAttributes) = (0, 0, TextAttributes())
     private var replies: [UInt8] = []
 
-    private enum ParseState { case ground, escape, charset, csi }
+    private enum ParseState { case ground, escape, charset, csi, controlString, controlStringEscape }
     private var state = ParseState.ground
     private var parameters: [Int?] = []
     private var currentParameter: Int?
@@ -136,6 +136,20 @@ public struct TerminalEmulator {
             state = .ground
         case .csi:
             csiByte(byte)
+        case .controlString:
+            // APC, OSC, DCS, PM and SOS strings (window titles, SyncTERM probes) are skipped,
+            // up to ST (ESC \) or BEL. Nothing is kept, so a string that never ends costs nothing.
+            switch byte {
+            case 0x1B: state = .controlStringEscape
+            case 0x07, 0x18, 0x1A: state = .ground
+            default: break
+            }
+        case .controlStringEscape:
+            if byte == UInt8(ascii: "\\") {
+                state = .ground
+            } else {
+                escape(byte)
+            }
         }
     }
 
@@ -208,6 +222,8 @@ public struct TerminalEmulator {
             hasIntermediate = false
             state = .csi
         case UInt8(ascii: "("), UInt8(ascii: ")"): state = .charset
+        case UInt8(ascii: "_"), UInt8(ascii: "]"), UInt8(ascii: "P"), UInt8(ascii: "^"), UInt8(ascii: "X"):
+            state = .controlString
         case UInt8(ascii: "7"): saved = (row, column, attributes)
         case UInt8(ascii: "8"):
             row = saved.row; column = saved.column; attributes = saved.attributes

@@ -287,3 +287,13 @@ extension TerminalEmulator {
         return t
     }
 }
+
+/// Synchronet probes for SyncTERM with an APC string (seen live on vert.synchro.net); OSC, DCS,
+/// PM and SOS strings must not print either, and an unterminated one is bounded.
+@Test func controlStringsAreSwallowed() {
+    var t = term("A\u{1B}_SyncTERM:Q;libsndfile\u{1B}\\B\u{1B}]0;title\u{07}C\u{1B}Pqqq\u{1B}\\D\u{1B}^pm\u{1B}\\E\u{1B}Xsos\u{1B}\\F")
+    #expect(line(t.grid[0]) == "ABCDEF")
+    t.feed(Array("\u{1B}_".utf8) + [UInt8](repeating: 0x41, count: 100_000))
+    t.feed(Array("\u{1B}\\G".utf8))
+    #expect(line(t.grid[0]) == "ABCDEFG")
+}

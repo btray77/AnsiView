@@ -115,6 +115,8 @@ public final class BBSClient {
     public var onState: ((BBSClientState) -> Void)?
     /// Data from the BBS with telnet commands removed, on `queue`.
     public var onData: (([UInt8]) -> Void)?
+    /// Every byte read from the network, before telnet decoding, on `queue` (for logs).
+    public var onReceived: (([UInt8]) -> Void)?
     /// Every byte written to the network (data and negotiation), on `queue`.
     public var onSent: (([UInt8]) -> Void)?
 
@@ -216,6 +218,7 @@ public final class BBSClient {
     }
 
     private func deliver(_ bytes: [UInt8]) {
+        onReceived?(bytes)
         guard mode == .telnet else {
             onData?(bytes)
             return

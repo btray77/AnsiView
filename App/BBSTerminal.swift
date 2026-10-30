@@ -154,6 +154,8 @@ final class TerminalViewController: NSViewController {
     private(set) var blinkOn = true
     private(set) var baud: Int
     private(set) var statusText = ""
+    /// Bytes released to the screen so far (after pacing).
+    private(set) var shownBytes = 0
     private var pacer: LinePacer
     private var capture: FileHandle?
     private var captureName: String?
@@ -275,6 +277,7 @@ final class TerminalViewController: NSViewController {
     func tick(elapsed: TimeInterval) {
         let due = pacer.release(elapsed: elapsed)
         if !due.isEmpty {
+            shownBytes += due.count
             emulator.feed(due)
             let replies = emulator.takeReplies()
             if !replies.isEmpty { client?.send(replies) }

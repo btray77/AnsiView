@@ -129,8 +129,11 @@ private func send(_ conn: NWConnection, _ bytes: [UInt8]) {
     let server = try LoopbackServer { conn in send(conn, script) }
     defer { server.stop() }
     let (client, states, data) = makeClient(port: await server.port())
+    let wire = Box<[UInt8]>([])
+    client.onReceived = { bytes in wire.update { $0 += bytes } }
     client.connect()
     #expect(await eventually { data.value.count == 6 })
+    #expect(wire.value == script)
     #expect(data.value == Array("Hello".utf8) + [255])
     let expected: [UInt8] = [255, 253, 3, 255, 251, 24, 255, 251, 31]
         + [255, 253, 1]
