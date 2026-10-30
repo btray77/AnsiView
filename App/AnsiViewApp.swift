@@ -40,6 +40,8 @@ struct AnsiViewApp: App {
     private var baud = PlaybackSpeed.defaultBaud
     @AppStorage(PlaybackSpeed.crtEffectKey, store: PlaybackSpeed.defaults)
     private var crtEffect = false
+    @AppStorage(PlaybackSpeed.holdFinalFrameKey, store: PlaybackSpeed.defaults)
+    private var holdFinalFrame = false
     /// The focused art window's speed; speed commands change that file's remembered speed.
     @FocusedObject private var focusedSpeed: PlayerSpeed?
 
@@ -90,6 +92,8 @@ struct AnsiViewApp: App {
                         Text(PlaybackSpeed.label(choice)).tag(choice)
                     }
                 }
+                Divider()
+                Toggle("Hold Final Frame", isOn: $holdFinalFrame)
             }
         }
     }

@@ -23,6 +23,10 @@ enum PlaybackSpeed {
     static let crtEffectKey = "crtEffect"
     static var crtEffect: Bool { defaults.bool(forKey: crtEffectKey) }
 
+    /// Hold the last frame of a playback until clicked, instead of going straight to the finished art.
+    static let holdFinalFrameKey = "holdFinalFrame"
+    static var holdFinalFrame: Bool { defaults.bool(forKey: holdFinalFrameKey) }
+
     /// Speeds remembered per file (by `ArtFile.identity`), shared with Quick Look.
     static let fileSpeedsKey = "fileSpeeds"
     static var fileSpeeds: SpeedMemory { SpeedMemory(serialized: defaults.object(forKey: fileSpeedsKey)) }
@@ -138,6 +142,12 @@ final class AnsiPlayerViewController: NSViewController {
     var isTerminalMode: Bool { analysis.canvasRows > TerminalViewport.rows && !screenIsFinal }
     /// Rows on screen now: the terminal window during playback of tall art, else the whole canvas.
     var displayedRows: Int { isTerminalMode ? TerminalViewport.rows : analysis.canvasRows }
+    /// True when playback reached the end and is holding its last frame until clicked.
+    private(set) var isHolding = false
+    /// Called each time a playback in progress reaches the finished art (end of stream without a
+    /// hold, a click or Skip to End during playback, or the release of a hold).
+    var onFinished: (() -> Void)?
+
     /// Top row of the terminal window; nil until playback places it.
     private(set) var viewportTop: Int?
 
@@ -302,9 +312,11 @@ final class AnsiPlayerViewController: NSViewController {
 
     func replay() {
         stopPlayback()
+        isHolding = false
         terminal = AnsiTerminal(source)
         if speed.baud == 0 {
-            skipToEnd()
+            showFinal()
+            onFinished?()
             return
         }
         viewportTop = nil
@@ -315,8 +327,22 @@ final class AnsiPlayerViewController: NSViewController {
         startTimer()
     }
 
+    /// Finishes playback and shows the finished art.
     func skipToEnd() {
+        let wasInProgress = isPlaying || isHolding || isPaused
+        showFinal()
+        if wasInProgress { onFinished?() }
+    }
+
+    /// Releases a held final frame and shows the finished art.
+    func finishHold() {
+        guard isHolding else { return }
+        skipToEnd()
+    }
+
+    private func showFinal() {
         stopPlayback()
+        isHolding = false
         terminal.runToEnd()
         screen = analysis.finalScreen
         screenIsFinal = true
@@ -328,9 +354,10 @@ final class AnsiPlayerViewController: NSViewController {
     /// Pauses and shows the screen as it was after `position` bytes.
     func seek(to position: Int) {
         stopPlayback()
+        isHolding = false
         terminal.seek(to: position)
         if terminal.isFinished {
-            skipToEnd()
+            showFinal()
             return
         }
         viewportTop = nil
@@ -369,8 +396,13 @@ final class AnsiPlayerViewController: NSViewController {
     }
 
     private func skipOrReplay() {
-        guard analysis.isAnimated else { return }
-        if isPlaying { skipToEnd() } else { replay() }
+        if isHolding {
+            finishHold()
+        } else if isPlaying {
+            skipToEnd()
+        } else if analysis.isAnimated {
+            replay()
+        }
     }
 
     private func startTimer() {
@@ -399,7 +431,12 @@ final class AnsiPlayerViewController: NSViewController {
         guard count > 0 else { return }
         byteCredit -= Double(count)
         terminal.advance(byteCount: count)
-        if terminal.isFinished {
+        if terminal.isFinished, PlaybackSpeed.holdFinalFrame {
+            stopPlayback()
+            isHolding = true
+            showTerminal()
+            showHUD("Click to continue")
+        } else if terminal.isFinished {
             skipToEnd()
         } else {
             showTerminal()
