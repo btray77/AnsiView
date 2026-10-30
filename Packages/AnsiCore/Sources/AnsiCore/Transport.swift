@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Security
 
 /// What a transport reports to `BBSClient`, always on the client's queue.
 public enum TransportEvent: Equatable {
@@ -98,15 +99,57 @@ public final class TCPTransport: BBSTransport {
     public let connectTimeout: TimeInterval
     public let queue: DispatchQueue
 
+    /// Telnet over TLS ("telnets"): certificates macOS trusts connect; others go to `verifier`.
+    public let tls: Bool
+    public weak var verifier: CertificateVerifying?
+
     private var connection: NWConnection?
     private var ready = false
     private var done = false
+    /// Why the TLS handshake was refused by AnsiView (shown instead of Network.framework's error).
+    private var certificateError: BBSConnectionError?
 
-    public init(host: String, port: Int, connectTimeout: TimeInterval, queue: DispatchQueue) {
+    public init(host: String, port: Int, connectTimeout: TimeInterval, queue: DispatchQueue, tls: Bool = false,
+                verifier: CertificateVerifying? = nil) {
         self.host = host
         self.port = port
         self.connectTimeout = connectTimeout
         self.queue = queue
+        self.tls = tls
+        self.verifier = verifier
+    }
+
+    private func tlsOptions() -> NWProtocolTLS.Options {
+        let options = NWProtocolTLS.Options()
+        let security = options.securityProtocolOptions
+        // BBS TLS stacks are often old: TLS 1.0 and later are accepted.
+        sec_protocol_options_set_min_tls_protocol_version(security, .TLSv10)
+        let host = self.host, port = self.port
+        sec_protocol_options_set_verify_block(security, { [weak self] _, secTrust, complete in
+            let trust = sec_trust_copy_ref(secTrust).takeRetainedValue()
+            SecTrustSetPolicies(trust, SecPolicyCreateSSL(true, host as CFString))
+            let systemTrusted = SecTrustEvaluateWithError(trust, nil)
+            guard let self, let info = CertificateInfo.make(trust: trust, systemTrusted: systemTrusted) else {
+                complete(false)
+                return
+            }
+            if systemTrusted {
+                complete(true)
+                return
+            }
+            guard let verifier = self.verifier else {
+                self.certificateError = .certificateNotTrusted(host)
+                complete(false)
+                return
+            }
+            self.events?(.waitingForUser(true))
+            verifier.verify(host: host, port: port, certificate: info) { error in
+                self.events?(.waitingForUser(false))
+                self.certificateError = error
+                complete(error == nil)
+            }
+        }, queue)
+        return options
     }
 
     public func open() {
@@ -119,7 +162,7 @@ public final class TCPTransport: BBSTransport {
         tcp.noDelay = true
         tcp.connectionTimeout = max(1, Int(connectTimeout.rounded(.up)))
         let connection = NWConnection(host: NWEndpoint.Host(host), port: endpointPort,
-                                      using: NWParameters(tls: nil, tcp: tcp))
+                                      using: NWParameters(tls: tls ? tlsOptions() : nil, tcp: tcp))
         self.connection = connection
         connection.stateUpdateHandler = { [weak self] state in self?.changed(state) }
         connection.start(queue: queue)
@@ -164,7 +207,13 @@ public final class TCPTransport: BBSTransport {
             receive()
         case .waiting(let error), .failed(let error):
             // A terminal reports the problem rather than silently retrying.
-            finish(.from(error, host: host, port: port, connected: ready))
+            if let certificateError {
+                finish(certificateError)
+            } else if tls, case .tls(let status) = error {
+                finish(.tls(host, "\(SecCopyErrorMessageString(status, nil) as String? ?? "error \(status)")."))
+            } else {
+                finish(.from(error, host: host, port: port, connected: ready))
+            }
         case .cancelled:
             finish(nil)
         default:
