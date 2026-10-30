@@ -108,6 +108,8 @@ struct AnsiViewApp: App {
                             }
                         })
                 }
+                Button("Connect to BBS...") { BBSConnectWindowController.show() }
+                    .keyboardShortcut("b", modifiers: [.command, .option])
                 Menu("Open Sample") {
                     ForEach(SampleArt.all(), id: \.url) { sample in
                         Button(sample.title) { SampleArt.open(sample) }
@@ -190,6 +192,32 @@ struct AnsiViewApp: App {
                 Divider()
                 Toggle("Hold Final Frame", isOn: $holdFinalFrame)
                 Toggle("Modem Sounds", isOn: $modemSounds)
+            }
+            CommandMenu("Terminal") {
+                Button("Disconnect") { TerminalWindowController.focused?.disconnect() }
+                Button("Reconnect") { TerminalWindowController.focused?.reconnect() }
+                    .keyboardShortcut("r", modifiers: [.command, .option])
+                Button("Send Username") { TerminalWindowController.focused?.sendUsername() }
+                Divider()
+                Menu("Speed") {
+                    ForEach(PlaybackSpeed.choices, id: \.self) { choice in
+                        Button(choice == 0 ? "Unlimited" : "\(choice) baud") {
+                            TerminalWindowController.focused?.setBaud(choice)
+                        }
+                    }
+                }
+                Menu("Size") {
+                    ForEach(TerminalViewController.sizes.indices, id: \.self) { index in
+                        let size = TerminalViewController.sizes[index]
+                        Button("\(size.columns) x \(size.rows)") {
+                            TerminalWindowController.focused?.setSize(columns: size.columns, rows: size.rows)
+                        }
+                    }
+                }
+                Divider()
+                Button("Capture Session...") { TerminalWindowController.focused?.startCapture() }
+                Button("Stop Capture") { TerminalWindowController.focused?.stopCapture() }
+                Button("Clear Scrollback") { TerminalWindowController.focused?.clearScrollback() }
             }
             CommandMenu("Slideshow") {
                 Button("Start Slideshow") { send(#selector(AnsiPlayerViewController.startSlideshow(_:))) }
