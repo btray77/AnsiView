@@ -182,6 +182,10 @@ struct AnsiViewApp: App {
                         .keyboardShortcut("c", modifiers: [.command, .option, .shift])
                     Button("Image") { send(#selector(EditorCanvasView.copyAsImage(_:))) }
                         .keyboardShortcut("c", modifiers: [.command, .option])
+                    Button("Discord (ANSI colour code block)") { send(#selector(EditorCanvasView.copyAsDiscord(_:))) }
+                        .help("A ```ansi code block in the 8 colours Discord shows (bold for bright). Discord's phone apps show it without colour.")
+                    Button("Slack (plain code block)") { send(#selector(EditorCanvasView.copyAsSlack(_:))) }
+                        .help("Slack code blocks have no colour, so this is the art's characters in a ``` block.")
                 }
             }
             CommandGroup(after: .importExport) {

@@ -701,12 +701,15 @@ final class EditorCanvasView: NSView {
             NSSound.beep()
             return
         }
+        ArtPasteboard.warnIfTooLongForDiscord(clip, kind: kind, window: window)
     }
 
     @objc func copy(_ sender: Any?) { copySelection(.all) }
     @objc func copyAsText(_ sender: Any?) { copySelection(.text) }
     @objc func copyAsANSI(_ sender: Any?) { copySelection(.ansi) }
     @objc func copyAsImage(_ sender: Any?) { copySelection(.image) }
+    @objc func copyAsDiscord(_ sender: Any?) { copySelection(.discord) }
+    @objc func copyAsSlack(_ sender: Any?) { copySelection(.slack) }
 
     @objc func cut(_ sender: Any?) {
         guard editor.floating == nil, let clip = selectionClipboard, ArtPasteboard.write(clip, kind: .all, to: pasteboard) else {
@@ -814,7 +817,7 @@ final class EditorCanvasView: NSView {
         let floating = editor.floating != nil
         switch item.action {
         case #selector(copy(_:)), #selector(cut(_:)), #selector(copyAsText(_:)), #selector(copyAsANSI(_:)),
-             #selector(copyAsImage(_:)):
+             #selector(copyAsImage(_:)), #selector(copyAsDiscord(_:)), #selector(copyAsSlack(_:)):
             return editor.selection != nil && !floating
         case #selector(paste(_:)), #selector(pasteAtContextCell(_:)): return ArtPasteboard.canPaste(pasteboard)
         case #selector(liftSelection(_:)), #selector(cropToSelection(_:)), #selector(swapSelectionColours(_:)):

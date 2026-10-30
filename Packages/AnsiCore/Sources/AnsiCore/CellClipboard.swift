@@ -7,7 +7,7 @@ import ImageIO
 /// app writes `representations` to an `NSPasteboard` as one item.
 public struct CellClipboard {
     /// Which representations a copy writes: everything (Copy) or one kind (Copy As).
-    public enum Kind: CaseIterable { case all, text, ansi, image }
+    public enum Kind: CaseIterable { case all, text, ansi, image, discord, slack }
 
     /// AnsiView's lossless cells (characters, exact colours, blink).
     public static let cellsType = "com.traynham.ansiview.cells"
@@ -33,7 +33,7 @@ public struct CellClipboard {
         self.ninePixel = ninePixel
     }
 
-    private var screen: AnsiScreen {
+    public var screen: AnsiScreen {
         var screen = AnsiScreen(columns: region.width, rows: region.cells)
         screen.font = font
         return screen
@@ -77,6 +77,10 @@ public struct CellClipboard {
             return [(Self.textType, ansi), (Self.ansiType, ansi)]
         case .image:
             return []
+        case .discord:
+            return [(Self.textType, Data(ChatCodeBlock.discord(screen).utf8))]
+        case .slack:
+            return [(Self.textType, Data(ChatCodeBlock.slack(screen).utf8))]
         }
     }
 
