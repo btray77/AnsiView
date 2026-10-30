@@ -94,6 +94,9 @@ struct AnsiViewApp: App {
                 Button("Zoom 3x") { send(#selector(AnsiCanvasView.zoom3x(_:))) }
                     .keyboardShortcut("3")
                 Divider()
+                Button("Presentation Mode") { send(#selector(AnsiPlayerViewController.presentArt(_:))) }
+                    .keyboardShortcut("f", modifiers: [.command, .shift])
+                Divider()
             }
             CommandMenu("Playback") {
                 Button("Play / Pause") { send(#selector(AnsiCanvasView.togglePausePlayback(_:))) }

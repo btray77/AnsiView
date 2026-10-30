@@ -205,6 +205,13 @@ final class SlideshowViewController: NSViewController {
         }
     }
 
+    /// Stops the dwell and the current playback (presentation mode took over).
+    func suspend() {
+        dwellTimer?.invalidate()
+        dwellTimer = nil
+        player?.halt()
+    }
+
     @objc func nextSlide(_ sender: Any?) { move(by: 1) }
     @objc func previousSlide(_ sender: Any?) { move(by: -1) }
 }

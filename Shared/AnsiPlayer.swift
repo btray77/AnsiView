@@ -118,7 +118,7 @@ final class AnsiPlayerViewController: NSViewController {
     private var lastFrameTime: TimeInterval = 0
     private var byteCredit: Double = 0
     /// True while the finished art is on screen (before playback starts, or after it ends).
-    private var screenIsFinal = true
+    private(set) var screenIsFinal = true
     private lazy var shownBaud = speed.baud
     private var shownCRT = PlaybackSpeed.crtEffect
     private var defaultsObserver: NSObjectProtocol?
@@ -429,6 +429,40 @@ final class AnsiPlayerViewController: NSViewController {
         }
         viewportTop = nil
         showTerminal()
+    }
+
+    /// True when the scrub bar is on screen.
+    var timelineBarShown: Bool { timelineBar.superview != nil }
+
+    /// Stops timers and sound without changing what is on screen (another player is taking over).
+    func halt() {
+        stopPlayback()
+    }
+
+    /// Continues where `other` was: the same position, playing, paused, held or finished. `other`
+    /// stops. Used when presentation mode starts and ends.
+    func takeOver(from other: AnsiPlayerViewController) {
+        let position = other.playbackPosition
+        let wasPlaying = other.isPlaying
+        let wasHolding = other.isHolding
+        let wasFinal = other.screenIsFinal && !wasPlaying
+        other.halt()
+        if wasFinal {
+            showFinal()
+        } else if wasHolding {
+            stopPlayback()
+            terminal.seek(to: position)
+            isHolding = true
+            viewportTop = nil
+            showTerminal()
+        } else {
+            stopPlayback()
+            isHolding = false
+            terminal.seek(to: position)
+            viewportTop = nil
+            showTerminal()
+            if wasPlaying { startTimer() }
+        }
     }
 
     /// Pauses and moves one frame forward (+1) or back (-1).
