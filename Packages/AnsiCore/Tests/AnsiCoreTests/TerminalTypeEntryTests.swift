@@ -31,6 +31,8 @@ import Testing
     #expect(TerminalEmulation.petscii128.defaultColumns == 80)
     #expect(TerminalEmulation.ansiBBS.defaultColumns == 80 && TerminalEmulation.ansiBBS.defaultRows == 25)
     #expect(TerminalEmulation.vt220.defaultRows == 24)
+    // Apple II boards seen live (GBBS Pro) lay text out for the 80 column card.
+    #expect(TerminalEmulation.appleII.defaultColumns == 80 && TerminalEmulation.appleII.defaultRows == 24)
     for e in TerminalEmulation.allCases {
         #expect(!e.terminalNames.isEmpty)
         #expect(!e.label.isEmpty)

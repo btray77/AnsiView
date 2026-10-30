@@ -102,7 +102,10 @@ public struct RIPTerminal: TerminalEngine {
         ansi = TerminalEmulator(columns: columns, rows: rows, encoding: encoding)
     }
 
-    public var font: BitmapFont? { BitmapFont.named("IBM EGA") }
+    /// The text layer uses the entry's font (the bundled EGA 8x14 rasterizes with a gap, so VGA is the default).
+    public var font: BitmapFont? { nil }
+    /// 640x350 pixels filled a 4:3 monitor: each pixel is shown narrower than tall.
+    public var horizontalStretch: Double { (4.0 / 3.0) / (640.0 / 350.0) }
     public var columns: Int { ansi.columns }
     public var rows: Int { ansi.rows }
     public var cursor: (row: Int, column: Int) { ansi.cursor }

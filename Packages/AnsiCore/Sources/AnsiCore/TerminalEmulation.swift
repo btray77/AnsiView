@@ -23,7 +23,7 @@ public enum TerminalEmulation: String, Codable, CaseIterable {
     /// The screen the platform had: 40x25 for the C64, 40x24 for Atari and Viewdata, and so on.
     public var defaultColumns: Int {
         switch self {
-        case .petscii64, .atascii, .viewdata, .mode7, .appleII: return 40
+        case .petscii64, .atascii, .viewdata, .mode7: return 40
         default: return 80
         }
     }

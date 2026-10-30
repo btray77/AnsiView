@@ -122,5 +122,7 @@ private func rip(_ text: String) -> RIPTerminal {
 @Test func engineFactoryMakesRIP() {
     let e = TerminalEngines.make(.ripscrip, columns: 80, rows: 25, encoding: .cp437, iceColors: false)
     #expect(e is RIPTerminal)
-    #expect(e.font?.height == 14)
+    // The entry's font draws the text layer; the 640x350 picture is shown 4:3.
+    #expect(e.font == nil)
+    #expect(abs(e.horizontalStretch - 0.729) < 0.001)
 }
