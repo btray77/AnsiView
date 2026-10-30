@@ -69,7 +69,7 @@ public enum DialPanelScreen {
         put(title, row: 0, column: (columns - title.count) / 2, color: value)
 
         let left = 3
-        let valueColumn = 13
+        let valueColumn = 15
         let width = columns - 1 - valueColumn - 2
         let lines: [(String, String, RGB)] = [
             ("BBS", status.name, value),

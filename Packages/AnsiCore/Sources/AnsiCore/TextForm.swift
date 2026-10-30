@@ -319,7 +319,8 @@ public struct TextForm {
         case .text, .secret, .number:
             var text = field.text
             if case .secret = field.kind, !reveal { text = String(repeating: "*", count: text.count) }
-            let caretAt = selected ? caret : text.count
+            // The selected field scrolls to keep the caret in view; others show their start.
+            let caretAt = selected ? caret : 0
             let start = max(0, caretAt - (width - 1))
             let window = String(Array(text).dropFirst(start).prefix(width))
             return (window, selected ? caretAt - start : nil)
