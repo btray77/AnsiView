@@ -5,6 +5,25 @@ public enum TextEncoding: String, Codable, CaseIterable {
     public var label: String { self == .cp437 ? "CP437" : "UTF-8" }
 }
 
+/// Which terminal the emulator behaves as. ANSI-BBS is the plan 7 behaviour (pinned by
+/// `TerminalRegressionTests`); the others add what those terminals did on top of it.
+public enum TerminalProfile: Equatable {
+    /// PC ANSI.SYS with the SyncTERM/CTerm extensions. Character set designations are ignored
+    /// (BBS text is always the PC set) and SO/SI are glyphs.
+    case ansiBBS
+    /// DEC VT100/VT102: G0/G1 character sets with DEC line drawing, application cursor keys, insert mode.
+    case vt100
+    /// DEC VT220: as VT100, with VT220 device attributes.
+    case vt220
+    /// The Amiga console: ISO 8859-1 text, 0x9B as CSI, LF also returns the carriage.
+    case amiga
+
+    var isDEC: Bool { self == .vt100 || self == .vt220 }
+}
+
+/// A G0 or G1 character set of a DEC terminal.
+enum DECCharset: Equatable { case ascii, uk, graphics }
+
 /// An interactive ANSI terminal screen for a live BBS session: a fixed grid with a scroll region,
 /// a scrollback buffer and replies to device status requests. Unlike `AnsiTerminal` (which plays
 /// a file onto a canvas that grows), text that reaches the bottom scrolls, and the parser keeps
@@ -38,6 +57,15 @@ public struct TerminalEmulator {
     private var attributes = TextAttributes()
     /// iCE colours: the blink attribute gives a bright background instead of blinking text.
     public var iceColors = false
+    public var profile = TerminalProfile.ansiBBS
+    /// DECCKM: cursor keys send ESC O x instead of ESC [ x.
+    public private(set) var applicationCursorKeys = false
+    private var charsets: [DECCharset] = [.ascii, .ascii]
+    private var shiftedOut = false
+    private var designating = 0
+    private var originMode = false
+    private var insertMode = false
+    private var intermediate: UInt8 = 0
     private var top = 0
     private var bottom: Int
     private var saved: (row: Int, column: Int, attributes: TextAttributes) = (0, 0, TextAttributes())
@@ -134,8 +162,11 @@ public struct TerminalEmulator {
         case .escape:
             escape(byte)
         case .charset:
-            // ESC ( x and ESC ) x choose character sets; BBS text is always the PC set.
+            // ESC ( x and ESC ) x choose character sets; ANSI-BBS text is always the PC set.
             state = .ground
+            if profile.isDEC {
+                charsets[designating] = byte == UInt8(ascii: "0") ? .graphics : (byte == UInt8(ascii: "A") ? .uk : .ascii)
+            }
         case .csi:
             csiByte(byte)
         case .controlString:
@@ -168,7 +199,10 @@ public struct TerminalEmulator {
         switch byte {
         case 0x1B: state = .escape
         case 0x0D: column = 0; pendingWrap = false
-        case 0x0A, 0x0B: pendingWrap = false; lineFeed()
+        case 0x0A, 0x0B:
+            pendingWrap = false
+            if profile == .amiga { column = 0 }
+            lineFeed()
         case 0x0C: eraseDisplay(2)
         case 0x08:
             column = max(0, column - 1)
@@ -178,6 +212,9 @@ public struct TerminalEmulator {
             pendingWrap = false
         case 0x07: bells += 1
         case 0x00, 0x18: break
+        case 0x0E where profile.isDEC: shiftedOut = true
+        case 0x0F where profile.isDEC: shiftedOut = false
+        case 0x9B where profile == .amiga && encoding != .utf8: startCSI()
         default:
             if encoding == .utf8, byte >= 0x80 {
                 switch byte {
@@ -218,12 +255,10 @@ public struct TerminalEmulator {
         state = .ground
         switch byte {
         case UInt8(ascii: "["):
-            parameters.removeAll(keepingCapacity: true)
-            currentParameter = nil
-            privateMarker = 0
-            hasIntermediate = false
-            state = .csi
-        case UInt8(ascii: "("), UInt8(ascii: ")"): state = .charset
+            startCSI()
+        case UInt8(ascii: "("), UInt8(ascii: ")"):
+            designating = byte == UInt8(ascii: "(") ? 0 : 1
+            state = .charset
         case UInt8(ascii: "_"), UInt8(ascii: "]"), UInt8(ascii: "P"), UInt8(ascii: "^"), UInt8(ascii: "X"):
             state = .controlString
         case UInt8(ascii: "7"): saved = (row, column, attributes)
@@ -239,6 +274,15 @@ public struct TerminalEmulator {
         }
     }
 
+    private mutating func startCSI() {
+        parameters.removeAll(keepingCapacity: true)
+        currentParameter = nil
+        privateMarker = 0
+        hasIntermediate = false
+        intermediate = 0
+        state = .csi
+    }
+
     private mutating func csiByte(_ byte: UInt8) {
         switch byte {
         case 0x30...0x39:
@@ -249,13 +293,14 @@ public struct TerminalEmulator {
         case 0x3C...0x3F:
             if privateMarker == 0 { privateMarker = byte }
         case 0x20...0x2F:
+            if !hasIntermediate { intermediate = byte }
             hasIntermediate = true
         case 0x40...0x7E:
             if currentParameter != nil || !parameters.isEmpty, parameters.count < Self.maxParameters {
                 parameters.append(currentParameter)
             }
             state = .ground
-            if !hasIntermediate { dispatch(byte) }
+            if !hasIntermediate { dispatch(byte) } else { dispatchIntermediate(byte) }
         case 0x1B:
             state = .escape
         case 0x18, 0x1A:
@@ -281,7 +326,18 @@ public struct TerminalEmulator {
             for value in parameters.compactMap({ $0 }) {
                 if value == 25 { cursorVisible = on }
                 if value == 7 { autowrap = on; if !on { pendingWrap = false } }
+                if value == 1 { applicationCursorKeys = on }
+                if value == 6 {
+                    originMode = on
+                    row = on ? top : 0
+                    column = 0
+                    pendingWrap = false
+                }
             }
+            return
+        }
+        if privateMarker == UInt8(ascii: ">"), final == UInt8(ascii: "c"), profile == .vt220 {
+            replies += Array("\u{1B}[>1;10;0c".utf8)
             return
         }
         guard privateMarker == 0 else { return }
@@ -304,9 +360,11 @@ public struct TerminalEmulator {
             column = 0
         case UInt8(ascii: "G"), UInt8(ascii: "`"): column = min(columns - 1, count() - 1)
         case UInt8(ascii: "H"), UInt8(ascii: "f"):
-            row = min(rows - 1, count(0) - 1)
+            row = originMode ? min(bottom, top + count(0) - 1) : min(rows - 1, count(0) - 1)
             column = min(columns - 1, count(1) - 1)
-        case UInt8(ascii: "d"): row = min(rows - 1, count() - 1)
+        case UInt8(ascii: "d"): row = originMode ? min(bottom, top + count() - 1) : min(rows - 1, count() - 1)
+        case UInt8(ascii: "h"), UInt8(ascii: "l"):
+            if profile.isDEC, parameters.contains(4) { insertMode = final == UInt8(ascii: "h") }
         case UInt8(ascii: "J"): eraseDisplay(parameter(0, 0))
         case UInt8(ascii: "K"): eraseLine(parameter(0, 0))
         case UInt8(ascii: "L"):
@@ -342,7 +400,7 @@ public struct TerminalEmulator {
             guard newTop < newBottom else { return }
             top = newTop
             bottom = newBottom
-            row = 0
+            row = originMode ? top : 0
             column = 0
         case UInt8(ascii: "s"): saved.row = row; saved.column = column
         case UInt8(ascii: "u"): row = saved.row; column = saved.column; pendingWrap = false
@@ -353,14 +411,47 @@ public struct TerminalEmulator {
         case UInt8(ascii: "n"):
             switch parameter(0, 0) {
             case 5: replies += Array("\u{1B}[0n".utf8)
-            case 6: replies += Array("\u{1B}[\(row + 1);\(column + 1)R".utf8)
+            case 6: replies += Array("\u{1B}[\(row + 1 - (originMode ? top : 0));\(column + 1)R".utf8)
             default: break
             }
         case UInt8(ascii: "c"):
-            if parameter(0, 0) == 0 { replies += Array("\u{1B}[?1;0c".utf8) }
+            guard parameter(0, 0) == 0 else { break }
+            switch profile {
+            case .vt100: replies += Array("\u{1B}[?1;2c".utf8)
+            case .vt220: replies += Array("\u{1B}[?62;1;6c".utf8)
+            case .ansiBBS, .amiga: replies += Array("\u{1B}[?1;0c".utf8)
+            }
         default:
             break
         }
+    }
+
+    /// Sequences with an intermediate byte (CSI ... SP x and the like).
+    private mutating func dispatchIntermediate(_ final: UInt8) {
+        guard privateMarker == 0 else { return }
+        switch (intermediate, final) {
+        case (0x20, UInt8(ascii: "q")) where profile == .amiga:
+            // Window status request: the Amiga console answers with its bounds.
+            replies += Array("\u{1B}[1;1;\(rows);\(columns) r".utf8)
+        case (0x20, UInt8(ascii: "p")) where profile == .amiga:
+            cursorVisible = parameter(0, 1) != 0
+        default:
+            break
+        }
+    }
+
+    /// Cursor keys follow DECCKM; everything else is the ANSI-BBS keyboard.
+    public func bytes(for key: TerminalKey, backspaceSendsDelete: Bool) -> [UInt8] {
+        if applicationCursorKeys {
+            switch key {
+            case .up: return [0x1B, 0x4F, 0x41]
+            case .down: return [0x1B, 0x4F, 0x42]
+            case .right: return [0x1B, 0x4F, 0x43]
+            case .left: return [0x1B, 0x4F, 0x44]
+            default: break
+            }
+        }
+        return TerminalInput.bytes(for: key, backspaceSendsDelete: backspaceSendsDelete)
     }
 
     // MARK: Screen operations
@@ -376,6 +467,19 @@ public struct TerminalEmulator {
             pendingWrap = false
             column = 0
             lineFeed()
+        }
+        var code = code, scalar = scalar
+        if profile.isDEC, scalar == nil {
+            switch charsets[shiftedOut ? 1 : 0] {
+            case .ascii: break
+            case .uk: if code == 0x23 { code = 0x9C }
+            case .graphics:
+                if let mapped = DECGraphics.map(code) { (code, scalar) = mapped }
+            }
+        }
+        if insertMode, column < columns - 1 {
+            grid[row].removeLast()
+            grid[row].insert(blankCell, at: column)
         }
         let colors = attributes.colors(iceColors: iceColors)
         grid[row][column] = AnsiCell(code: code, fg: colors.fg, bg: colors.bg, blink: attributes.blink && !iceColors,
@@ -460,8 +564,10 @@ public struct TerminalEmulator {
 
     private mutating func reset() {
         let kept = scrollback
-        let changes = changeCount, bellCount = bells
+        let changes = changeCount, bellCount = bells, keptProfile = profile, ice = iceColors
         self = TerminalEmulator(columns: columns, rows: rows, encoding: encoding)
+        profile = keptProfile
+        iceColors = ice
         scrollback = kept
         changeCount = changes
         bells = bellCount
