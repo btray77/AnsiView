@@ -34,6 +34,8 @@ public struct RIPCanvas {
     var position = (x: 0, y: 0)
     var font = 0, direction = 0, size = 1
     public private(set) var changeCount = 0
+    private var fillMarks: [UInt32] = []
+    private var fillGeneration: UInt32 = 0
 
     public init() {
         pixels = [UInt8](repeating: 0, count: 640 * 350)
@@ -171,24 +173,38 @@ public struct RIPCanvas {
     /// BGI floodfill: fills the area around a point bounded by the border colour.
     mutating func floodFill(_ x: Int, _ y: Int, border: UInt8) {
         guard x >= viewport.x0, x <= viewport.x1, y >= viewport.y0, y <= viewport.y1, pixel(x, y) != border else { return }
-        var inside = [Bool](repeating: false, count: width * height)
+        // Marks are reused between fills (a generation number per fill), and only the touched box is painted.
+        if fillMarks.count != width * height { fillMarks = [UInt32](repeating: 0, count: width * height) }
+        fillGeneration &+= 1
+        if fillGeneration == 0 { fillMarks = [UInt32](repeating: 0, count: width * height); fillGeneration = 1 }
+        let mark = fillGeneration
+        var box = (x0: x, y0: y, x1: x, y1: y)
         var stack = [(x, y)]
         while let (px, py) = stack.popLast() {
-            guard !inside[py * width + px] else { continue }
+            guard fillMarks[py * width + px] != mark else { continue }
             var left = px
-            while left > viewport.x0, pixel(left - 1, py) != border, !inside[py * width + left - 1] { left -= 1 }
+            while left > viewport.x0, pixel(left - 1, py) != border, fillMarks[py * width + left - 1] != mark { left -= 1 }
             var right = px
-            while right < viewport.x1, pixel(right + 1, py) != border, !inside[py * width + right + 1] { right += 1 }
-            for cx in left...right { inside[py * width + cx] = true }
+            while right < viewport.x1, pixel(right + 1, py) != border, fillMarks[py * width + right + 1] != mark { right += 1 }
+            for cx in left...right { fillMarks[py * width + cx] = mark }
+            box = (min(box.x0, left), min(box.y0, py), max(box.x1, right), max(box.y1, py))
             for ny in [py - 1, py + 1] where ny >= viewport.y0 && ny <= viewport.y1 {
                 var cx = left
+                var inRun = false
                 while cx <= right {
-                    if pixel(cx, ny) != border, !inside[ny * width + cx] { stack.append((cx, ny)) }
+                    // One seed per run of fillable pixels keeps the stack small.
+                    let open = pixel(cx, ny) != border && fillMarks[ny * width + cx] != mark
+                    if open, !inRun { stack.append((cx, ny)) }
+                    inRun = open
                     cx += 1
                 }
             }
         }
-        for i in inside.indices where inside[i] { pixels[i] = patternPixel(i % width, i / width) & 15 }
+        for py in box.y0...box.y1 {
+            for px in box.x0...box.x1 where fillMarks[py * width + px] == mark {
+                pixels[py * width + px] = patternPixel(px, py) & 15
+            }
+        }
         changeCount &+= 1
     }
 

@@ -21,7 +21,12 @@ public struct TerminalDetector {
     private var wordLetters: [UInt8] = []
     private var suggested = false
 
-    public init() {}
+    /// PETSCII and ATASCII are not suggested on a UTF-8 entry: its multi byte characters contain those codes.
+    private let utf8: Bool
+
+    public init(encoding: TextEncoding = .cp437) {
+        utf8 = encoding == .utf8
+    }
 
     public var isFinished: Bool { suggested || seen >= Self.window }
 
@@ -64,9 +69,9 @@ public struct TerminalDetector {
     private func decide(rip: Bool) -> TerminalEmulation? {
         if rip { return .ripscrip }
         if ansi { return nil }
-        if petsciiClear, petscii >= 3 { return .petscii64 }
+        if !utf8, petsciiClear, petscii >= 3 { return .petscii64 }
         if swappedCaseWords >= 3 { return .petscii64 }
-        if atasciiEOL >= 2 { return .atascii }
+        if !utf8, atasciiEOL >= 2 { return .atascii }
         if viewdataAttributes >= 3 { return .viewdata }
         if avatarCommands >= 2 { return .avatar }
         return nil

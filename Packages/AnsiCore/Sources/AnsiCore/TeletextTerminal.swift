@@ -239,7 +239,12 @@ public struct TeletextTerminal: TerminalEngine {
     public func screen(scrollOffset: Int) -> AnsiScreen {
         let offset = min(max(0, scrollOffset), scrollback.count)
         let start = scrollback.count - offset
-        let lines = (start..<(start + rows)).map { $0 < scrollback.count ? scrollback[$0] : memory[$0 - scrollback.count] }
+        let width = columns
+        let lines = (start..<(start + rows)).map { index -> [UInt8] in
+            let line = index < scrollback.count ? scrollback[index] : memory[index - scrollback.count]
+            // Rows kept from before a resize are padded or trimmed to the current width.
+            return Array(line.prefix(width)) + Array(repeating: 0x20, count: max(0, width - line.count))
+        }
         var out: [[AnsiCell]] = []
         var above: [Shown]?
         for line in lines {
@@ -307,8 +312,11 @@ public struct TeletextTerminal: TerminalEngine {
 
     public func text(_ text: String, encoding: TextEncoding) -> [UInt8] {
         var out: [UInt8] = []
+        var previousCR = false
         for scalar in text.unicodeScalars {
+            defer { previousCR = scalar == "\r" }
             switch scalar {
+            case "\n" where previousCR: break
             case "\n", "\r": out.append(flavour == .viewdata ? 0x5F : 0x0D)
             // Prestel's # key is code 0x5F.
             case "#" where flavour == .viewdata: out.append(0x5F)

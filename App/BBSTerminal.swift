@@ -133,12 +133,14 @@ final class TerminalView: NSView {
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         // RIPscrip mouse fields and buttons: the click in the graphics screen's own pixels.
-        guard let controller, let overlay = controller.emulator.overlay() else { return }
+        // Not while scrolled back: the picture (and its buttons) is hidden then.
+        guard let controller, controller.scrollOffset == 0, controller.emulator is RIPTerminal else { return }
         let point = convert(event.locationInWindow, from: nil)
         let art = artRect
         guard art.contains(point), art.width > 0, art.height > 0 else { return }
-        let x = Int((point.x - art.minX) / art.width * CGFloat(overlay.width))
-        let y = Int((point.y - art.minY) / art.height * CGFloat(overlay.height))
+        let canvas = RIPCanvas()
+        let x = Int((point.x - art.minX) / art.width * CGFloat(canvas.width))
+        let y = Int((point.y - art.minY) / art.height * CGFloat(canvas.height))
         controller.click(x: x, y: y)
     }
 
@@ -313,7 +315,7 @@ final class TerminalViewController: NSViewController {
         emulator = TerminalEngines.make(entry.emulation, columns: emulator.columns, rows: emulator.rows,
                                         encoding: entry.encoding, iceColors: entry.iceColors)
         terminalView.font = emulator.font ?? BitmapFont.named(entry.fontName)
-        detector = TerminalDetector()
+        detector = TerminalDetector(encoding: entry.encoding)
         sessionStart = []
         iemsi = nil
         if entry.iemsi, let name = entry.username, !name.isEmpty,
@@ -525,7 +527,6 @@ final class TerminalViewController: NSViewController {
         }
         // Prompts are matched as they arrive, not as the speed emulation shows them.
         watch(bytes)
-        if sessionStart.count < Self.replayLimit { sessionStart += bytes.prefix(Self.replayLimit - sessionStart.count) }
         if !detector.isFinished, let suggestion = detector.feed(bytes), suggestion != entry.emulation,
            !(suggestion == .petscii64 && entry.emulation == .petscii128) {
             suggest(suggestion)
@@ -551,6 +552,7 @@ final class TerminalViewController: NSViewController {
         if !due.isEmpty {
             shownBytes += due.count
             emulator.feed(due)
+            remember(due)
             let replies = emulator.takeReplies()
             if !replies.isEmpty { client?.send(replies) }
             applySpeedRequest()
@@ -612,6 +614,7 @@ final class TerminalViewController: NSViewController {
         if !due.isEmpty {
             shownBytes += due.count
             emulator.feed(due)
+            remember(due)
             let replies = emulator.takeReplies()
             if !replies.isEmpty { client?.send(replies) }
         }
@@ -742,6 +745,12 @@ final class TerminalViewController: NSViewController {
 
     // MARK: Terminal type
 
+    /// Keeps the most recent bytes already drawn, for replay when the terminal type is switched.
+    private func remember(_ bytes: [UInt8]) {
+        sessionStart += bytes
+        if sessionStart.count > Self.replayLimit { sessionStart.removeFirst(sessionStart.count - Self.replayLimit) }
+    }
+
     /// A SyncTERM speed request (CSI Ps1 ; Ps2 * r) sets the simulated line speed.
     private func applySpeedRequest() {
         guard var ansi = emulator as? TerminalEmulator, let speed = ansi.takeSpeedRequest() else { return }
@@ -754,13 +763,17 @@ final class TerminalViewController: NSViewController {
         hideSuggestion()
         guard emulation != entry.emulation else { return }
         let old = entry.emulation
+        // A size picked from Terminal > Size during this call is kept; the entry's defaults follow the type.
+        let sessionSize = (emulator.columns, emulator.rows)
+        let sizeChangedHere = sessionSize != (entry.columns, entry.rows)
         if entry.columns == old.defaultColumns { entry.columns = emulation.defaultColumns }
         if entry.rows == old.defaultRows { entry.rows = emulation.defaultRows }
         if entry.terminalType.caseInsensitiveCompare(old.terminalNames[0]) == .orderedSame {
             entry.terminalType = emulation.terminalNames[0]
         }
         entry.emulation = emulation
-        emulator = TerminalEngines.make(emulation, columns: entry.columns, rows: entry.rows, encoding: entry.encoding,
+        emulator = TerminalEngines.make(emulation, columns: sizeChangedHere ? sessionSize.0 : entry.columns,
+                                        rows: sizeChangedHere ? sessionSize.1 : entry.rows, encoding: entry.encoding,
                                         iceColors: entry.iceColors)
         terminalView.font = emulator.font ?? BitmapFont.named(entry.fontName)
         emulator.feed(sessionStart)

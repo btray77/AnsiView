@@ -77,6 +77,7 @@ public enum TerminalEngines {
         }
         var t = TerminalEmulator(columns: columns, rows: rows, encoding: encoding)
         t.iceColors = iceColors
+        t.entryIceColors = iceColors
         switch emulation {
         case .vt100: t.profile = .vt100
         case .vt220: t.profile = .vt220

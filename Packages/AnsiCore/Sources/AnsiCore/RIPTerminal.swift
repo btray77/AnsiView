@@ -85,6 +85,7 @@ public struct RIPTerminal: TerminalEngine {
                                dark: UInt8(8), surface: UInt8(7))
     private var textBlock: (x0: Int, y0: Int, x1: Int, y1: Int, y: Int)?
     private var clipboard: (width: Int, height: Int, pixels: [UInt8])?
+    var clipboardSize: (width: Int, height: Int)? { clipboard.map { ($0.width, $0.height) } }
 
     // Line splitting state.
     private var atLineStart = true
@@ -329,7 +330,9 @@ public struct RIPTerminal: TerminalEngine {
             }
         case "E": textBlock = nil
         case "C":
-            let (x0, y0) = point(), (x1, y1) = point()
+            // Clamped to the screen: MegaNums reach 1295, which would copy (and paste) far more than exists.
+            let (a, b) = point(), (c, d) = point()
+            let x0 = max(0, a), y0 = max(0, b), x1 = min(canvas.width - 1, c), y1 = min(canvas.height - 1, d)
             guard x1 >= x0, y1 >= y0 else { return }
             var copied: [UInt8] = []
             for y in y0...y1 { for x in x0...x1 { copied.append(canvas.pixel(x, y)) } }

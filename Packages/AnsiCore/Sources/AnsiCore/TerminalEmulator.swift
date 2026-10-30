@@ -58,6 +58,8 @@ public struct TerminalEmulator {
     /// iCE colours: the blink attribute gives a bright background instead of blinking text.
     public var iceColors = false
     public var profile = TerminalProfile.ansiBBS
+    /// The entry's iCE colour choice, restored by a reset (ESC c) after the host changed it with CSI ? 33 h/l.
+    public var entryIceColors = false
     /// DECCKM: cursor keys send ESC O x instead of ESC [ x.
     public private(set) var applicationCursorKeys = false
     private var charsets: [DECCharset] = [.ascii, .ascii]
@@ -331,7 +333,7 @@ public struct TerminalEmulator {
             for value in parameters.compactMap({ $0 }) {
                 if value == 25 { cursorVisible = on }
                 if value == 7 { autowrap = on; if !on { pendingWrap = false } }
-                if value == 1 { applicationCursorKeys = on }
+                if value == 1, profile.isDEC { applicationCursorKeys = on }
                 if value == 33 { iceColors = on }
                 if value == 6 {
                     originMode = on
@@ -694,10 +696,11 @@ public struct TerminalEmulator {
 
     private mutating func reset() {
         let kept = scrollback
-        let changes = changeCount, bellCount = bells, keptProfile = profile, ice = iceColors
+        let changes = changeCount, bellCount = bells, keptProfile = profile, ice = entryIceColors
         self = TerminalEmulator(columns: columns, rows: rows, encoding: encoding)
         profile = keptProfile
         iceColors = ice
+        entryIceColors = ice
         scrollback = kept
         changeCount = changes
         bells = bellCount
