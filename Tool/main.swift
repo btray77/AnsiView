@@ -21,6 +21,12 @@ import UniformTypeIdentifiers
 // ansirender --music [--mode off|pipe|bananacom|all] <input>...   (lists ANSI music sequences with byte offsets)
 // ansirender --music-wav [--soft] [--mode M] <input> | --play "<PLAY string>" <out.wav>
 // ansirender --music-midi [--mode M] <input> | --play "<PLAY string>" <out.mid>
+// ansirender --font <file.tdf|flf> [--font-index N] [--outline-style N] [--spacing N] [--fg N] [--bg N]
+//   [--layout default|full|fit|smush|universal] [--vlayout ...] [--width N] [--align left|center|right] [--ice]
+//   --text "HELLO" [-o out.ans|out.png|out.txt]   (ANSI to stdout without -o; --font original:N uses a bundled font)
+// ansirender --list-fonts <file>...
+// ansirender --figlet-gallery "TEXT" [--font-dir <folder>]   (every bundled font, headed by its name)
+// ansirender --export-original-fonts <folder>   (writes AnsiView's original fonts as .tdf and .flf)
 // ansirender --version
 let args = CommandLine.arguments
 func fail(_ message: String, _ code: Int32) -> Never {
@@ -294,6 +300,12 @@ if args[1] == "--roundtrip" {
         }
     }
     exit(failures == 0 ? 0 : 1)
+}
+
+// MARK: Text art fonts (fonts plan ruling 18)
+
+if args[1] == "--list-fonts" || args[1] == "--font" || args[1] == "--figlet-gallery" || args[1] == "--export-original-fonts" {
+    runFontCommand(Array(args.dropFirst()))
 }
 
 // MARK: ANSI music

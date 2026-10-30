@@ -10,7 +10,7 @@ let package = Package(
         .executable(name: "ansixfer", targets: ["ansixfer"]),
     ],
     targets: [
-        .target(name: "AnsiCore", resources: [.copy("Resources/Fonts")]),
+        .target(name: "AnsiCore", resources: [.copy("Resources/Fonts"), .copy("Resources/FIGlet")]),
         .executableTarget(name: "ansixfer", dependencies: ["AnsiCore"]),
         .testTarget(name: "AnsiCoreTests", dependencies: ["AnsiCore"], resources: [.copy("Fixtures")]),
     ],

@@ -23,7 +23,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Export | PNG, JPEG, WebP, GIF, APNG, MP4, HTML, text, modern ANSI | |
 | File transfers | none | |
 | ANSI music | `AnsiMusic.swift`, `PlayString.swift`, `MusicScheduler.swift`, synth, `App/Music*`, `App/ViewerMusic.swift`, `App/TerminalMusic.swift` | engine and editor merged; playback in viewer, terminal and MP4 export on branch `ansiview-2.0-music-playback` |
-| TDF fonts | none | |
+| TDF fonts | `TheDrawFont.swift`, `FIGletFont.swift`, `TextArt.swift`, `FontLibrary.swift`, `App/TextToASCII.swift`, `App/FontManager.swift` | TDF read/write, FIGlet, Text to ASCII, Font Manager |
 | Screen designer / templates | none | |
 
 ## 1. Art editor
@@ -48,8 +48,8 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Block operations | done (harness; live check needs owner), item 60 |
 | Undo / redo | done | plan 6 |
 | Layers (flattened on save, kept in a sidecar project file) | done (harness; live check needs owner), item 60 |
-| TDF font import, preview, insert, manage collection | planned | TDF fonts |
-| Other font formats (FIGlet .flf) | planned | TDF fonts |
+| TDF font import, preview, insert, manage collection | done (harness; live check needs owner): parser and writer (8,634 collection fonts round trip), 19 outline styles, Text Art insert as a floating paste, Font Manager | fonts |
+| Other font formats (FIGlet .flf) | done (harness; live check needs owner): figlet 2.2.5 layouts matching its reference output, vertical layouts, 18 bundled distribution fonts (New BSD); Text to ASCII gallery (owner request) | fonts |
 
 ## 2. ANSI music
 
@@ -105,7 +105,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Format | Status |
 |---|---|
 | .ANS .ASC .TXT .BIN .XB SAUCE | done (read and write) |
-| .TDF | planned (TDF fonts) |
+| .TDF | done (read and write), .flf read |
 | .ICE .ADF .IDF .PCB, Avatar, Wildcat | read done; write planned where useful |
 | Unsupported data preserved, never silently dropped (SAUCE comments, unknown SAUCE fields, trailing data) | done: SAUCE fields kept, losses shown on open/save (item 60) |
 
@@ -119,7 +119,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Configurable keyboard shortcuts | done (item 60) |
 | Context sensitive help, tooltips, glossary | planned (item 62) |
 | Light and dark themes | system appearance today; retro theme planned |
-| Font browser, character picker | planned |
+| Font browser, character picker | done: Font Manager and Text to ASCII gallery (fonts); character picker (item 60) |
 
 ## 8. Rendering consistency
 
