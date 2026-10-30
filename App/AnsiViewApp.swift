@@ -92,6 +92,10 @@ struct AnsiViewApp: App {
                 Divider()
                 Button("Get Info") { send(#selector(AnsiPlayerViewController.showArtInfo(_:))) }
                     .keyboardShortcut("i")
+                Divider()
+                ForEach(ArtEditor.all, id: \.bundleIdentifier) { editor in
+                    Button(editor.menuTitle) { EditorHandoff.open(in: editor) }
+                }
             }
             CommandGroup(before: .toolbar) {
                 Toggle("CRT Effect", isOn: $crtEffect)
