@@ -198,7 +198,9 @@ public enum TransferEngineFactory {
         switch kind {
         case .xmodem, .xmodemCRC, .xmodem1K, .ymodem, .ymodemG:
             return XModemSender(kind: kind, files: files, clock: clock, options: options)
-        case .zmodem, .kermit:
+        case .zmodem:
+            return ZModemSender(files: files, clock: clock, options: options)
+        case .kermit:
             return UnavailableEngine(kind: kind, clock: clock, options: options)
         }
     }
@@ -208,7 +210,9 @@ public enum TransferEngineFactory {
         switch kind {
         case .xmodem, .xmodemCRC, .xmodem1K, .ymodem, .ymodemG:
             return XModemReceiver(kind: kind, sink: sink, clock: clock, options: options, xmodemFileName: xmodemFileName)
-        case .zmodem, .kermit:
+        case .zmodem:
+            return ZModemReceiver(sink: sink, clock: clock, options: options)
+        case .kermit:
             return UnavailableEngine(kind: kind, clock: clock, options: options)
         }
     }

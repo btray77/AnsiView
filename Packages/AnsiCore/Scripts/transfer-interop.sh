@@ -121,19 +121,19 @@ t_zmodem() {
     for opts in "" "--escctl" "--crc16" "--block 8192" "--escape-telnet"; do
         fresh "$out"
         echo "+ ansixfer send zmodem $opts <all sizes> --exec \"lrz -y\""
-        (cd "$F" && "$X" send zmodem --quiet $opts $SIZES --exec "cd '$out' && lrz -y -q 2>>'$WORK/lrz.log'") | tail -2
+        (cd "$F" && "$X" send zmodem $opts $SIZES --exec "cd '$out' && lrz -y -q 2>>'$WORK/lrz.log'") 2>&1 | grep -E "negotiated|^result|^elapsed"
         for f in $SIZES; do check "zmodem ours->lrz $opts" "$F/$f" "$out/$f"; done
     done
     for opts in "" "-e" "-o" "-8" "-w 4096"; do
         fresh "$out"
         echo "+ ansixfer receive zmodem --exec \"lsz $opts <all sizes>\""
-        "$X" receive zmodem --quiet --dir "$out" --exec "cd '$F' && lsz -q $opts $SIZES 2>>'$WORK/lsz.log'" | tail -2
+        "$X" receive zmodem --dir "$out" --exec "cd '$F' && lsz -q $opts $SIZES 2>>'$WORK/lsz.log'" 2>&1 | grep -E "frames so far|^result|^elapsed" | tail -3
         for f in $SIZES; do check "zmodem lsz $opts->ours" "$F/$f" "$out/$f"; done
     done
     for opts in "--window 4096" "--escctl"; do
         fresh "$out"
         echo "+ ansixfer receive zmodem $opts --exec \"lsz r1048576.bin\""
-        "$X" receive zmodem --quiet $opts --dir "$out" --exec "cd '$F' && lsz -q r1048576.bin 2>>'$WORK/lsz.log'" | tail -2
+        "$X" receive zmodem $opts --dir "$out" --exec "cd '$F' && lsz -q r1048576.bin 2>>'$WORK/lsz.log'" 2>&1 | grep -E "frames so far|^result|^elapsed" | tail -3
         check "zmodem lsz->ours $opts" "$F/r1048576.bin" "$out/r1048576.bin"
     done
 }

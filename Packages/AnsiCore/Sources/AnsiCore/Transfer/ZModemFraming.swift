@@ -190,6 +190,18 @@ public final class ZReader {
     public static let maxSubpacket = 8192 + 1024
     public var expectsDataAfterHeaders = true
 
+    /// What has been decoded so far (for logs and tests).
+    public struct Stats: Equatable, Sendable {
+        public var hexHeaders = 0, bin16Headers = 0, bin32Headers = 0
+        public var subpackets = 0, longestSubpacket = 0
+        /// Subpackets per frame end: ZCRCE, ZCRCG, ZCRCQ, ZCRCW.
+        public var ends = [0, 0, 0, 0]
+        /// Data bytes that arrived ZDLE escaped.
+        public var escapedBytes = 0
+        public var dataBytes = 0
+    }
+    public private(set) var stats = Stats()
+
     private enum State { case scan, pad, padDLE, binHeader(crc32: Bool), hexHeader, data, crc }
     private enum Decoded { case byte(UInt8), end(UInt8), bad(UInt8) }
 
@@ -313,9 +325,12 @@ public final class ZReader {
             escaped = false
             switch byte {
             case ZEnd.crcE...ZEnd.crcW: return .end(byte)
-            case ZByte.rub0: return .byte(0x7F)
-            case ZByte.rub1: return .byte(0xFF)
-            default: return byte & 0x60 == 0x40 ? .byte(byte ^ 0x40) : .bad(byte)
+            case ZByte.rub0: stats.escapedBytes += 1; return .byte(0x7F)
+            case ZByte.rub1: stats.escapedBytes += 1; return .byte(0xFF)
+            default:
+                guard byte & 0x60 == 0x40 else { return .bad(byte) }
+                stats.escapedBytes += 1
+                return .byte(byte ^ 0x40)
             }
         }
         if byte == ZByte.dle {
@@ -366,6 +381,11 @@ public final class ZReader {
     }
 
     private func accept(_ header: ZHeader, _ encoding: ZHeaderEncoding, _ emit: (ZToken) -> Void) {
+        switch encoding {
+        case .hex: stats.hexHeaders += 1
+        case .bin16: stats.bin16Headers += 1
+        case .bin32: stats.bin32Headers += 1
+        }
         if expectsDataAfterHeaders, Self.dataHeaders.contains(header.type) { beginData(crc32: encoding == .bin32) }
         emit(.header(header, encoding))
     }
@@ -386,6 +406,10 @@ public final class ZReader {
         }
         let data = buffer
         let end = frameEnd
+        stats.subpackets += 1
+        stats.longestSubpacket = max(stats.longestSubpacket, data.count)
+        stats.ends[Int(end - ZEnd.crcE)] += 1
+        stats.dataBytes += data.count
         buffer.removeAll(keepingCapacity: true)
         if end == ZEnd.crcE || end == ZEnd.crcW { state = .scan } else { state = .data }
         emit(.data(data, end: end))
