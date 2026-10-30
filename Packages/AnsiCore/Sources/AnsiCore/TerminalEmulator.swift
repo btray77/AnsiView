@@ -66,6 +66,11 @@ public struct TerminalEmulator {
     private var originMode = false
     private var insertMode = false
     private var intermediate: UInt8 = 0
+    /// CTerm DoorWay mode (CSI = 255 h): special keys send NUL and the PC scan code.
+    public private(set) var doorwayMode = false
+    /// The result of the last CTerm font selection (99: none asked yet), for CSI = 1 n.
+    private var fontSelectResult = 99
+    private var speedRequest: Int??
     private var top = 0
     private var bottom: Int
     private var saved: (row: Int, column: Int, attributes: TextAttributes) = (0, 0, TextAttributes())
@@ -327,6 +332,7 @@ public struct TerminalEmulator {
                 if value == 25 { cursorVisible = on }
                 if value == 7 { autowrap = on; if !on { pendingWrap = false } }
                 if value == 1 { applicationCursorKeys = on }
+                if value == 33 { iceColors = on }
                 if value == 6 {
                     originMode = on
                     row = on ? top : 0
@@ -334,6 +340,12 @@ public struct TerminalEmulator {
                     pendingWrap = false
                 }
             }
+            return
+        }
+        if privateMarker == UInt8(ascii: "="), ctermPrivate(final) { return }
+        if privateMarker == UInt8(ascii: "<"), final == UInt8(ascii: "c"), parameter(0, 0) == 0 {
+            // CTerm capabilities: 2 bright backgrounds, 5 font selection.
+            replies += Array("\u{1B}[<0;2;5c".utf8)
             return
         }
         if privateMarker == UInt8(ascii: ">"), final == UInt8(ascii: "c"), profile == .vt220 {
@@ -412,6 +424,7 @@ public struct TerminalEmulator {
             switch parameter(0, 0) {
             case 5: replies += Array("\u{1B}[0n".utf8)
             case 6: replies += Array("\u{1B}[\(row + 1 - (originMode ? top : 0));\(column + 1)R".utf8)
+            case 255: replies += Array("\u{1B}[\(rows);\(columns)R".utf8)
             default: break
             }
         case UInt8(ascii: "c"):
@@ -426,10 +439,53 @@ public struct TerminalEmulator {
         }
     }
 
+    /// CTerm's CSI = sequences: status reports and DoorWay mode. True when handled.
+    private mutating func ctermPrivate(_ final: UInt8) -> Bool {
+        switch final {
+        case UInt8(ascii: "n"):
+            switch parameter(0, 0) {
+            case 1: replies += Array("\u{1B}[=1;255;\(fontSelectResult);0;0;0;0n".utf8)
+            case 2:
+                var modes: [Int] = []
+                if originMode { modes.append(6) }
+                if autowrap { modes.append(7) }
+                if cursorVisible { modes.append(25) }
+                if iceColors { modes.append(33) }
+                replies += Array("\u{1B}[=2;\(modes.map(String.init).joined(separator: ";"))n".utf8)
+            case 3: replies += Array("\u{1B}[=3;16;8n".utf8)
+            default: return false
+            }
+            return true
+        case UInt8(ascii: "h"), UInt8(ascii: "l"):
+            if parameters.contains(255) { doorwayMode = final == UInt8(ascii: "h") }
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// The modem speed a CTerm `CSI Ps1 ; Ps2 * r` asked for (0 unlimited), once; nil when none.
+    public mutating func takeSpeedRequest() -> Int? {
+        defer { speedRequest = nil }
+        return speedRequest ?? nil
+    }
+
     /// Sequences with an intermediate byte (CSI ... SP x and the like).
     private mutating func dispatchIntermediate(_ final: UInt8) {
+        if intermediate == UInt8(ascii: "$"), final == UInt8(ascii: "p") {
+            requestMode()
+            return
+        }
         guard privateMarker == 0 else { return }
         switch (intermediate, final) {
+        case (0x20, UInt8(ascii: "D")):
+            // CTerm font selection: only the code page 437 fonts (0 and 26, thin) are bundled.
+            let font = parameter(1, 0)
+            fontSelectResult = parameter(0, 0) <= 3 && (font == 0 || font == 26) ? 0 : 1
+        case (UInt8(ascii: "*"), UInt8(ascii: "r")):
+            let speeds = [0, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 76800, 115200]
+            let first = parameter(0, 0), index = parameter(1, 0)
+            if first <= 1, index < speeds.count { speedRequest = .some(speeds[index]) }
         case (0x20, UInt8(ascii: "q")) where profile == .amiga:
             // Window status request: the Amiga console answers with its bounds.
             replies += Array("\u{1B}[1;1;\(rows);\(columns) r".utf8)
@@ -440,8 +496,48 @@ public struct TerminalEmulator {
         }
     }
 
+    /// DECRQM: CSI ? Ps $ p and CSI = Ps $ p, answered as SyncTERM does (0 unknown, 1 set, 2 reset).
+    private mutating func requestMode() {
+        let mode = parameter(0, 0)
+        var state = 0
+        if privateMarker == UInt8(ascii: "?") {
+            switch mode {
+            case 6: state = originMode ? 1 : 2
+            case 7: state = autowrap ? 1 : 2
+            case 25: state = cursorVisible ? 1 : 2
+            case 33: state = iceColors ? 1 : 2
+            default: state = 0
+            }
+            replies += Array("\u{1B}[?\(mode);\(state)$y".utf8)
+        } else if privateMarker == UInt8(ascii: "=") {
+            state = mode == 255 ? (doorwayMode ? 1 : 2) : 0
+            replies += Array("\u{1B}[=\(mode);\(state)$y".utf8)
+        }
+    }
+
+    /// PC scan codes DoorWay mode sends after a NUL.
+    private static func doorwayScanCode(_ key: TerminalKey) -> UInt8? {
+        switch key {
+        case .up: return 0x48
+        case .down: return 0x50
+        case .left: return 0x4B
+        case .right: return 0x4D
+        case .home: return 0x47
+        case .end: return 0x4F
+        case .pageUp: return 0x49
+        case .pageDown: return 0x51
+        case .insert: return 0x52
+        case .forwardDelete: return 0x53
+        case .function(let n) where (1...10).contains(n): return 0x3A + UInt8(n)
+        case .function(11): return 0x85
+        case .function(12): return 0x86
+        default: return nil
+        }
+    }
+
     /// Cursor keys follow DECCKM; everything else is the ANSI-BBS keyboard.
     public func bytes(for key: TerminalKey, backspaceSendsDelete: Bool) -> [UInt8] {
+        if doorwayMode, let scan = Self.doorwayScanCode(key) { return [0x00, scan] }
         if applicationCursorKeys {
             switch key {
             case .up: return [0x1B, 0x4F, 0x41]
