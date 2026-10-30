@@ -78,6 +78,8 @@ public struct EditCanvas: Equatable {
     public var fontName = "IBM VGA"
     /// SAUCE flags other than iCE (letter spacing, aspect ratio) kept from an opened file.
     public var sauceFlags: UInt8 = 0
+    /// SAUCE TInfo3 and TInfo4 of an opened file, written back by ANSI and XBin saves.
+    public var sauceTInfo34: [UInt16] = [0, 0]
 
     public var height: Int { rows.count }
     public var font: BitmapFont { BitmapFont.named(fontName) }

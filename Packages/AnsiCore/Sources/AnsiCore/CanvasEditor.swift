@@ -42,10 +42,11 @@ public final class CanvasEditor {
     private var nextRevision = 1
     private var savedRevision = 0
     private var selectionAnchor: (x: Int, y: Int)?
-    private var strokeStart: (canvas: EditCanvas, revision: Int)?
+    private var strokeStart: Snapshot?
 
     public init(canvas: EditCanvas = EditCanvas()) {
         self.canvas = canvas
+        layerStore = [CanvasLayer(name: "Background", canvas: canvas)]
         undoManager = UndoManager()
         // Groups are opened and closed by each command, so undo works without a run loop.
         undoManager.groupsByEvent = false
@@ -154,7 +155,7 @@ public final class CanvasEditor {
 
     public func setIceColors(_ on: Bool) {
         guard floating == nil else { return }
-        perform(on ? "iCE Colours On" : "iCE Colours Off") { $0.canvas.setIceColors(on) }
+        perform(on ? "iCE Colours On" : "iCE Colours Off") { $0.forEachLayer { $0.setIceColors(on) } }
         if !on, background >= 8 { background -= 8 }
         changed()
     }
@@ -224,6 +225,15 @@ public final class CanvasEditor {
 
     /// The canvas as it looks with the floating block stamped where it is now.
     public var displayCanvas: EditCanvas {
+        let active = activeWithFloating
+        guard layerStore.count > 1 else { return active }
+        var list = layerStore
+        list[activeLayer].canvas = active
+        return LayerStack.composite(list)
+    }
+
+    /// The active layer with the floating block stamped where it is now.
+    private var activeWithFloating: EditCanvas {
         guard let floating else { return canvas }
         var shown = canvas
         if let source = floating.liftedFrom, !floating.leavesCopy {
@@ -403,13 +413,13 @@ public final class CanvasEditor {
 
     /// Starts a mouse stroke: everything painted until `endStroke` is one undo step.
     public func beginStroke() {
-        strokeStart = (canvas, revision)
+        strokeStart = snapshot
     }
 
     public func endStroke() {
         guard let start = strokeStart else { return }
         strokeStart = nil
-        guard canvas != start.canvas else {
+        guard !snapshot.sameContent(as: start) else {
             revision = start.revision
             return
         }
@@ -433,16 +443,18 @@ public final class CanvasEditor {
     // MARK: Canvas and metadata
 
     public func resize(columns: Int, height: Int) {
-        perform("Canvas Size") { $0.canvas.resize(columns: columns, height: height) }
+        perform("Canvas Size") { $0.forEachLayer { $0.resize(columns: columns, height: height) } }
         clampToCanvas()
         changed()
     }
 
     public func setMetadata(title: String, author: String, group: String) {
         perform("Edit SAUCE") { editor in
-            editor.canvas.title = String(title.prefix(35))
-            editor.canvas.author = String(author.prefix(20))
-            editor.canvas.group = String(group.prefix(20))
+            editor.forEachLayer { canvas in
+                canvas.title = String(title.prefix(35))
+                canvas.author = String(author.prefix(20))
+                canvas.group = String(group.prefix(20))
+            }
         }
     }
 
@@ -452,33 +464,168 @@ public final class CanvasEditor {
         changed()
     }
 
-    // MARK: Layers
+    // MARK: Layers (ruling 10)
 
-    /// The layer being edited (0 is the bottom).
+    /// The layer being edited (0 is the bottom). `canvas` is that layer's cells.
     public private(set) var activeLayer = 0
+    /// Every layer; the active one's entry is refreshed from `canvas` when read.
+    private var layerStore: [CanvasLayer] = []
 
-    /// Applies a change to every layer (size and metadata changes).
-    func forEachLayer(_ body: (inout EditCanvas) -> Void) { body(&canvas) }
+    /// All layers, bottom first.
+    public var layers: [CanvasLayer] {
+        var list = layerStore
+        list[activeLayer].canvas = canvas
+        return list
+    }
+
+    /// What the layers look like together (visible layers only): what a plain save writes.
+    public var flattenedCanvas: EditCanvas {
+        layerStore.count == 1 ? canvas : LayerStack.composite(layers)
+    }
+
+    /// The layers as a project file.
+    public var project: ArtProject { ArtProject(layers: layers, activeLayer: activeLayer) }
+
+    public convenience init(project: ArtProject) {
+        self.init(canvas: project.layers[project.activeLayer].canvas)
+        layerStore = project.layers
+        activeLayer = project.activeLayer
+    }
+
+    /// Applies a change to every layer (size, iCE and metadata changes).
+    func forEachLayer(_ body: (inout EditCanvas) -> Void) {
+        body(&canvas)
+        for index in layerStore.indices where index != activeLayer { body(&layerStore[index].canvas) }
+    }
+
+    private func syncActiveLayer() { layerStore[activeLayer].canvas = canvas }
+
+    private func activate(_ index: Int) {
+        activeLayer = min(layerStore.count - 1, max(0, index))
+        canvas = layerStore[activeLayer].canvas
+    }
+
+    /// Edits another layer (not an undo step).
+    public func selectLayer(_ index: Int) {
+        guard floating == nil, layerStore.indices.contains(index), index != activeLayer else { return }
+        syncActiveLayer()
+        activate(index)
+        clampToCanvas()
+        changed()
+    }
+
+    /// Adds an empty layer above the active one and edits it.
+    public func addLayer(name: String? = nil) {
+        perform("Add Layer") { editor in
+            editor.syncActiveLayer()
+            var blank = editor.canvas
+            blank.clearCells()
+            let title = name ?? "Layer \(editor.layerStore.count + 1)"
+            editor.layerStore.insert(CanvasLayer(name: title, canvas: blank), at: editor.activeLayer + 1)
+            editor.activate(editor.activeLayer + 1)
+        }
+    }
+
+    public func duplicateLayer() {
+        perform("Duplicate Layer") { editor in
+            editor.syncActiveLayer()
+            var copy = editor.layerStore[editor.activeLayer]
+            copy.name += " copy"
+            editor.layerStore.insert(copy, at: editor.activeLayer + 1)
+            editor.activate(editor.activeLayer + 1)
+        }
+    }
+
+    /// Deletes the active layer; the last layer stays.
+    public func deleteLayer() {
+        guard layerStore.count > 1 else { return }
+        perform("Delete Layer") { editor in
+            editor.layerStore.remove(at: editor.activeLayer)
+            editor.activate(max(0, editor.activeLayer - 1))
+        }
+    }
+
+    /// Moves the active layer up (+1) or down (-1) in the stack.
+    public func moveLayer(by offset: Int) {
+        let target = activeLayer + offset
+        guard layerStore.indices.contains(target), offset != 0 else { return }
+        perform(offset > 0 ? "Move Layer Up" : "Move Layer Down") { editor in
+            editor.syncActiveLayer()
+            editor.layerStore.swapAt(editor.activeLayer, target)
+            editor.activate(target)
+        }
+    }
+
+    public func setLayerVisible(_ index: Int, _ visible: Bool) {
+        guard layerStore.indices.contains(index), layerStore[index].visible != visible else { return }
+        perform(visible ? "Show Layer" : "Hide Layer") { editor in
+            editor.syncActiveLayer()
+            editor.layerStore[index].visible = visible
+        }
+    }
+
+    public func renameLayer(_ index: Int, to name: String) {
+        guard layerStore.indices.contains(index), !name.isEmpty else { return }
+        perform("Rename Layer") { editor in
+            editor.syncActiveLayer()
+            editor.layerStore[index].name = name
+        }
+    }
+
+    /// Draws the active layer onto the one below and removes it.
+    public func mergeDown() {
+        guard activeLayer > 0 else { return }
+        perform("Merge Down") { editor in
+            editor.syncActiveLayer()
+            let upper = editor.layerStore.remove(at: editor.activeLayer)
+            editor.layerStore[editor.activeLayer - 1].canvas.overlay(upper.canvas)
+            editor.activate(editor.activeLayer - 1)
+        }
+    }
+
+    /// Replaces all layers with one holding what is visible.
+    public func flatten() {
+        guard layerStore.count > 1 else { return }
+        perform("Flatten") { editor in
+            let flat = editor.flattenedCanvas
+            editor.layerStore = [CanvasLayer(name: "Background", canvas: flat)]
+            editor.activate(0)
+        }
+    }
 
     // MARK: Helpers
 
-    /// Runs one undoable change. Nothing is registered when the canvas did not change. Nothing
+    /// Everything one undo step restores.
+    private struct Snapshot {
+        var canvas: EditCanvas
+        var layers: [CanvasLayer]
+        var activeLayer: Int
+        var revision: Int
+
+        func sameContent(as other: Snapshot) -> Bool {
+            canvas == other.canvas && activeLayer == other.activeLayer && layers == other.layers
+        }
+    }
+
+    private var snapshot: Snapshot { Snapshot(canvas: canvas, layers: layerStore, activeLayer: activeLayer, revision: revision) }
+
+    /// Runs one undoable change. Nothing is registered when nothing changed. Nothing
     /// runs while a paste floats: it is placed or cancelled first.
     private func perform(_ name: String, _ change: (CanvasEditor) -> Void) {
         guard floating == nil else { return }
-        let before = (canvas, revision)
+        let before = snapshot
         change(self)
         clampToCanvas()
-        if canvas != before.0 {
+        if !snapshot.sameContent(as: before) {
             revision = newRevision()
             registerUndo(restoring: before, name: name)
         }
         changed()
     }
 
-    private func registerUndo(restoring state: (canvas: EditCanvas, revision: Int), name: String) {
+    private func registerUndo(restoring state: Snapshot, name: String) {
         undoManager.beginUndoGrouping()
-        let current = (canvas, revision)
+        let current = snapshot
         undoManager.registerUndo(withTarget: self) { editor in
             editor.restore(state, redo: current, name: name)
         }
@@ -491,9 +638,10 @@ public final class CanvasEditor {
         return nextRevision
     }
 
-    private func restore(_ state: (canvas: EditCanvas, revision: Int),
-                         redo: (canvas: EditCanvas, revision: Int), name: String) {
+    private func restore(_ state: Snapshot, redo: Snapshot, name: String) {
         canvas = state.canvas
+        layerStore = state.layers
+        activeLayer = state.activeLayer
         revision = state.revision
         undoManager.registerUndo(withTarget: self) { editor in
             editor.restore(redo, redo: state, name: name)
@@ -502,6 +650,7 @@ public final class CanvasEditor {
         clampToCanvas()
         changed()
     }
+
 
     /// Writes a character at the cursor in the current colours and advances, wrapping at the edge.
     private func write(_ code: UInt8) {
