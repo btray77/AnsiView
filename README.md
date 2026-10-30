@@ -44,17 +44,31 @@ solid block and shade characters, and box drawing that lines up without gaps.
 - **Presentation Mode** (View menu, Shift Command F) shows the art alone on a black screen with the
   menu bar, Dock and cursor hidden. Escape leaves.
 - **Gallery and slideshow.** File > Open Folder or Art Pack (Shift Command O) shows a grid of
-  thumbnails for a folder or a `.zip` art pack. Slideshow > Start Slideshow (Option Command S) steps
+  thumbnails for a folder or a `.zip` art pack; the toggle at the right of its title bar switches
+  between the grid and a list (small thumbnail, name and kind), and the choice is remembered for
+  gallery windows. Slideshow > Start Slideshow (Option Command S) steps
   through a folder or pack with the Left and Right arrow keys, with optional Auto Advance.
 - **Finder thumbnails.** Art files show the art itself as their Finder icon (except `.asc`, which
   macOS does not let thumbnail extensions claim).
 - **Sample art.** File > Open Sample opens four original pieces bundled with the app: a static
   ANSI with a SAUCE record, an animation, a 24 bit colour picture and an XBin with its own font.
 - **16colo.rs.** File > Browse 16colo.rs... lists the archive at [16colo.rs](https://16colo.rs) by
-  year, pack and file. Open Pack downloads the pack's ZIP and shows it in a gallery; Open File
-  (or a double click) downloads one file and opens it. Downloads are kept in AnsiView's cache.
-  AnsiView waits at least a second between requests and identifies itself as AnsiView. The art
-  belongs to its artists.
+  year, pack and file, with a preview pane on the right. Selecting a file previews it at once:
+  its 16colo.rs thumbnail when that is already saved, then the art itself drawn by AnsiView
+  (animations play, blink blinks, tall art scrolls), with the SAUCE title, author and group under
+  it. Files AnsiView does not draw (pictures, programs, music) show 16colo.rs's own picture of
+  them. The arrow keys move through the files and the preview follows. Open (or Return, or a
+  double click) opens the file in its own window, Open in Editor opens a copy in the editor, and
+  Save to... saves the original file (the panel starts in Downloads). The files can be shown as a
+  list or as a grid of 16colo.rs's thumbnails with names under them (the toggle at the bottom
+  right; the choice is remembered), and each pack row shows a small picture of the pack (its
+  FILE_ID.DIZ, as on 16colo.rs). Open Pack downloads the pack's ZIP and shows it in a gallery.
+  Pictures load only for rows and grid items on screen, and stop loading when scrolled away.
+  AnsiView sends one request at a time, at least a second apart, the file you selected before
+  any thumbnail, and identifies itself as AnsiView. Thumbnails, previews, downloaded files and
+  listings are kept in AnsiView's Caches folder, up to 200 MB (the least recently used go first;
+  downloaded pack ZIPs are kept separately). Without a network the browser shows the listings,
+  thumbnails and files it saved before and says it is offline. The art belongs to its artists.
 - **Draw your own.** A TheDraw style editor (File > New ANSI Art, or File > Edit Art for a copy
   of the art in front): typing, F1 to F10 block character sets, half block drawing with the
   mouse, the 16 VGA colours with iCE, rectangle copy and paste, fill, undo, and saving as `.ans`,
