@@ -665,7 +665,8 @@ screens are exported into your BBS install folder, or uploaded through the termi
   line ends, SAUCE. It lists the file each screen becomes; names a package does not document are
   marked "suggested".
 - **Screen > Export to BBS...** writes the file into the folder with the right name. An existing
-  file is replaced only after you confirm, and the old one is kept as `<name>.bak`.
+  file is replaced only after you confirm. The first file replaced is kept as `<name>.bak` and never
+  overwritten (it is usually your original); later replacements keep the previous version as `<name>.bak2`.
   **Screen > Screen Set...** lists what was exported per profile with its status (exported,
   modified since, changed in the BBS folder, missing) and Export Again, Upload via Terminal and
   Reveal in Finder. **Upload via Terminal...** connects with a dialing directory entry and, once you

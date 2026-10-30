@@ -6,6 +6,7 @@ private let day = Date(timeIntervalSince1970: 1_800_000_000)
 
 @Test func screenSetStatusFollowsExportAndEdits() {
     var entry = ScreenSetEntry(slot: .mainMenu, fileName: "text/menu/main.ans")
+    entry.sourcePath = "/art/main.ans"
     #expect(ScreenSet.status(entry, current: Data([1]), inFolder: nil) == .notExported)
 
     // The file (with SAUCE, whose date changes daily) is compared with the folder; the body
@@ -16,6 +17,15 @@ private let day = Date(timeIntervalSince1970: 1_800_000_000)
     #expect(ScreenSet.status(entry, current: Data([1]), inFolder: Data([3])) == .changedInFolder(day))
     #expect(ScreenSet.status(entry, current: Data([1]), inFolder: nil) == .missingInFolder(day))
     #expect(ScreenSet.status(entry, current: nil, inFolder: Data([1, 9])) == .sourceMissing(day))
+}
+
+@Test func screenExportedFromAnUnsavedEditorIsNotASourceProblem() {
+    var entry = ScreenSetEntry(slot: .mainMenu, fileName: "main.ans")
+    entry.recordExport(file: Data([1]), body: Data([1]), at: day)
+    // No source path: nothing to compare with, so it stays Exported while the folder matches.
+    #expect(ScreenSet.status(entry, current: nil, inFolder: Data([1])) == .exported(day))
+    entry.sourcePath = "/gone.ans"
+    #expect(ScreenSet.status(entry, current: nil, inFolder: Data([1])) == .sourceMissing(day))
 }
 
 @Test func screenSetStatusLabels() {

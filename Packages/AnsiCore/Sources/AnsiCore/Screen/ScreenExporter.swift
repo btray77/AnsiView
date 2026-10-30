@@ -78,8 +78,9 @@ public struct ExportProfile: Codable, Equatable, Identifiable {
             if rules.eightDotThree { base = String(base.prefix(8)) }
             path = rules.folder.isEmpty ? base : rules.folder + "/" + base
         }
-        if let theme = rules.themeFolder, !themeName.isEmpty {
-            let clean = themeName.replacingOccurrences(of: "/", with: "")
+        if let theme = rules.themeFolder, themeName.unicodeScalars.contains(where: { $0.isASCII && CharacterSet.alphanumerics.contains($0) }) {
+            // Letters, digits, '-' and '_' only, so a theme cannot be "." or climb out (review fix).
+            let clean = String(themeName.unicodeScalars.filter { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_") })
             path = path.split(separator: "/").map { $0 == theme ? clean : String($0) }.joined(separator: "/")
         }
         let parts = path.split(separator: "/").map(String.init)
@@ -109,9 +110,16 @@ public struct ExportedScreen {
 public enum ScreenExporter {
     /// Writes `project` for `profile`: one frame flattened (with the package's colour codes when
     /// asked), or an animation as ANSI with padding delays (ruling 5).
+    /// `exactPath` (Export Again) keeps the file the screen set already names.
     public static func export(_ project: ArtProject, profile: ExportProfile, slot: ScreenSlot, customName: String? = nil,
-                              date: Date = Date()) -> ExportedScreen {
+                              exactPath: String? = nil, date: Date = Date()) -> ExportedScreen {
         var warnings: [PreviewWarning] = []
+        var profile = profile
+        if profile.colourCodes == .native, profile.package.definition.colours == .none {
+            profile.colourCodes = .ansi
+            warnings.append(PreviewWarning(kind: .noColourCodes, message:
+                "\(profile.package.displayName) has no documented colour codes of its own; exported with ANSI colours."))
+        }
         let canvas = project.frames[project.frames.count > 1 ? 0 : project.currentFrame].composite
         var body: [UInt8]
         if project.frames.count > 1 {
@@ -145,11 +153,14 @@ public enum ScreenExporter {
             }
         }
         var data = body
-        if profile.sauce, let full = try? ArtWriter.data(canvas, format: .ansi, date: date) {
-            let ansiCount = ArtWriter.ansiBody(canvas).count
-            data += full[ansiCount...]
+        // The editor's own SAUCE (title, author, width, iCE, font, date), with the file size of
+        // this body rather than of the ANSI one it was made for.
+        if profile.sauce, let full = try? ArtWriter.data(canvas, format: .ansi, date: date),
+           let sauce = Sauce.read([UInt8](full)).0 {
+            data += sauce.encoded(fileSize: body.count)
         }
-        return ExportedScreen(data: Data(data), relativePath: profile.relativePath(slot: slot, customName: customName, columns: canvas.columns),
+        let path = exactPath ?? profile.relativePath(slot: slot, customName: customName, columns: canvas.columns)
+        return ExportedScreen(data: Data(data), relativePath: path,
                               warnings: warnings, body: body)
     }
 }

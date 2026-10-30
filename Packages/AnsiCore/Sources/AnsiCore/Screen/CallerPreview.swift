@@ -20,7 +20,7 @@ public struct CallerTerminalSize: Equatable, Hashable, Codable {
 /// Something about a screen that a caller may see differently from the editor.
 public struct PreviewWarning: Equatable {
     public enum Kind: String, Equatable, CaseIterable {
-        case lineTooLong, wrapAtLastColumn, bottomRightScroll, tallerThanScreen, unsupportedCode, needsIce, encodingUndocumented,
+        case lineTooLong, wrapAtLastColumn, bottomRightScroll, tallerThanScreen, unsupportedCode, needsIce, encodingUndocumented, noColourCodes,
              notRepresentable, animatedAsANSI
     }
 

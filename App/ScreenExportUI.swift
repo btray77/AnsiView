@@ -148,8 +148,9 @@ final class ExportProfilesViewController: NSViewController, NSTableViewDataSourc
         themeField.isEnabled = p.package.definition.files.themeFolder != nil
         encodingPopup.selectItem(at: p.encoding == .utf8 ? 1 : 0)
         coloursPopup.removeAllItems()
-        coloursPopup.addItems(withTitles: ColourCodeMode.allCases.map { $0.label(p.package) })
-        coloursPopup.selectItem(at: p.colourCodes == .native ? 1 : 0)
+        // Only packages with colour codes of their own offer them (review fix).
+        coloursPopup.addItems(withTitles: ColourCodeMode.modes(for: p.package).map { $0.label(p.package) })
+        coloursPopup.selectItem(at: p.colourCodes == .native && ColourCodeMode.modes(for: p.package).contains(.native) ? 1 : 0)
         coloursPopup.toolTip = "ANSI escapes work on every package; the package's own codes keep files editable in its own tools"
         lineEndingPopup.selectItem(at: p.lineEnding == .lf ? 1 : 0)
         sauceBox.state = p.sauce ? .on : .off
@@ -165,17 +166,22 @@ final class ExportProfilesViewController: NSViewController, NSTableViewDataSourc
     @objc func formChanged() {
         guard var p = editing else { return }
         let package = ScreenDesigner.package(of: packagePopup)
+        let typedName = nameField.stringValue
         if package != p.package {
+            // A new package starts from its defaults (SAUCE, colour codes), keeping the user's own name.
+            let fresh = ExportProfile(id: p.id, package: package)
+            let renamed = !BBSPackage.allCases.map(\.displayName).contains(typedName) && !typedName.isEmpty
             p.package = package
-            p.sauce = package.definition.files.readsSauce
-            if p.name == p.package.displayName || BBSPackage.allCases.map(\.displayName).contains(p.name) { p.name = package.displayName }
+            p.sauce = fresh.sauce
+            p.colourCodes = fresh.colourCodes
+            p.name = renamed ? typedName : package.displayName
         } else {
-            p.name = nameField.stringValue.isEmpty ? package.displayName : nameField.stringValue
+            p.name = typedName.isEmpty ? package.displayName : typedName
             p.sauce = sauceBox.state == .on
+            p.colourCodes = coloursPopup.indexOfSelectedItem == 1 ? .native : .ansi
         }
         p.themeName = themeField.stringValue
         p.encoding = encodingPopup.indexOfSelectedItem == 1 ? .utf8 : .cp437
-        p.colourCodes = coloursPopup.indexOfSelectedItem == 1 ? .native : .ansi
         p.lineEnding = lineEndingPopup.indexOfSelectedItem == 1 ? .lf : .crlf
         p.widthNames = widthBox.state == .on
         settings.saveProfile(p)
@@ -256,7 +262,7 @@ enum ScreenExportController {
     /// Writes the screen into the profile's folder, asking before replacing; records it in the screen set.
     @discardableResult
     static func export(project: ArtProject, profile: ExportProfile, slot: ScreenSlot, customName: String?, source: URL?,
-                       window: NSWindow?, quiet: Bool = false, entryID: UUID? = nil) -> URL? {
+                       window: NSWindow?, quiet: Bool = false, entryID: UUID? = nil, exactPath: String? = nil) -> URL? {
         guard let folder = TransferFolders.resolve(profile.folderBookmark) else {
             let alert = NSAlert()
             alert.messageText = "Choose the BBS folder for \"\(profile.name)\""
@@ -267,7 +273,7 @@ enum ScreenExportController {
         }
         let scoped = folder.startAccessingSecurityScopedResource()
         defer { if scoped { folder.stopAccessingSecurityScopedResource() } }
-        let exported = ScreenExporter.export(project, profile: profile, slot: slot, customName: customName)
+        let exported = ScreenExporter.export(project, profile: profile, slot: slot, customName: customName, exactPath: exactPath)
         guard let relative = ScreenExportWriter.safeRelativePath(exported.relativePath) else {
             NSAlert(error: ScreenExportWriter.WriteError.unsafePath(exported.relativePath)).runModal()
             return nil
@@ -526,9 +532,9 @@ final class ScreenSetWindowController: NSWindowController, NSWindowDelegate, NST
             return
         }
         let source = entry.sourcePath.map { URL(fileURLWithPath: $0) }
-        let name = profile.isDocumented(entry.slot) ? nil : ((entry.fileName as NSString).lastPathComponent as NSString).deletingPathExtension
-        ScreenExportController.export(project: project, profile: profile, slot: entry.slot, customName: name, source: source,
-                                      window: window, entryID: entry.id)
+        // Exactly the file the set names, not a name rebuilt from it (review fix).
+        ScreenExportController.export(project: project, profile: profile, slot: entry.slot, customName: nil, source: source,
+                                      window: window, entryID: entry.id, exactPath: entry.fileName)
         reload()
     }
 
@@ -611,7 +617,7 @@ enum ScreenUploader {
 }
 
 /// "Start the upload on the BBS, then click Send": a small panel by the terminal.
-final class ScreenUploadPanel: NSWindowController {
+final class ScreenUploadPanel: NSWindowController, NSWindowDelegate {
     private static var open: Set<ScreenUploadPanel> = []
     let file: URL
     weak var terminal: TerminalWindowController?
@@ -644,6 +650,7 @@ final class ScreenUploadPanel: NSWindowController {
         let stack = ScreenDesigner.column([text, ScreenDesigner.row([status, NSView(), cancel, sendButton])], spacing: 12)
         stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
         window.contentView = ScreenDesigner.container(stack)
+        window.delegate = self
         if let frame = terminal.window?.frame { window.setFrameTopLeftPoint(NSPoint(x: frame.maxX - 470, y: frame.maxY - 30)) }
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.update() }
         update()
@@ -664,7 +671,15 @@ final class ScreenUploadPanel: NSWindowController {
         finish()
     }
 
-    @objc func cancel() { finish() }
+    @objc func cancel() {
+        try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
+        finish()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        timer?.invalidate()
+        Self.open.remove(self)
+    }
 
     private func finish() {
         timer?.invalidate()

@@ -39,9 +39,10 @@ private func tempFolder() -> URL {
     #expect(first.backupURL?.lastPathComponent == "MAIN.ANS.bak")
     #expect(try Data(contentsOf: root.appendingPathComponent("MAIN.ANS.bak")) == Data([9]))
     #expect(try Data(contentsOf: target) == Data([1]))
-    // A second replace keeps the newest previous version as the backup.
+    // A second replace keeps the original in .bak and the previous version in .bak2 (review fix).
     _ = try ScreenExportWriter.write(Data([2]), to: target, replacing: true)
-    #expect(try Data(contentsOf: root.appendingPathComponent("MAIN.ANS.bak")) == Data([1]))
+    #expect(try Data(contentsOf: root.appendingPathComponent("MAIN.ANS.bak")) == Data([9]))
+    #expect(try Data(contentsOf: root.appendingPathComponent("MAIN.ANS.bak2")) == Data([1]))
 }
 
 @Test func exportWriterRejectsPathsOutsideTheFolder() {

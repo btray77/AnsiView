@@ -4,6 +4,11 @@ import Foundation
 public enum ColourCodeMode: String, Codable, CaseIterable, Equatable {
     case ansi, native
 
+    /// The modes a package offers: its own codes only when it has colour codes (review fix).
+    public static func modes(for package: BBSPackage) -> [ColourCodeMode] {
+        package.definition.colours == .none ? [.ansi] : [.ansi, .native]
+    }
+
     public func label(_ package: BBSPackage) -> String {
         self == .ansi ? "ANSI colours (escape codes)" : "\(package.displayName) \(package.colourCodeName)"
     }
@@ -212,7 +217,12 @@ public enum BBSDisplay {
             }
         }
 
+        /// Widest field a code may ask for: wider than any terminal line, small enough that a
+        /// mistyped width ("@USER:999999999@") cannot stall the preview (review fix).
+        static let maxPad = 255
+
         static func pad(_ text: String, width: Int, align: UInt8, fill: Character = " ") -> String {
+            let width = min(width, maxPad)
             let chars = Array(text)
             if chars.count >= width { return String(chars.prefix(width)) }
             let gap = width - chars.count

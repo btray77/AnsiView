@@ -50,6 +50,18 @@ private func oneLine(_ text: String, fg: Int = 14) -> ArtProject {
     #expect(Array(withSauce.data[(plain.data.count + 1)...].prefix(7)) == Array("SAUCE00".utf8))
 }
 
+@Test func sauceFileSizeIsTheExportedBodySize() {
+    var profile = ExportProfile(package: .mystic)
+    profile.colourCodes = .native
+    profile.sauce = true
+    profile.encoding = .utf8
+    let out = ScreenExporter.export(oneLine("\u{2588}\u{2588} |UH"), profile: profile, slot: .welcome, date: fixedDate)
+    let record = Array(out.data.suffix(128))
+    #expect(Array(record.prefix(7)) == Array("SAUCE00".utf8))
+    let size = Int(record[90]) | Int(record[91]) << 8 | Int(record[92]) << 16 | Int(record[93]) << 24
+    #expect(size == out.body.count)
+}
+
 @Test func exportedNativeBytesAndLineEndings() {
     var profile = ExportProfile(package: .mystic)
     profile.colourCodes = .native

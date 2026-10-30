@@ -108,7 +108,8 @@ public struct ScreenSet: Codable, Equatable {
         guard let hash = entry.exportedSHA256, let date = entry.exportedAt else { return .notExported }
         guard let inFolder else { return .missingInFolder(date) }
         if sha256(inFolder) != hash { return .changedInFolder(date) }
-        guard let current else { return .sourceMissing(date) }
+        // Exported from an unsaved editor: there is no source to compare with.
+        guard let current else { return entry.sourcePath == nil ? .exported(date) : .sourceMissing(date) }
         return sha256(current) == (entry.bodySHA256 ?? hash) ? .exported(date) : .modifiedSince(date)
     }
 }

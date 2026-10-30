@@ -20,6 +20,8 @@ public enum ScreenDesignerHelp {
             return "Some colours are not one of the 16 DOS colours. BBS colour codes can only send the 16 colours, so these cells use the nearest one."
         case .encodingUndocumented:
             return "No source found says this BBS package reads UTF-8 display files. Callers with CP437 terminals would see the UTF-8 bytes as pairs of odd characters. Export CP437 unless you know your BBS converts."
+        case .noColourCodes:
+            return "No source documents colour codes of this BBS package's own, so the profile's choice of package codes cannot be used. ANSI escape codes are written instead; every package listed shows ANSI files."
         case .animatedAsANSI:
             return "Animated screens are sent as ANSI cursor movements with padding for the delays. BBS colour codes cannot move the cursor, so this screen is exported with ANSI colours whatever the profile says."
         }

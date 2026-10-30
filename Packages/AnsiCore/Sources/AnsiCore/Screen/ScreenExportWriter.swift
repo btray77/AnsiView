@@ -1,7 +1,8 @@
 import Foundation
 
 /// Writes an exported screen into a BBS install folder: never over an existing file without
-/// confirmation, and the previous version is kept as `<name>.bak` (screen designer ruling 6).
+/// confirmation; the first replaced file is kept as `<name>.bak` and the previous version as `<name>.bak2`
+/// (screen designer ruling 6).
 public enum ScreenExportWriter {
     public struct Existing: Equatable {
         public let size: Int
@@ -22,7 +23,7 @@ public enum ScreenExportWriter {
         public var errorDescription: String? {
             switch self {
             case .wouldOverwrite(let name):
-                return "\(name) already exists in the BBS folder. Confirm replacing it (the old file is kept as \(name).bak)."
+                return "\(name) already exists in the BBS folder. Confirm replacing it (the old file is kept as \(name).bak, or .bak2 when a .bak exists)."
             case .unsafePath(let path):
                 return "The file name \"\(path)\" would write outside the BBS folder."
             }
@@ -46,7 +47,7 @@ public enum ScreenExportWriter {
     }
 
     /// Writes `data` at `url`, making missing folders. An existing file is replaced only when
-    /// `replacing` is true, and is first copied to `<name>.bak` (an older backup is replaced).
+    /// `replacing` is true, and is first copied to `<name>.bak` (or `.bak2`, see below).
     @discardableResult
     public static func write(_ data: Data, to url: URL, replacing: Bool) throws -> Result {
         let manager = FileManager.default
@@ -55,8 +56,13 @@ public enum ScreenExportWriter {
         let exists = conflict(at: url) != nil
         if exists {
             guard replacing else { throw WriteError.wouldOverwrite(url.lastPathComponent) }
-            let bak = url.appendingPathExtension(backupExtension)
-            if manager.fileExists(atPath: bak.path) { try manager.removeItem(at: bak) }
+            // `.bak` keeps the first file AnsiView replaced (often the SysOp's original) and is
+            // never overwritten; later replacements keep the previous version in `.bak2`.
+            var bak = url.appendingPathExtension(backupExtension)
+            if manager.fileExists(atPath: bak.path) {
+                bak = url.appendingPathExtension(backupExtension + "2")
+                if manager.fileExists(atPath: bak.path) { try manager.removeItem(at: bak) }
+            }
             try manager.copyItem(at: url, to: bak)
             backup = bak
         }
