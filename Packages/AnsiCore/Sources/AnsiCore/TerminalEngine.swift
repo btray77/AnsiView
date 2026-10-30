@@ -70,6 +70,7 @@ public enum TerminalEngines {
         case .petscii128: return PETSCIITerminal(model: .c128, columns: columns, rows: rows)
         case .atascii: return ATASCIITerminal(columns: columns, rows: rows)
         case .appleII: return AppleIITerminal(columns: columns, rows: rows)
+        case .ripscrip: return RIPTerminal(columns: columns, rows: rows, encoding: encoding)
         case .viewdata: return TeletextTerminal(flavour: .viewdata, columns: columns, rows: rows)
         case .mode7: return TeletextTerminal(flavour: .mode7, columns: columns, rows: rows)
         default: break

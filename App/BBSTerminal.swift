@@ -71,8 +71,18 @@ final class TerminalView: NSView {
         let rowHeight = art.height / CGFloat(images.count)
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.interpolationQuality = .none
-        for (index, image) in images.enumerated() {
-            guard let image else { continue }
+        // RIPscrip: the graphics screen lies under the text, whose black background is see-through.
+        let overlay = controller.scrollOffset == 0 ? controller.emulator.overlay() : nil
+        if let overlay {
+            context.saveGState()
+            context.translateBy(x: art.minX, y: art.maxY)
+            context.scaleBy(x: 1, y: -1)
+            context.draw(overlay, in: CGRect(origin: .zero, size: art.size))
+            context.restoreGState()
+        }
+        for (index, row) in images.enumerated() {
+            guard let row else { continue }
+            let image = overlay == nil ? row : (row.copy(maskingColorComponents: [0, 0, 0, 0, 0, 0]) ?? row)
             let rect = NSRect(x: art.minX, y: art.minY + CGFloat(index) * rowHeight, width: art.width, height: rowHeight)
             // The context is flipped; draw the image upright.
             context.saveGState()
@@ -122,6 +132,14 @@ final class TerminalView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        // RIPscrip mouse fields and buttons: the click in the graphics screen's own pixels.
+        guard let controller, let overlay = controller.emulator.overlay() else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let art = artRect
+        guard art.contains(point), art.width > 0, art.height > 0 else { return }
+        let x = Int((point.x - art.minX) / art.width * CGFloat(overlay.width))
+        let y = Int((point.y - art.minY) / art.height * CGFloat(overlay.height))
+        controller.click(x: x, y: y)
     }
 
     // MARK: Menu actions
@@ -693,6 +711,13 @@ final class TerminalViewController: NSViewController {
 
     func sendText(_ text: String) {
         send(emulator.text(text, encoding: entry.encoding))
+    }
+
+    /// A click on the RIPscrip screen: a mouse field or button sends its host command.
+    func click(x: Int, y: Int) {
+        let bytes = emulator.click(x: x, y: y)
+        if !bytes.isEmpty { send(bytes) }
+        terminalView.needsDisplay = true
     }
 
     /// Return as this terminal type sends it (CR, ATASCII EOL, the Prestel # key).
