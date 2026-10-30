@@ -2,18 +2,27 @@ import AnsiCore
 import AppKit
 import UniformTypeIdentifiers
 
-/// What the left mouse button does on the editor canvas.
-enum EditorMode: Int { case draw, select }
-
-/// The editor's canvas: draws the art with the bitmap font renderer, the cursor and the
-/// selection, and turns keys and mouse events into `CanvasEditor` commands.
+/// The editor's canvas: draws the art with the bitmap font renderer, the cursor, selection and
+/// grid, and turns keys and mouse events into `CanvasEditor` commands for the current tool.
 final class EditorCanvasView: NSView {
     unowned let editor: CanvasEditor
     weak var controller: EditorViewController?
-    var mode = EditorMode.draw
+    var tool = EditorTool.draw {
+        didSet {
+            if tool != oldValue { controller?.toolChanged() }
+            window?.invalidateCursorRects(for: self)
+        }
+    }
+    /// Plan 6's name for the tool.
+    var mode: EditorTool {
+        get { tool }
+        set { tool = newValue }
+    }
     /// Screen points per font pixel.
     var zoom: CGFloat = 2 { didSet { refresh() } }
+    var showGrid = false { didSet { needsDisplay = true } }
     var pasteboard = NSPasteboard.general
+    var settings: ToolSettings { controller?.optionsBar.settings ?? ToolSettings() }
 
     /// Rows are rendered in bands, so a big canvas never hits the renderer's image size limit
     /// and a change re-renders only the bands it touched (and only when they are visible).
@@ -25,11 +34,19 @@ final class EditorCanvasView: NSView {
     /// The last half block pixel painted in this stroke (column, half row), to fill gaps on fast drags.
     private var lastPixel: (x: Int, y: Int)?
     private var strokeUsesBackground = false
-    /// A drag of the floating paste: the cell the mouse went down on, the block's origin then,
+    /// The last cell of a Line or Brush stroke, and where a Box drag started.
+    private var lastCell: (x: Int, y: Int)?
+    private var shapeAnchor: (x: Int, y: Int)?
+    private var strokeErases = false
+    /// A drag of the floating block: the cell the mouse went down on, the block's origin then,
     /// and whether the mouse has moved to another cell (a click without movement stamps).
     private var floatDrag: (start: (x: Int, y: Int), origin: (x: Int, y: Int), moved: Bool)?
     /// The cell a context menu was opened on, where its Paste puts the block.
     private var contextCell: (x: Int, y: Int)?
+    /// Space held (outside the Text tool), or the middle button: the mouse pans.
+    private(set) var spaceHeld = false
+    private var panStart: (point: NSPoint, origin: NSPoint)?
+    private var magnifyTotal: CGFloat = 0
 
     init(editor: CanvasEditor) {
         self.editor = editor
@@ -55,6 +72,10 @@ final class EditorCanvasView: NSView {
                width: cellSize.width, height: cellSize.height)
     }
 
+    private func rect(of cells: CellRect) -> NSRect {
+        cellRect(column: cells.x, row: cells.y).union(cellRect(column: cells.x + cells.width - 1, row: cells.y + cells.height - 1))
+    }
+
     /// Resizes to the canvas and redraws; bands whose rows changed are re-rendered when drawn.
     func refresh() {
         let canvas = editor.displayCanvas
@@ -67,6 +88,7 @@ final class EditorCanvasView: NSView {
         let size = NSSize(width: CGFloat(canvas.columns) * cellSize.width, height: CGFloat(canvas.height) * cellSize.height)
         if frame.size != size { setFrameSize(size) }
         needsDisplay = true
+        window?.invalidateCursorRects(for: self)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -85,10 +107,10 @@ final class EditorCanvasView: NSView {
                 NSImage(cgImage: image, size: drawn.size).draw(in: drawn)
             }
         }
-        // A floating paste hides the selection, so its colours show as they will be stamped.
+        if showGrid, cellSize.width >= 6 { drawGrid(dirtyRect, canvas: canvas) }
+        // A floating block hides the selection, so its colours show as they will be stamped.
         if editor.floating == nil, let selection = editor.selection {
-            let rect = cellRect(column: selection.x, row: selection.y)
-                .union(cellRect(column: selection.x + selection.width - 1, row: selection.y + selection.height - 1))
+            let rect = self.rect(of: selection)
             NSColor.systemBlue.withAlphaComponent(0.3).setFill()
             rect.fill(using: .sourceOver)
             NSColor.systemBlue.setStroke()
@@ -97,6 +119,13 @@ final class EditorCanvasView: NSView {
             path.stroke()
         }
         if let floating = editor.floating {
+            if let source = floating.liftedFrom {
+                // Where a moved block came from, so the move is visible.
+                NSColor.systemOrange.withAlphaComponent(0.8).setStroke()
+                let path = NSBezierPath(rect: rect(of: source).insetBy(dx: 0.5, dy: 0.5))
+                path.setLineDash([2, 3], count: 2, phase: 0)
+                path.stroke()
+            }
             let rect = cellRect(column: floating.x, row: floating.y)
                 .union(cellRect(column: min(canvas.columns - 1, floating.x + floating.region.width - 1),
                                 row: floating.y + floating.region.height - 1))
@@ -111,10 +140,34 @@ final class EditorCanvasView: NSView {
         let cursor = cellRect(column: editor.cursor.x, row: editor.cursor.y)
         NSColor.black.setStroke()
         NSBezierPath(rect: cursor.insetBy(dx: 1.5, dy: 1.5)).stroke()
-        NSColor.white.setStroke()
+        (editor.insertMode ? NSColor.systemGreen : NSColor.white).setStroke()
         NSBezierPath(rect: cursor.insetBy(dx: 0.5, dy: 0.5)).stroke()
-        NSColor.white.setFill()
-        NSRect(x: cursor.minX, y: cursor.maxY - max(2, cursor.height / 8), width: cursor.width, height: max(2, cursor.height / 8)).fill()
+        (editor.insertMode ? NSColor.systemGreen : NSColor.white).setFill()
+        // Insert mode shows a bar on the left, overwrite an underline.
+        if editor.insertMode {
+            NSRect(x: cursor.minX, y: cursor.minY, width: max(2, cursor.width / 6), height: cursor.height).fill()
+        } else {
+            NSRect(x: cursor.minX, y: cursor.maxY - max(2, cursor.height / 8), width: cursor.width, height: max(2, cursor.height / 8)).fill()
+        }
+    }
+
+    private func drawGrid(_ dirtyRect: NSRect, canvas: EditCanvas) {
+        NSColor.white.withAlphaComponent(0.14).setStroke()
+        let path = NSBezierPath()
+        path.lineWidth = 1
+        let c0 = max(0, Int(dirtyRect.minX / cellSize.width)), c1 = min(canvas.columns, Int(dirtyRect.maxX / cellSize.width) + 1)
+        let r0 = max(0, Int(dirtyRect.minY / cellSize.height)), r1 = min(canvas.height, Int(dirtyRect.maxY / cellSize.height) + 1)
+        for c in c0...c1 {
+            let x = CGFloat(c) * cellSize.width + 0.5
+            path.move(to: NSPoint(x: x, y: CGFloat(r0) * cellSize.height))
+            path.line(to: NSPoint(x: x, y: CGFloat(r1) * cellSize.height))
+        }
+        for r in r0...r1 {
+            let y = CGFloat(r) * cellSize.height + 0.5
+            path.move(to: NSPoint(x: CGFloat(c0) * cellSize.width, y: y))
+            path.line(to: NSPoint(x: CGFloat(c1) * cellSize.width, y: y))
+        }
+        path.stroke()
     }
 
     /// The rendered rows of one band, re-rendered only when those rows changed.
@@ -134,6 +187,20 @@ final class EditorCanvasView: NSView {
         scrollToVisible(cellRect(column: editor.cursor.x, row: editor.cursor.y).insetBy(dx: -cellSize.width, dy: -cellSize.height))
     }
 
+    // MARK: Pointer
+
+    override func resetCursorRects() {
+        addCursorRect(visibleRect, cursor: spaceHeld ? .openHand : tool.cursor)
+        if editor.floating == nil, tool == .select, let selection = editor.selection {
+            // Inside a selection the block can be dragged away (ruling 8).
+            addCursorRect(rect(of: selection).intersection(visibleRect), cursor: .openHand)
+        }
+        if let floating = editor.floating {
+            addCursorRect(rect(of: CellRect(x: floating.x, y: floating.y, width: floating.region.width,
+                                            height: floating.region.height)).intersection(visibleRect), cursor: .openHand)
+        }
+    }
+
     // MARK: Keyboard
 
     /// Menu shortcuts without Command (Space for Play / Pause) would otherwise take keys meant
@@ -147,23 +214,62 @@ final class EditorCanvasView: NSView {
         return true
     }
 
+    /// The key of an event as a `KeyCombo` (Command is not part of editor shortcuts).
+    static func combo(for event: NSEvent) -> KeyCombo? {
+        guard let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first else { return nil }
+        let flags = event.modifierFlags
+        var name = KeyCombo.keyName(scalar: scalar.value)
+        // The Help key sits where Insert is on extended Mac keyboards.
+        if name == "help" { name = "insert" }
+        return KeyCombo(name, control: flags.contains(.control), option: flags.contains(.option),
+                        shift: flags.contains(.shift), command: flags.contains(.command))
+    }
+
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command) { super.keyDown(with: event); return }
         guard let characters = event.charactersIgnoringModifiers, let scalar = characters.unicodeScalars.first else { return }
         let shift = event.modifierFlags.contains(.shift)
+        let option = event.modifierFlags.contains(.option)
         let value = Int(scalar.value)
         if editor.floating != nil { floatingKey(value, shift: shift); return }
+        if let combo = Self.combo(for: event), !(combo.isPlain && tool == .text),
+           let action = ShortcutStore.shared.shortcuts.action(for: combo) {
+            controller?.run(action)
+            return
+        }
+        if value == 0x20, tool != .text {
+            if !event.isARepeat {
+                spaceHeld = true
+                spacePanned = false
+                window?.invalidateCursorRects(for: self)
+            }
+            return
+        }
         if (NSF1FunctionKey...NSF10FunctionKey).contains(value) {
             let index = value - NSF1FunctionKey
-            if event.modifierFlags.contains(.option) { editor.blockSet = index } else { editor.insertBlock(index) }
+            if option { editor.blockSet = index } else { editor.insertBlock(index) }
+            scrollCursorVisible()
+            return
+        }
+        let arrows: [Int: (Int, Int)] = [NSLeftArrowFunctionKey: (-1, 0), NSRightArrowFunctionKey: (1, 0),
+                                         NSUpArrowFunctionKey: (0, -1), NSDownArrowFunctionKey: (0, 1)]
+        if let (dx, dy) = arrows[value] {
+            if tool == .line, !shift {
+                // Line mode: the arrows draw behind the cursor; Option erases.
+                editor.lineStep(dx: dx, dy: dy, style: settings.lineStyle, erase: option)
+            } else if option, editor.selection != nil {
+                // Option-arrow moves the selection like a floating paste (Shift: 8 cells).
+                let step = shift ? 8 : 1
+                editor.moveSelection(dx: dx * step, dy: dy * step)
+                scrollFloatingVisible()
+                return
+            } else {
+                editor.moveCursor(dx: dx, dy: dy, extendSelection: shift)
+            }
             scrollCursorVisible()
             return
         }
         switch value {
-        case NSLeftArrowFunctionKey: editor.moveCursor(dx: -1, dy: 0, extendSelection: shift)
-        case NSRightArrowFunctionKey: editor.moveCursor(dx: 1, dy: 0, extendSelection: shift)
-        case NSUpArrowFunctionKey: editor.moveCursor(dx: 0, dy: -1, extendSelection: shift)
-        case NSDownArrowFunctionKey: editor.moveCursor(dx: 0, dy: 1, extendSelection: shift)
         case NSPageUpFunctionKey: editor.moveCursor(dx: 0, dy: -25, extendSelection: shift)
         case NSPageDownFunctionKey: editor.moveCursor(dx: 0, dy: 25, extendSelection: shift)
         case NSHomeFunctionKey: editor.moveToLineStart()
@@ -173,6 +279,7 @@ final class EditorCanvasView: NSView {
         case 0x7F, 0x08: editor.backspace()
         case 0x1B: editor.select(nil)
         default:
+            guard !event.modifierFlags.contains(.control) else { return }
             // Typed text (with Option for symbols) uses `characters`, not the unmodified key.
             let text = String((event.characters ?? "").unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7F
                 && !(0xF700...0xF8FF).contains($0.value) }.map(Character.init))
@@ -181,8 +288,20 @@ final class EditorCanvasView: NSView {
         scrollCursorVisible()
     }
 
-    /// Keys while a paste floats: arrows move it (Shift: 8 cells), Return or Enter places it,
-    /// Escape cancels, T toggles transparency; anything else beeps.
+    override func keyUp(with event: NSEvent) {
+        if event.charactersIgnoringModifiers == " ", spaceHeld {
+            spaceHeld = false
+            window?.invalidateCursorRects(for: self)
+            // Pressed and released without a drag: it was typing.
+            if !spacePanned, editor.floating == nil {
+                editor.type(" ")
+                scrollCursorVisible()
+            }
+        }
+    }
+
+    /// Keys while a block floats: arrows move it (Shift: 8 cells; Option-arrows too), Return or
+    /// Enter places it, Escape cancels (a lifted selection goes back), T toggles transparency.
     private func floatingKey(_ value: Int, shift: Bool) {
         let step = shift ? 8 : 1
         switch value {
@@ -207,6 +326,83 @@ final class EditorCanvasView: NSView {
         if editor.floating != nil { editor.cancelFloating() } else { editor.select(nil) }
     }
 
+    // MARK: Zoom and pan
+
+    override func magnify(with event: NSEvent) {
+        magnifyTotal += event.magnification
+        if magnifyTotal > 0.25 { zoomIn(nil); magnifyTotal = 0 }
+        if magnifyTotal < -0.25 { zoomOut(nil); magnifyTotal = 0 }
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        // Control-scroll zooms; plain scrolling pans (the scroll view).
+        if event.modifierFlags.contains(.control) {
+            if event.scrollingDeltaY > 0.5 { zoomIn(nil) } else if event.scrollingDeltaY < -0.5 { zoomOut(nil) }
+            return
+        }
+        super.scrollWheel(with: event)
+    }
+
+    /// Ends a stroke, shape drag or pan in progress (a tool change or lost focus mid-drag), so no
+    /// preview stays on screen and every stroke gets its undo step (review I1).
+    func endInteraction() {
+        if shapeAnchor != nil {
+            shapeAnchor = nil
+            editor.setPreview(nil)
+            controller?.transientHint = nil
+        }
+        if lastPixel != nil || lastCell != nil { editor.endStroke() }
+        lastPixel = nil
+        lastCell = nil
+        dragAnchor = nil
+        floatDrag = nil
+        panStart = nil
+    }
+
+    /// Space held without panning types a space when released (plan 6 typing still works).
+    private var spacePanned = false
+
+    override func resignFirstResponder() -> Bool {
+        spaceHeld = false
+        endInteraction()
+        return super.resignFirstResponder()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
+        if let window {
+            NotificationCenter.default.addObserver(self, selector: #selector(windowResignedKey(_:)),
+                                                   name: NSWindow.didResignKeyNotification, object: window)
+        }
+    }
+
+    @objc private func windowResignedKey(_ note: Notification) {
+        spaceHeld = false
+        window?.invalidateCursorRects(for: self)
+    }
+
+    private func startPan(_ event: NSEvent) {
+        guard let clip = enclosingScrollView?.contentView else { return }
+        spacePanned = true
+        panStart = (event.locationInWindow, clip.bounds.origin)
+        NSCursor.closedHand.set()
+    }
+
+    private func continuePan(_ event: NSEvent) {
+        guard let start = panStart, let scroll = enclosingScrollView else { return }
+        let p = event.locationInWindow
+        var origin = NSPoint(x: start.origin.x - (p.x - start.point.x), y: start.origin.y + (p.y - start.point.y))
+        let maxX = max(0, frame.width - scroll.contentView.bounds.width), maxY = max(0, frame.height - scroll.contentView.bounds.height)
+        origin = NSPoint(x: min(maxX, max(0, origin.x)), y: min(maxY, max(0, origin.y)))
+        scroll.contentView.scroll(to: origin)
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    override func otherMouseDown(with event: NSEvent) { startPan(event) }
+    override func otherMouseDragged(with event: NSEvent) { continuePan(event) }
+    override func otherMouseUp(with event: NSEvent) { panStart = nil }
+
     // MARK: Mouse
 
     /// The cell and half under a point in this view.
@@ -216,7 +412,7 @@ final class EditorCanvasView: NSView {
         let rowPosition = p.y / cellSize.height
         let row = Int(floor(rowPosition))
         let half: HalfBlock = rowPosition - floor(rowPosition) < 0.5 ? .top : .bottom
-        return (min(editor.canvas.columns - 1, max(0, column)), max(0, row), half)
+        return (min(editor.canvas.columns - 1, max(0, column)), min(AnsiTerminal.maxRows - 1, max(0, row)), half)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -225,20 +421,55 @@ final class EditorCanvasView: NSView {
             if let menu = menu(for: event) { NSMenu.popUpContextMenu(menu, with: event, for: self) }
             return
         }
+        if spaceHeld { startPan(event); return }
         let at = location(event)
+        let option = event.modifierFlags.contains(.option)
         if let floating = editor.floating {
+            let block = CellRect(x: floating.x, y: floating.y, width: floating.region.width, height: floating.region.height)
+            // A click outside the block places it; inside, the block follows the mouse.
+            if !block.contains(x: at.x, y: at.y) { editor.stampFloating(); return }
             floatDrag = ((at.x, at.y), (floating.x, floating.y), false)
             return
         }
-        if mode == .select {
+        switch tool {
+        case .select:
+            if let selection = editor.selection, selection.contains(x: at.x, y: at.y) {
+                // Dragging a selection lifts it (Option: a copy) and moves it like a paste (ruling 8).
+                editor.liftSelection(duplicate: option)
+                floatDrag = ((at.x, at.y), (selection.x, selection.y), false)
+                controller?.transientHint = option ? "Moving a copy: release to drop it, then Return or click outside to place, Esc to cancel"
+                    : "Moving: release to drop it, then Return or click outside to place, Esc to put it back"
+                NSCursor.closedHand.set()
+                return
+            }
             dragAnchor = (at.x, at.y)
             editor.setCursor(x: at.x, y: at.y)
-            return
+        case .draw:
+            startStroke(at, background: false)
+        case .line:
+            strokeErases = option
+            editor.setCursor(x: at.x, y: at.y)
+            editor.beginStroke()
+            lastCell = (at.x, at.y)
+        case .box:
+            shapeAnchor = (at.x, at.y)
+            updateShapePreview(to: (at.x, at.y))
+        case .fill:
+            editor.floodFill(x: at.x, y: at.y, matchBy: settings.fillMatch, apply: settings.fillApply)
+        case .text:
+            editor.setCursor(x: at.x, y: at.y)
+        case .brush:
+            strokeUsesBackground = false
+            editor.beginStroke()
+            editor.brush(x: at.x, y: at.y, colourOnly: settings.colourOnlyBrush, useBackground: false)
+            lastCell = (at.x, at.y)
+        case .eyedropper:
+            editor.pickColours(x: at.x, y: at.y, includeCharacter: option)
         }
-        startStroke(at, background: false)
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if panStart != nil { continuePan(event); return }
         let at = location(event)
         if let drag = floatDrag {
             let moved = drag.moved || at.x != drag.start.x || at.y != drag.start.y
@@ -247,49 +478,97 @@ final class EditorCanvasView: NSView {
             autoscroll(with: event)
             return
         }
-        if mode == .select, let anchor = dragAnchor {
-            editor.select(CellRect.spanning(anchor, (at.x, at.y)))
-            autoscroll(with: event)
-            return
+        switch tool {
+        case .select:
+            if let anchor = dragAnchor { editor.select(CellRect.spanning(anchor, (at.x, at.y))) }
+        case .draw:
+            continueStroke(at)
+        case .line:
+            if let last = lastCell, last != (at.x, at.y) {
+                editor.strokeLine(from: last, to: (at.x, at.y), style: settings.lineStyle, erase: strokeErases)
+                lastCell = (at.x, at.y)
+            }
+        case .box:
+            updateShapePreview(to: (at.x, at.y))
+        case .brush:
+            brushLine(to: (at.x, at.y))
+        default:
+            break
         }
-        continueStroke(at)
         autoscroll(with: event)
     }
 
     override func mouseUp(with event: NSEvent) {
+        if panStart != nil { panStart = nil; window?.invalidateCursorRects(for: self); return }
         if let drag = floatDrag {
             floatDrag = nil
+            controller?.transientHint = nil
+            // A click without movement places the block; after a drag it stays lifted to nudge or place.
             if !drag.moved { editor.stampFloating() }
+            window?.invalidateCursorRects(for: self)
             return
         }
-        if mode == .select { dragAnchor = nil; return }
-        editor.endStroke()
-        lastPixel = nil
+        switch tool {
+        case .select: dragAnchor = nil
+        case .draw: editor.endStroke(); lastPixel = nil
+        case .line:
+            editor.endStroke()
+            if let last = lastCell { editor.setCursor(x: last.x, y: last.y) }
+            lastCell = nil
+        case .box:
+            if let anchor = shapeAnchor { commitShape(from: anchor, to: (location(event).x, location(event).y)) }
+            shapeAnchor = nil
+        case .brush: editor.endStroke(); lastCell = nil
+        default: break
+        }
     }
 
-    /// Right button: paints the background colour in Draw mode; opens the context menu in
-    /// Select mode or while a paste floats (Control-click opens it in any mode).
+    /// Right button: paints the background colour in Draw and Brush, erases in Line; opens the
+    /// context menu otherwise or while a block floats (Control-click opens it in any tool).
     override func rightMouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        if mode == .select || editor.floating != nil {
+        let at = location(event)
+        guard editor.floating == nil else {
             if let menu = menu(for: event) { NSMenu.popUpContextMenu(menu, with: event, for: self) }
             return
         }
-        startStroke(location(event), background: true)
+        switch tool {
+        case .draw: startStroke(at, background: true)
+        case .brush:
+            strokeUsesBackground = true
+            editor.beginStroke()
+            editor.brush(x: at.x, y: at.y, colourOnly: settings.colourOnlyBrush, useBackground: true)
+            lastCell = (at.x, at.y)
+        case .line:
+            strokeErases = true
+            editor.beginStroke()
+            lastCell = (at.x, at.y)
+        default:
+            if let menu = menu(for: event) { NSMenu.popUpContextMenu(menu, with: event, for: self) }
+        }
     }
 
     override func rightMouseDragged(with event: NSEvent) {
-        guard lastPixel != nil else { return }
-        continueStroke(location(event))
+        let at = location(event)
+        switch tool {
+        case .draw: if lastPixel != nil { continueStroke(at) }
+        case .brush: brushLine(to: (at.x, at.y))
+        case .line:
+            if let last = lastCell, last != (at.x, at.y) {
+                editor.strokeLine(from: last, to: (at.x, at.y), style: settings.lineStyle, erase: true)
+                lastCell = (at.x, at.y)
+            }
+        default: break
+        }
     }
 
     override func rightMouseUp(with event: NSEvent) {
-        guard lastPixel != nil else { return }
-        editor.endStroke()
+        if lastPixel != nil || lastCell != nil { editor.endStroke() }
         lastPixel = nil
+        lastCell = nil
     }
 
-    /// Cut, Copy, Copy As, Paste (at the clicked cell) and Select All.
+    /// Cut, Copy, Copy As, Paste (at the clicked cell), Select All and the selection commands.
     override func menu(for event: NSEvent) -> NSMenu? {
         let at = location(event)
         contextCell = (at.x, at.y)
@@ -302,6 +581,12 @@ final class EditorCanvasView: NSView {
         menu.addItem(withTitle: "Paste", action: #selector(pasteAtContextCell(_:)), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Select All", action: #selector(selectAll(_:)), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        for (title, action) in [("Move Selection", #selector(liftSelection(_:))), ("Mirror Horizontally", #selector(mirrorHorizontally(_:))),
+                                ("Mirror Vertically", #selector(mirrorVertically(_:))), ("Rotate 180", #selector(rotate180(_:))),
+                                ("Rotate 90 Clockwise", #selector(rotateClockwise(_:))), ("Crop to Selection", #selector(cropToSelection(_:)))] {
+            menu.addItem(withTitle: title, action: action, keyEquivalent: "").target = self
+        }
         return menu
     }
 
@@ -332,6 +617,56 @@ final class EditorCanvasView: NSView {
         editor.paint(x: pixel.0, y: pixel.1 / 2, half: pixel.1 % 2 == 0 ? .top : .bottom, useBackground: strokeUsesBackground)
     }
 
+    /// Brushes every cell on the line from the last brushed one.
+    private func brushLine(to cell: (x: Int, y: Int)) {
+        guard let last = lastCell, last != cell else { return }
+        for (x, y) in EditCanvas.bresenham(from: last, to: cell).dropFirst() {
+            editor.brush(x: x, y: y, colourOnly: settings.colourOnlyBrush, useBackground: strokeUsesBackground)
+        }
+        lastCell = cell
+    }
+
+    // MARK: Shapes
+
+    /// The shape between two cells with the current options, as a change to a canvas.
+    func shapeChange(from a: (x: Int, y: Int), to b: (x: Int, y: Int)) -> (inout EditCanvas) -> Void {
+        let s = settings
+        let style = s.boxStyle.style(brush: editor.brushCharacter)
+        let fg = editor.foregroundColor, bg = editor.backgroundColor
+        let rect = CellRect.spanning((a.x, a.y), (b.x, b.y))
+        let fillCode = s.fillWithBrush ? editor.brushCharacter : 0x20
+        switch s.shape {
+        case .rectangle:
+            return { $0.drawRectangle(rect, style: style, fg: fg, bg: bg, filled: s.filled, fillCode: fillCode, shadow: s.shadow, title: s.title) }
+        case .line:
+            return { $0.drawStraightLine(from: (a.x, a.y), to: (b.x, b.y), style: style, fg: fg, bg: bg) }
+        case .ellipse:
+            return { $0.drawEllipse(in: rect, color: fg) }
+        }
+    }
+
+    private func updateShapePreview(to cell: (x: Int, y: Int)) {
+        guard let anchor = shapeAnchor else { return }
+        editor.setPreview(shapeChange(from: anchor, to: cell))
+        let rect = CellRect.spanning((anchor.x, anchor.y), (cell.x, cell.y))
+        controller?.transientHint = "\(settings.shape.title) \(rect.width) x \(rect.height): release to draw"
+    }
+
+    func commitShape(from a: (x: Int, y: Int), to b: (x: Int, y: Int)) {
+        editor.setPreview(nil)
+        controller?.transientHint = nil
+        let s = settings
+        let style = s.boxStyle.style(brush: editor.brushCharacter)
+        let rect = CellRect.spanning((a.x, a.y), (b.x, b.y))
+        switch s.shape {
+        case .rectangle:
+            editor.drawRectangle(rect, style: style, filled: s.filled, fillCode: s.fillWithBrush ? editor.brushCharacter : 0x20,
+                                 shadow: s.shadow, title: s.title)
+        case .line: editor.drawStraightLine(from: (a.x, a.y), to: (b.x, b.y), style: style)
+        case .ellipse: editor.drawEllipse(in: rect)
+        }
+    }
+
     // MARK: Edit menu
 
     /// The selection as clipboard data, drawn with the canvas's font as the editor shows it.
@@ -360,7 +695,7 @@ final class EditorCanvasView: NSView {
         _ = editor.cut()
     }
 
-    /// Floats the pasteboard's cells, text or picture at the cursor (ruling 5).
+    /// Floats the pasteboard's cells, text or picture at the cursor (copy and paste ruling 5).
     @objc func paste(_ sender: Any?) { paste(at: nil) }
 
     /// The context menu's Paste: floats at the cell that was clicked.
@@ -381,8 +716,7 @@ final class EditorCanvasView: NSView {
         scrollFloatingVisible()
     }
 
-    /// A picture becomes block art with the last Import Image options (ruling 7): as wide as the
-    /// selection (and floated at its corner), else the image's pixel width up to the canvas width.
+    /// A picture becomes block art with the last Import Image options (copy and paste ruling 7).
     private func pasteImage(_ image: CGImage, at cell: (x: Int, y: Int)?) {
         let selection = editor.selection
         var options = ImageImportSettings.preset.options(base: ImageImportSettings.options,
@@ -402,29 +736,82 @@ final class EditorCanvasView: NSView {
     @objc override func selectAll(_ sender: Any?) { editor.selectAll() }
     @objc func delete(_ sender: Any?) { editor.deleteForward() }
 
-    // MARK: Art menu (forwarded to the controller)
+    // MARK: Art and Tools menus (forwarded to the editor or the controller)
 
     /// File > Save and Save As (the standard items send these through the responder chain).
     @objc func saveDocument(_ sender: Any?) { controller?.windowController?.save() }
     @objc func saveDocumentAs(_ sender: Any?) { controller?.windowController?.saveAs() }
+    @objc func saveProject(_ sender: Any?) { controller?.windowController?.saveProject() }
     @objc func fillWithCharacter(_ sender: Any?) { editor.fillWithCharacter() }
     @objc func fillWithColour(_ sender: Any?) { editor.fillWithColour() }
     @objc func toggleIceColors(_ sender: Any?) { controller?.setIce(!editor.canvas.iceColors) }
     @objc func canvasSize(_ sender: Any?) { controller?.showCanvasSize() }
     @objc func editSauce(_ sender: Any?) { controller?.showSauce() }
-    @objc func zoomIn(_ sender: Any?) { zoom = min(6, zoom + 1) }
-    @objc func zoomOut(_ sender: Any?) { zoom = max(1, zoom - 1) }
+    @objc func zoomIn(_ sender: Any?) { zoom = min(8, zoom + 1); controller?.editorChanged() }
+    @objc func zoomOut(_ sender: Any?) { zoom = max(1, zoom - 1); controller?.editorChanged() }
+
+    @objc func chooseDrawTool(_ sender: Any?) { controller?.setTool(.draw) }
+    @objc func chooseSelectTool(_ sender: Any?) { controller?.setTool(.select) }
+    @objc func chooseLineTool(_ sender: Any?) { controller?.setTool(.line) }
+    @objc func chooseBoxTool(_ sender: Any?) { controller?.setTool(.box) }
+    @objc func chooseFillTool(_ sender: Any?) { controller?.setTool(.fill) }
+    @objc func chooseTextTool(_ sender: Any?) { controller?.setTool(.text) }
+    @objc func chooseBrushTool(_ sender: Any?) { controller?.setTool(.brush) }
+    @objc func chooseEyedropperTool(_ sender: Any?) { controller?.setTool(.eyedropper) }
+    @objc func showCharacterPicker(_ sender: Any?) { controller?.run(.characterPicker) }
+    @objc func swapColours(_ sender: Any?) { controller?.run(.swapColours) }
+    @objc func toggleInsertMode(_ sender: Any?) { controller?.run(.toggleInsert) }
+    @objc func insertLine(_ sender: Any?) { controller?.run(.insertLine) }
+    @objc func deleteLine(_ sender: Any?) { controller?.run(.deleteLine) }
+    @objc func insertColumn(_ sender: Any?) { controller?.run(.insertColumn) }
+    @objc func deleteColumn(_ sender: Any?) { controller?.run(.deleteColumn) }
+    @objc func liftSelection(_ sender: Any?) { controller?.run(.liftSelection) }
+    @objc func mirrorHorizontally(_ sender: Any?) { controller?.run(.mirrorHorizontal) }
+    @objc func mirrorVertically(_ sender: Any?) { controller?.run(.mirrorVertical) }
+    @objc func rotate180(_ sender: Any?) { controller?.run(.rotate180) }
+    @objc func rotateClockwise(_ sender: Any?) { controller?.run(.rotateClockwise) }
+    @objc func cropToSelection(_ sender: Any?) { editor.cropToSelection() }
+    @objc func swapSelectionColours(_ sender: Any?) { editor.swapSelectionColours() }
+    @objc func showReplace(_ sender: Any?) { controller?.showReplace() }
+    @objc func addLayer(_ sender: Any?) { editor.addLayer() }
+    @objc func mergeLayerDown(_ sender: Any?) { editor.mergeDown() }
+    @objc func flattenLayers(_ sender: Any?) { editor.flatten() }
+    @objc func toggleGrid(_ sender: Any?) { controller?.run(.toggleGrid) }
+    @objc func toggleRetroTheme(_ sender: Any?) { controller?.toggleTheme() }
 
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        let floating = editor.floating != nil
         switch item.action {
         case #selector(copy(_:)), #selector(cut(_:)), #selector(copyAsText(_:)), #selector(copyAsANSI(_:)),
              #selector(copyAsImage(_:)):
-            return editor.selection != nil && editor.floating == nil
+            return editor.selection != nil && !floating
         case #selector(paste(_:)), #selector(pasteAtContextCell(_:)): return ArtPasteboard.canPaste(pasteboard)
-        // A floating paste is placed or cancelled before anything else changes the canvas.
+        case #selector(liftSelection(_:)), #selector(cropToSelection(_:)), #selector(swapSelectionColours(_:)):
+            return editor.selection != nil && !floating
+        case #selector(mirrorHorizontally(_:)): return editor.canTransformSelection(.mirrorHorizontal)
+        case #selector(mirrorVertically(_:)): return editor.canTransformSelection(.mirrorVertical)
+        case #selector(rotate180(_:)): return editor.canTransformSelection(.rotate180)
+        case #selector(rotateClockwise(_:)): return editor.canTransformSelection(.rotateClockwise)
+        case #selector(mergeLayerDown(_:)): return editor.activeLayer > 0 && !floating
+        case #selector(flattenLayers(_:)): return editor.layers.count > 1 && !floating
+        case #selector(toggleInsertMode(_:)): item.state = editor.insertMode ? .on : .off; return true
+        case #selector(toggleGrid(_:)): item.state = showGrid ? .on : .off; return true
+        case #selector(toggleRetroTheme(_:)): item.state = EditorTheme.current == .retro ? .on : .off; return true
+        case #selector(chooseDrawTool(_:)), #selector(chooseSelectTool(_:)), #selector(chooseLineTool(_:)),
+             #selector(chooseBoxTool(_:)), #selector(chooseFillTool(_:)), #selector(chooseTextTool(_:)),
+             #selector(chooseBrushTool(_:)), #selector(chooseEyedropperTool(_:)):
+            let tools: [Selector: EditorTool] = [#selector(chooseDrawTool(_:)): .draw, #selector(chooseSelectTool(_:)): .select,
+                                                 #selector(chooseLineTool(_:)): .line, #selector(chooseBoxTool(_:)): .box,
+                                                 #selector(chooseFillTool(_:)): .fill, #selector(chooseTextTool(_:)): .text,
+                                                 #selector(chooseBrushTool(_:)): .brush, #selector(chooseEyedropperTool(_:)): .eyedropper]
+            item.state = tools[item.action!] == tool ? .on : .off
+            return true
+        // A floating block is placed or cancelled before anything else changes the canvas.
         case #selector(delete(_:)), #selector(fillWithCharacter(_:)), #selector(fillWithColour(_:)),
-             #selector(toggleIceColors(_:)), #selector(canvasSize(_:)), #selector(editSauce(_:)):
-            if editor.floating != nil { return false }
+             #selector(toggleIceColors(_:)), #selector(canvasSize(_:)), #selector(editSauce(_:)),
+             #selector(insertLine(_:)), #selector(deleteLine(_:)), #selector(insertColumn(_:)), #selector(deleteColumn(_:)),
+             #selector(showReplace(_:)), #selector(addLayer(_:)), #selector(saveProject(_:)):
+            if floating { return false }
             if item.action == #selector(toggleIceColors(_:)) { item.state = editor.canvas.iceColors ? .on : .off }
             return true
         default: return true
@@ -478,7 +865,9 @@ final class ColourSwatch: NSView {
     override func rightMouseDown(with event: NSEvent) { onPick?(index, true) }
 }
 
-/// The editor: palette bar, canvas in a scroll view, status line.
+
+/// The editor: palette bar and tool options on top, tools on the left, the canvas, layers on
+/// the right, and a status bar with the position and a hint for whatever is under the mouse.
 final class EditorViewController: NSViewController {
     let editor: CanvasEditor
     let canvasView: EditorCanvasView
@@ -490,12 +879,38 @@ final class EditorViewController: NSViewController {
     private var swatches: [ColourSwatch] = []
     private var blockButtons: [NSButton] = []
     private let setPopup = NSPopUpButton()
-    private let modeControl = NSSegmentedControl(labels: ["Draw", "Select"], trackingMode: .selectOne, target: nil, action: nil)
+    let palette = ToolPaletteView()
+    let optionsBar = ToolOptionsBar()
+    private(set) lazy var layersPanel = LayersPanelView(editor: editor)
     private let iceBox = NSButton(checkboxWithTitle: "iCE colours", target: nil, action: nil)
     private let transparentBox = NSButton(checkboxWithTitle: "Transparent paste", target: nil, action: nil)
     private let status = NSTextField(labelWithString: "")
+    private let hintLabel = NSTextField(labelWithString: "")
     private let preview = NSTextField(labelWithString: " Aa ")
+    private let insertLabel = NSTextField(labelWithString: "OVR")
     private var lastBlockSet = -1
+    private let hints = HintTracker()
+    private var root = NSView()
+    private var chrome: [NSView] = []
+    private var shortcutObserver: NSObjectProtocol?
+    private var loadedCharacterPanel: CharacterPickerPanel?
+    var characterPanel: CharacterPickerPanel {
+        if let loadedCharacterPanel { return loadedCharacterPanel }
+        let panel = CharacterPickerPanel()
+        panel.picker.onChoose = { [weak self] code in
+            self?.editor.brushCharacter = code
+            self?.view.window?.makeFirstResponder(self?.canvasView)
+        }
+        loadedCharacterPanel = panel
+        return panel
+    }
+
+    /// The editor window is closing: its floating panel goes too (review M8).
+    func closePanels() { loadedCharacterPanel?.orderOut(nil) }
+
+    /// The hint under the mouse (a control's tooltip), and one for a drag in progress.
+    var hoverHint: String? { didSet { updateHint() } }
+    var transientHint: String? { didSet { updateHint() } }
 
     init(editor: CanvasEditor, name: String) {
         self.editor = editor
@@ -506,10 +921,15 @@ final class EditorViewController: NSViewController {
         editor.onChange = { [weak self] in self?.editorChanged() }
     }
 
+    deinit {
+        if let shortcutObserver { NotificationCenter.default.removeObserver(shortcutObserver) }
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     var statusText: String { status.stringValue }
+    var hintText: String { hintLabel.stringValue }
 
     override func loadView() {
         let scroll = NSScrollView()
@@ -520,10 +940,7 @@ final class EditorViewController: NSViewController {
         scroll.backgroundColor = NSColor(white: 0.12, alpha: 1)
         scroll.drawsBackground = true
 
-        modeControl.selectedSegment = 0
-        modeControl.target = self
-        modeControl.action = #selector(modeChanged(_:))
-        modeControl.toolTip = "Draw: left button paints foreground half blocks, right button background. Select: drag a rectangle."
+        palette.onPick = { [weak self] tool in self?.setTool(tool) }
         setPopup.addItems(withTitles: (1...10).map { "Set \($0)" })
         setPopup.target = self
         setPopup.action = #selector(setChanged(_:))
@@ -535,7 +952,7 @@ final class EditorViewController: NSViewController {
             button.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
             blockButtons.append(button)
         }
-        let topRow = NSStackView(views: [modeControl, setPopup] + blockButtons)
+        let topRow = NSStackView(views: [setPopup] + blockButtons)
         topRow.spacing = 4
 
         for index in 0..<16 {
@@ -550,43 +967,73 @@ final class EditorViewController: NSViewController {
         iceBox.toolTip = "iCE colours: bright backgrounds instead of blinking text"
         preview.font = NSFont(name: "Menlo-Bold", size: 15)
         preview.drawsBackground = true
-        preview.toolTip = "Current foreground on background"
+        preview.toolTip = "Current colours: foreground on background (\(ShortcutStore.shared.shortcuts.combo(for: .swapColours).display) swaps them)"
         let colourLabel = NSTextField(labelWithString: "Colours:")
+        colourLabel.toolTip = "Click a colour for the foreground; Option-click or right-click for the background"
         transparentBox.target = self
         transparentBox.action = #selector(transparentChanged(_:))
-        transparentBox.toolTip = "Spaces in a pasted block leave the art underneath (T while pasting)"
-        let bottomRow = NSStackView(views: [colourLabel] + swatches + [preview, iceBox, transparentBox])
+        transparentBox.toolTip = "Spaces in a pasted or moved block leave the art underneath (T while it floats)"
+        insertLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+        insertLabel.toolTip = "Overwrite (OVR) replaces characters; insert (INS) shifts the row right (\(ShortcutStore.shared.shortcuts.combo(for: .toggleInsert).display) switches)"
+        let bottomRow = NSStackView(views: [colourLabel] + swatches + [preview, iceBox, transparentBox, insertLabel])
         bottomRow.spacing = 2
         bottomRow.setCustomSpacing(10, after: swatches.last!)
         bottomRow.setCustomSpacing(12, after: preview)
+        bottomRow.setCustomSpacing(12, after: transparentBox)
+        optionsBar.onChange = { [weak self] in self?.optionsChanged() }
+        optionsBar.onPickCharacter = { [weak self] in self?.run(.characterPicker) }
 
         status.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         status.textColor = .secondaryLabelColor
+        status.toolTip = "Cursor column and row, canvas size, insert mode, layer, character set and font"
+        hintLabel.font = NSFont.systemFont(ofSize: 11)
+        hintLabel.textColor = .secondaryLabelColor
+        hintLabel.lineBreakMode = .byTruncatingTail
 
-        let bar = NSStackView(views: [topRow, bottomRow])
+        let bar = NSStackView(views: [topRow, bottomRow, optionsBar])
         bar.orientation = .vertical
         bar.alignment = .leading
         bar.spacing = 6
-        bar.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 6, right: 10)
+        bar.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 2, right: 10)
 
         let root = NSView()
-        for sub in [bar, scroll, status] as [NSView] {
+        self.root = root
+        for sub in [bar, palette, scroll, layersPanel, status, hintLabel] as [NSView] {
             sub.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(sub)
         }
+        chrome = [bar, palette, layersPanel]
         NSLayoutConstraint.activate([
             bar.topAnchor.constraint(equalTo: root.topAnchor),
             bar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             bar.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor),
+            palette.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            palette.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.topAnchor.constraint(equalTo: bar.bottomAnchor),
-            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scroll.leadingAnchor.constraint(equalTo: palette.trailingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: layersPanel.leadingAnchor),
+            layersPanel.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            layersPanel.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            layersPanel.widthAnchor.constraint(equalToConstant: 190),
             status.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 4),
             status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 10),
             status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -5),
+            hintLabel.centerYAnchor.constraint(equalTo: status.centerYAnchor),
+            hintLabel.leadingAnchor.constraint(equalTo: status.trailingAnchor, constant: 16),
+            hintLabel.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -10),
         ])
+        status.setContentCompressionResistancePriority(.required, for: .horizontal)
+        hintLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view = root
+        layersPanel.onRename = { [weak self] index in self?.renameLayer(index) }
+        hints.show = { [weak self] text in self?.hoverHint = text }
+        shortcutObserver = NotificationCenter.default.addObserver(forName: ShortcutStore.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.palette.refreshTooltips()
+        }
+        setTool(.draw)
+        applyTheme()
         editorChanged()
+        hints.track(root)
     }
 
     override func viewDidAppear() {
@@ -594,21 +1041,70 @@ final class EditorViewController: NSViewController {
         view.window?.makeFirstResponder(canvasView)
     }
 
+    // MARK: Tools
+
+    func setTool(_ tool: EditorTool) {
+        canvasView.endInteraction()
+        if editor.floating != nil, tool != canvasView.tool { editor.stampFloating() }
+        canvasView.tool = tool
+        toolChanged()
+        view.window?.makeFirstResponder(canvasView)
+    }
+
+    /// Plan 6's name.
+    func setMode(_ mode: EditorMode) { setTool(mode) }
+
+    func toolChanged() {
+        palette.select(canvasView.tool)
+        optionsBar.show(for: canvasView.tool, brush: editor.brushCharacter)
+        updateHint()
+    }
+
+    private func optionsChanged() {
+        editor.leaveCopyWhenMoving = optionsBar.settings.leaveCopy
+        optionsBar.show(for: canvasView.tool, brush: editor.brushCharacter)
+        view.window?.makeFirstResponder(canvasView)
+    }
+
+    /// Runs a keyboard action (ruling 13).
+    func run(_ action: EditorAction) {
+        switch action {
+        case .toolDraw: setTool(.draw)
+        case .toolSelect: setTool(.select)
+        case .toolLine: setTool(.line)
+        case .toolBox: setTool(.box)
+        case .toolFill: setTool(.fill)
+        case .toolText: setTool(.text)
+        case .toolBrush: setTool(.brush)
+        case .toolEyedropper: setTool(.eyedropper)
+        case .swapColours: editor.swapDrawingColours()
+        case .toggleInsert: editor.insertMode.toggle()
+        case .insertLine: editor.insertLine()
+        case .deleteLine: editor.deleteLine()
+        case .insertColumn: editor.insertColumn()
+        case .deleteColumn: editor.deleteColumn()
+        case .liftSelection: if !editor.liftSelection() { NSSound.beep() }
+        case .mirrorHorizontal: if !editor.transformSelection(.mirrorHorizontal) { NSSound.beep() }
+        case .mirrorVertical: if !editor.transformSelection(.mirrorVertical) { NSSound.beep() }
+        case .rotate180: if !editor.transformSelection(.rotate180) { NSSound.beep() }
+        case .rotateClockwise: if !editor.transformSelection(.rotateClockwise) { NSSound.beep() }
+        case .characterPicker:
+            characterPanel.picker.selected = editor.brushCharacter
+            if characterPanel.isVisible { characterPanel.orderOut(nil) } else { characterPanel.orderFront(nil) }
+        case .nextLineStyle:
+            let all = LineStyle.allCases
+            optionsBar.setLineStyle(all[((all.firstIndex(of: optionsBar.settings.lineStyle) ?? 0) + 1) % all.count])
+            transientHint = "Line style: \(optionsBar.settings.lineStyle.label)"
+        case .toggleGrid: canvasView.showGrid.toggle()
+        }
+        editorChanged()
+    }
+
     // MARK: Controls
 
     func chooseForeground(_ index: Int) { editor.setForeground(index) }
     func chooseBackground(_ index: Int) { editor.setBackground(index) }
     func setIce(_ on: Bool) { editor.setIceColors(on) }
-
-    func setMode(_ mode: EditorMode) {
-        canvasView.mode = mode
-        modeControl.selectedSegment = mode.rawValue
-    }
-
-    @objc private func modeChanged(_ sender: NSSegmentedControl) {
-        setMode(EditorMode(rawValue: sender.selectedSegment) ?? .draw)
-        view.window?.makeFirstResponder(canvasView)
-    }
 
     @objc private func setChanged(_ sender: NSPopUpButton) {
         editor.blockSet = sender.indexOfSelectedItem
@@ -630,7 +1126,7 @@ final class EditorViewController: NSViewController {
         view.window?.makeFirstResponder(canvasView)
     }
 
-    private func editorChanged() {
+    func editorChanged() {
         canvasView.refresh()
         guard isViewLoaded else { return }
         if lastBlockSet != editor.blockSet {
@@ -639,8 +1135,9 @@ final class EditorViewController: NSViewController {
             for (index, button) in blockButtons.enumerated() {
                 let code = CanvasEditor.blockSets[editor.blockSet][index]
                 button.title = "F\(index + 1) \(Character(CP437.unicode[Int(code)]))"
-                button.toolTip = "F\(index + 1): type CP437 \(code)"
+                button.toolTip = "F\(index + 1): type \(CharacterInfo(code: code).summary)"
             }
+            hints.track(root)
         }
         for swatch in swatches {
             swatch.isForeground = swatch.index == editor.foreground
@@ -652,16 +1149,64 @@ final class EditorViewController: NSViewController {
         preview.backgroundColor = color(editor.backgroundColor)
         iceBox.state = editor.canvas.iceColors ? .on : .off
         transparentBox.state = editor.transparentPaste ? .on : .off
+        insertLabel.stringValue = editor.insertMode ? "INS" : "OVR"
+        optionsBar.show(for: canvasView.tool, brush: editor.brushCharacter)
+        let layers = editor.layers
         var text = "\(editor.cursor.x + 1), \(editor.cursor.y + 1)  |  \(editor.canvas.columns) x \(editor.canvas.height)"
         if let s = editor.selection { text += "  |  selection \(s.width) x \(s.height)" }
-        text += "  |  set \(editor.blockSet + 1)  |  \(editor.canvas.fontName)"
+        text += "  |  \(editor.insertMode ? "INS" : "OVR")"
+        text += "  |  layer \(editor.activeLayer + 1)/\(layers.count) \(layers[editor.activeLayer].name)"
+        text += "  |  set \(editor.blockSet + 1)  |  zoom \(Int(canvasView.zoom))x  |  \(editor.canvas.fontName)"
         if let floating = editor.floating {
-            text = "Pasting \(floating.region.width) x \(floating.region.height) at \(floating.x + 1), \(floating.y + 1)"
+            let verb = floating.liftedFrom == nil ? "Pasting" : (floating.leavesCopy ? "Moving a copy" : "Moving")
+            text = "\(verb) \(floating.region.width) x \(floating.region.height) at \(floating.x + 1), \(floating.y + 1)"
                 + (editor.transparentPaste ? " (transparent)" : "")
-                + "  |  arrows or drag to move, Return or click to place, Esc to cancel, T for transparent"
         }
         status.stringValue = text
+        layersPanel.refresh()
+        hints.track(layersPanel)
+        updateHint()
         onChange?()
+    }
+
+    /// The hint line: a drag in progress, else the control under the mouse, else the floating
+    /// block's keys, else the current tool's hint.
+    private func updateHint() {
+        guard isViewLoaded else { return }
+        if let transientHint { hintLabel.stringValue = transientHint; return }
+        if let hoverHint { hintLabel.stringValue = hoverHint; return }
+        if let floating = editor.floating {
+            hintLabel.stringValue = floating.liftedFrom == nil
+                ? "Arrows or drag to move, Return or click outside to place, Esc to cancel, T for transparent"
+                : "Arrows or drag to move, Return or click outside to place, Esc puts it back, T for transparent"
+            return
+        }
+        hintLabel.stringValue = canvasView.tool.tooltip(ShortcutStore.shared.shortcuts)
+    }
+
+    // MARK: Theme (ruling 14)
+
+    func toggleTheme() {
+        EditorTheme.current = EditorTheme.current == .retro ? .native : .retro
+        applyTheme()
+    }
+
+    func applyTheme() {
+        guard isViewLoaded else { return }
+        let retro = EditorTheme.current == .retro
+        root.wantsLayer = true
+        root.layer?.backgroundColor = retro ? EditorTheme.dosBlue.cgColor : nil
+        root.appearance = retro ? NSAppearance(named: .darkAqua) : nil
+        status.textColor = retro ? EditorTheme.dosYellow : .secondaryLabelColor
+        hintLabel.textColor = retro ? .white : .secondaryLabelColor
+        let font = retro ? NSFont.monospacedSystemFont(ofSize: 11, weight: .bold) : NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        status.font = font
+        hintLabel.font = retro ? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular) : NSFont.systemFont(ofSize: 11)
+        insertLabel.textColor = retro ? EditorTheme.dosCyan : .labelColor
+        for view in chrome {
+            view.wantsLayer = true
+            view.layer?.backgroundColor = retro ? EditorTheme.dosBlue.cgColor : nil
+        }
     }
 
     // MARK: Sheets
@@ -680,6 +1225,38 @@ final class EditorViewController: NSViewController {
         sheet.onDone = { [weak self] title, author, group in self?.editor.setMetadata(title: title, author: author, group: group) }
         sheet.present(on: window)
     }
+
+    func renameLayer(_ index: Int) {
+        guard let window = view.window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Rename Layer"
+        let field = NSTextField(string: editor.layers[index].name)
+        field.frame = NSRect(x: 0, y: 0, width: 220, height: 24)
+        field.toolTip = "The layer's name (kept in the project file)"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            if response == .alertFirstButtonReturn { self?.editor.renameLayer(index, to: field.stringValue) }
+        }
+    }
+
+    func showReplace() {
+        guard let window = view.window else { return }
+        let alert = NSAlert()
+        alert.messageText = editor.selection == nil ? "Replace in the whole canvas" : "Replace in the selection"
+        alert.informativeText = "Cells that match every part you set are changed; parts left empty or set to Any / Keep are ignored."
+        let options = ReplaceOptionsView()
+        alert.accessoryView = options
+        alert.addButton(withTitle: "Replace")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self else { return }
+            let count = self.editor.replace(matching: options.find, with: options.replacement)
+            self.transientHint = "Replaced \(count) \(count == 1 ? "cell" : "cells")"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.transientHint = nil }
+        }
+    }
 }
 
 /// One editor window. The first Save asks where (and in which format); later saves go there.
@@ -690,12 +1267,72 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private(set) var format: SaveFormat
     private let name: String
 
+    /// Where Save Project writes (chosen on the first Save Project, or the project that was opened).
+    private(set) var projectURL: URL?
+
     @discardableResult
     static func open(canvas: EditCanvas, name: String, suggestedFormat: SaveFormat = .ansi) -> EditorWindowController {
-        let controller = EditorWindowController(canvas: canvas, name: name, format: suggestedFormat)
+        open(editor: CanvasEditor(canvas: canvas), name: name, format: suggestedFormat)
+    }
+
+    @discardableResult
+    static func open(editor: CanvasEditor, name: String, format: SaveFormat = .ansi) -> EditorWindowController {
+        let controller = EditorWindowController(editor: editor, name: name, format: format)
         open.insert(controller)
         controller.showWindow(nil)
         return controller
+    }
+
+    static let projectType = UTType(filenameExtension: ArtProject.fileExtension, conformingTo: .json) ?? .json
+
+    /// Tools > Open Project...: a layered `.ansiproj` file (ruling 11).
+    static func openProject() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [projectType]
+        panel.message = "Choose an AnsiView project (.ansiproj) to edit with its layers."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let project = try ArtProject(data: try Data(contentsOf: url))
+            let controller = open(editor: CanvasEditor(project: project), name: url.deletingPathExtension().lastPathComponent)
+            controller.projectURL = url
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    /// Tools > Save Project...: keeps the layers. The art files themselves always flatten.
+    @discardableResult
+    func saveProject() -> Bool {
+        guard refuseWhileFloating() else { return false }
+        var url = projectURL
+        if url == nil {
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [Self.projectType]
+            panel.nameFieldStringValue = "\(fileURL?.deletingPathExtension().lastPathComponent ?? name).\(ArtProject.fileExtension)"
+            panel.message = "Saves every layer. ANSI, BinaryText and XBin saves write the visible layers flattened."
+            guard panel.runModal() == .OK else { return false }
+            url = panel.url
+        }
+        guard let url else { return false }
+        do {
+            try editor.project.data().write(to: url, options: .atomic)
+            projectURL = url
+            editor.markSaved()
+            return true
+        } catch {
+            NSAlert(error: error).runModal()
+            return false
+        }
+    }
+
+    /// Tells the user what an opened file carries that the editor cannot keep (ruling 12).
+    func showOpenReport(_ notes: [String]) {
+        guard !notes.isEmpty, let window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Some parts of this file cannot be kept"
+        alert.informativeText = notes.map { "\u{2022} " + $0 }.joined(separator: "\n")
+            + "\n\nEverything else (SAUCE title, author, group, comments, font, flags and date) is kept."
+        alert.beginSheetModal(for: window)
     }
 
     enum UnsavedDecision { case save, discard, cancel }
@@ -743,8 +1380,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         let base = player.fileURL.map { $0.deletingPathExtension().lastPathComponent } ?? player.artName ?? "Art"
-        open(canvas: EditCanvas(file: player.source), name: "\(base) (edited)",
-             suggestedFormat: SaveFormat.suggested(for: player.source.format))
+        let controller = open(canvas: EditCanvas(file: player.source), name: "\(base) (edited)",
+                              suggestedFormat: SaveFormat.suggested(for: player.source.format))
+        if let url = player.fileURL, let data = try? Data(contentsOf: url) {
+            controller.showOpenReport(SaucePreservation.openReport(data: data, fileExtension: url.pathExtension))
+        }
     }
 
     /// File > Import Image...: the import window with a live preview (App/ImageImport.swift).
@@ -765,16 +1405,18 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         return nil
     }
 
-    private init(canvas: EditCanvas, name: String, format: SaveFormat) {
+    private init(editor: CanvasEditor, name: String, format: SaveFormat) {
         self.name = name
         self.format = format
-        editorController = EditorViewController(editor: CanvasEditor(canvas: canvas), name: name)
+        editorController = EditorViewController(editor: editor, name: name)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1340, height: 900),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.minSize = NSSize(width: 640, height: 360)
         window.title = name
         window.tabbingMode = .disallowed
+        // Full screen editing (the green button, View > Enter Full Screen, Tools > Full Screen Editing).
+        window.collectionBehavior.insert(.fullScreenPrimary)
         super.init(window: window)
         window.delegate = self
         window.contentViewController = editorController
@@ -811,6 +1453,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        editorController.closePanels()
         Self.open.remove(self)
     }
 
@@ -823,7 +1466,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     @discardableResult
     func saveAs() -> Bool {
-        guard let window else { return false }
+        guard let window, refuseWhileFloating() else { return false }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "\(fileURL?.deletingPathExtension().lastPathComponent ?? name).\(format.fileExtension)"
         panel.allowedContentTypes = [Self.contentType(format)]
@@ -853,9 +1496,36 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         return true
     }
 
+    /// Plain art files hold the visible layers flattened (ruling 10); anything the format cannot
+    /// hold is reported first and the user may cancel (ruling 12).
+    /// A floating block is not part of the art until placed: saving asks for it to be placed or
+    /// cancelled first (review I3). True when nothing floats.
+    private func refuseWhileFloating() -> Bool {
+        guard editor.floating != nil else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Place or cancel the floating block first"
+        alert.informativeText = "Press Return to place it, or Escape to cancel, then save again."
+        alert.runModal()
+        return false
+    }
+
     private func write(to url: URL, format: SaveFormat) -> Bool {
+        guard refuseWhileFloating() else { return false }
+        let flat = editor.flattenedCanvas
+        var notes = SaucePreservation.saveReport(flat, format: format)
+        if editor.layers.count > 1 {
+            notes.append("The \(editor.layers.count) layers are saved flattened (hidden layers left out); Tools > Save Project keeps them.")
+        }
+        if !notes.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "Saving as \(format.label) changes some things"
+            alert.informativeText = notes.map { "\u{2022} " + $0 }.joined(separator: "\n")
+            alert.addButton(withTitle: "Save")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        }
         do {
-            try ArtWriter.data(editor.canvas, format: format).write(to: url, options: .atomic)
+            try ArtWriter.data(flat, format: format).write(to: url, options: .atomic)
             editor.markSaved()
             return true
         } catch {

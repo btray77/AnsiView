@@ -52,7 +52,7 @@ public enum ArtWriter {
             body = ansiBody(canvas)
             sauce.dataType = 1
             sauce.fileType = 1
-            sauce.tInfo = [UInt16(canvas.columns), UInt16(canvas.screen(trimmed: true).rows.count), 0, 0]
+            sauce.tInfo = [UInt16(canvas.columns), UInt16(canvas.screen(trimmed: true).rows.count)] + canvas.sauceTInfo34.prefix(2)
         case .bin:
             let width = canvas.columns + canvas.columns % 2
             guard width <= 510 else { throw WriteError.tooWideForBinaryText(columns: canvas.columns) }
@@ -71,7 +71,7 @@ public enum ArtWriter {
             body = header + pairs(canvas, columns: canvas.columns, palette: palette)
             sauce.dataType = 6
             sauce.fileType = 0
-            sauce.tInfo = [UInt16(canvas.columns), UInt16(canvas.height), 0, 0]
+            sauce.tInfo = [UInt16(canvas.columns), UInt16(canvas.height)] + canvas.sauceTInfo34.prefix(2)
         }
         return Data(body + sauce.encoded(fileSize: body.count))
     }
@@ -100,7 +100,7 @@ public enum ArtWriter {
     private static func baseSauce(_ canvas: EditCanvas, date: Date) -> Sauce {
         let parts = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: date)
         return Sauce(title: canvas.title, author: canvas.author, group: canvas.group,
-                     date: DateComponents(year: parts.year, month: parts.month, day: parts.day),
+                     date: canvas.sauceDate ?? DateComponents(year: parts.year, month: parts.month, day: parts.day),
                      dataType: 1, fileType: 1, tInfo: [0, 0, 0, 0],
                      flags: (canvas.sauceFlags & ~0x01) | (canvas.iceColors ? 0x01 : 0),
                      fontName: canvas.fontName, comments: canvas.comments)

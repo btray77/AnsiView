@@ -66,8 +66,8 @@ public struct EditCanvas: Equatable {
     public static let blockUpper: UInt8 = 223
     public static let blockLower: UInt8 = 220
 
-    public private(set) var columns: Int
-    public private(set) var rows: [[AnsiCell]]
+    public internal(set) var columns: Int
+    public internal(set) var rows: [[AnsiCell]]
     /// The blink bit selects bright backgrounds instead of blinking.
     public private(set) var iceColors = false
     public var title = ""
@@ -81,6 +81,10 @@ public struct EditCanvas: Equatable {
     /// A 16 colour palette other than VGA (an image import's fitted palette). XBin saves it;
     /// ANSI writes those colours as truecolor.
     public var palette: [RGB]?
+    /// SAUCE TInfo3 and TInfo4 of an opened file, written back by ANSI and XBin saves.
+    public var sauceTInfo34: [UInt16] = [0, 0]
+    /// The SAUCE creation date of an opened file, kept on save (new art is dated when saved).
+    public var sauceDate: DateComponents?
 
     public var height: Int { rows.count }
     public var font: BitmapFont { BitmapFont.named(fontName) }
@@ -110,6 +114,8 @@ public struct EditCanvas: Equatable {
             comments = sauce.comments
             if !sauce.fontName.isEmpty { fontName = sauce.fontName }
             sauceFlags = sauce.flags & ~0x01
+            sauceTInfo34 = [sauce.tInfo.count > 2 ? sauce.tInfo[2] : 0, sauce.tInfo.count > 3 ? sauce.tInfo[3] : 0]
+            sauceDate = sauce.date
         } else if let screenTitle = screen.title {
             title = screenTitle
         }

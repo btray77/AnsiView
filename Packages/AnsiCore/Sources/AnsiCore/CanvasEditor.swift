@@ -20,32 +20,35 @@ public final class CanvasEditor {
     /// Pasteboard type for copied cells (lossless: characters, exact colours and blink).
     public static let cellsPasteboardType = "com.traynham.ansiview.cells"
 
-    public private(set) var canvas: EditCanvas
-    public private(set) var cursor: (x: Int, y: Int) = (0, 0)
-    public private(set) var selection: CellRect?
+    public internal(set) var canvas: EditCanvas
+    public internal(set) var cursor: (x: Int, y: Int) = (0, 0)
+    public internal(set) var selection: CellRect?
     /// VGA indexes of the drawing colours.
-    public private(set) var foreground = 7
-    public private(set) var background = 0
+    public internal(set) var foreground = 7
+    public internal(set) var background = 0
     /// The current character set, 0 to 9.
     public var blockSet = 5 {
         didSet { blockSet = min(9, max(0, blockSet)); changed() }
     }
     /// The block character most recently inserted, used by Fill with Character.
-    public private(set) var lastBlockCharacter: UInt8 = 219
+    public internal(set) var lastBlockCharacter: UInt8 = 219
     public let undoManager: UndoManager
     /// Called after anything changes (cells, cursor, selection, colours).
     public var onChange: (() -> Void)?
 
     public var isModified: Bool { revision != savedRevision }
 
-    private var revision = 0
+    var revision = 0
     private var nextRevision = 1
     private var savedRevision = 0
-    private var selectionAnchor: (x: Int, y: Int)?
-    private var strokeStart: (canvas: EditCanvas, revision: Int)?
+    var selectionAnchor: (x: Int, y: Int)?
+    var strokeStart: Snapshot?
+    /// The undo name of the stroke in progress (Draw, Brush, Line...).
+    var strokeName = "Draw"
 
     public init(canvas: EditCanvas = EditCanvas()) {
         self.canvas = canvas
+        layerStore = [CanvasLayer(name: "Background", canvas: canvas)]
         undoManager = UndoManager()
         // Groups are opened and closed by each command, so undo works without a run loop.
         undoManager.groupsByEvent = false
@@ -124,18 +127,34 @@ public final class CanvasEditor {
         typeCode(code)
     }
 
+    /// Insert mode (ruling 7): typing shifts the rest of the row right; Backspace and Delete
+    /// close the gap. Overwrite mode (the default) replaces and clears.
+    public var insertMode = false {
+        didSet { if insertMode != oldValue { changed() } }
+    }
+
     public func backspace() {
         guard cursor.x > 0 else { return }
         perform("Typing") { editor in
             editor.cursor.x -= 1
-            editor.canvas.set(AnsiCell(), x: editor.cursor.x, y: editor.cursor.y)
+            if editor.insertMode {
+                editor.canvas.deleteCell(x: editor.cursor.x, y: editor.cursor.y)
+            } else {
+                editor.canvas.set(AnsiCell(), x: editor.cursor.x, y: editor.cursor.y)
+            }
         }
     }
 
-    /// Clears the selection, or the cell under the cursor.
+    /// Clears the selection, or the cell under the cursor (insert mode: deletes it, closing the gap).
     public func deleteForward() {
         if selection != nil { clearSelection(); return }
-        perform("Delete") { editor in editor.canvas.set(AnsiCell(), x: editor.cursor.x, y: editor.cursor.y) }
+        perform("Delete") { editor in
+            if editor.insertMode {
+                editor.canvas.deleteCell(x: editor.cursor.x, y: editor.cursor.y)
+            } else {
+                editor.canvas.set(AnsiCell(), x: editor.cursor.x, y: editor.cursor.y)
+            }
+        }
     }
 
     // MARK: Colours
@@ -154,7 +173,7 @@ public final class CanvasEditor {
 
     public func setIceColors(_ on: Bool) {
         guard floating == nil else { return }
-        perform(on ? "iCE Colours On" : "iCE Colours Off") { $0.canvas.setIceColors(on) }
+        perform(on ? "iCE Colours On" : "iCE Colours Off") { $0.forEachLayer { $0.setIceColors(on) } }
         if !on, background >= 8 { background -= 8 }
         changed()
     }
@@ -208,6 +227,12 @@ public final class CanvasEditor {
         public let region: CanvasRegion
         public var x: Int
         public var y: Int
+        /// Where a lifted selection came from (a move); nil for a paste.
+        public var liftedFrom: CellRect? = nil
+        /// A lifted block that leaves the original in place (Option-drag, or the setting).
+        public var leavesCopy = false
+        /// Option-drag (named Duplicate in Undo); the setting alone still makes a Move.
+        public var isDuplicate = false
     }
 
     /// The block being placed, shown over the canvas until it is stamped or cancelled.
@@ -220,9 +245,35 @@ public final class CanvasEditor {
 
     /// The canvas as it looks with the floating block stamped where it is now.
     public var displayCanvas: EditCanvas {
-        guard let floating else { return canvas }
+        let active = activeWithFloating
+        guard layerStore.count > 1 else { return active }
+        var list = layerStore
+        list[activeLayer].canvas = active
+        return LayerStack.composite(list)
+    }
+
+    /// The active layer with the floating block stamped where it is now.
+    /// A shape being dragged out, shown on the active layer but not applied (no undo step).
+    var preview: ((inout EditCanvas) -> Void)?
+
+    /// Shows `change` over the canvas until it is cleared (nil) or the shape is drawn.
+    public func setPreview(_ change: ((inout EditCanvas) -> Void)?) {
+        preview = change
+        changed()
+    }
+
+    private var activeWithFloating: EditCanvas {
+        guard floating != nil || preview != nil else { return canvas }
         var shown = canvas
-        shown.paste(floating.region, x: floating.x, y: floating.y, transparent: transparentPaste)
+        if let floating {
+            if let source = floating.liftedFrom, !floating.leavesCopy {
+                let vacated = vacatedCell
+                shown.fill(source) { _ in vacated }
+            }
+            shown.paste(floating.region, x: floating.x, y: floating.y, transparent: transparentPaste)
+        }
+        // A shape being dragged shows with (not instead of) a floating block.
+        preview?(&shown)
         return shown
     }
 
@@ -266,11 +317,86 @@ public final class CanvasEditor {
     public func stampFloating() {
         guard let block = floating else { return }
         floating = nil
+        // A lifted block put down where it came from changes nothing (a click in a selection).
+        if let source = block.liftedFrom, source.x == block.x, source.y == block.y {
+            selection = source
+            changed()
+            return
+        }
         let transparent = transparentPaste
-        perform("Paste") { $0.canvas.paste(block.region, x: block.x, y: block.y, transparent: transparent) }
+        let vacated = vacatedCell
+        let name = block.liftedFrom == nil ? "Paste" : (block.isDuplicate ? "Duplicate" : "Move")
+        perform(name) { editor in
+            if let source = block.liftedFrom, !block.leavesCopy { editor.canvas.fill(source) { _ in vacated } }
+            editor.canvas.paste(block.region, x: block.x, y: block.y, transparent: transparent)
+        }
         selectionAnchor = nil
         selection = canvas.clip(CellRect(x: block.x, y: block.y, width: block.region.width, height: block.region.height))
         cursor = (block.x, min(canvas.height - 1, block.y))
+        changed()
+    }
+
+    // MARK: Moving a selection (owner request, ruling 8)
+
+    /// Moving a selection keeps the original in place (a copy) instead of clearing it.
+    public var leaveCopyWhenMoving = false
+
+    /// What a moved block leaves behind: a space in the current background on the bottom
+    /// layer; on an upper layer the unset (transparent) cell.
+    public var vacatedCell: AnsiCell {
+        activeLayer == 0 ? AnsiCell(code: 0x20, fg: Palette.vga[7], bg: backgroundColor) : AnsiCell()
+    }
+
+    /// Lifts the selection into a floating block that moves like a paste. Nothing changes
+    /// until it is stamped; cancelling leaves the canvas as it was. False without a selection.
+    @discardableResult
+    public func liftSelection(duplicate: Bool = false) -> Bool {
+        guard floating == nil, let rect = selection else { return false }
+        floating = FloatingPaste(region: canvas.region(rect), x: rect.x, y: rect.y, liftedFrom: rect,
+                                 leavesCopy: duplicate || leaveCopyWhenMoving, isDuplicate: duplicate)
+        changed()
+        return true
+    }
+
+    /// Option-arrow: moves the selection (lifting it first) or the floating block.
+    public func moveSelection(dx: Int, dy: Int, duplicate: Bool = false) {
+        if floating == nil, !liftSelection(duplicate: duplicate) { return }
+        moveFloating(dx: dx, dy: dy)
+    }
+
+    // MARK: Transforms
+
+    /// Whether `transform` can apply to the selection: a quarter turn needs the turned block
+    /// to fit the canvas width from the selection's left edge.
+    public func canTransformSelection(_ transform: CellTransform) -> Bool {
+        guard floating == nil, let rect = selection else { return false }
+        return !transform.swapsSize || rect.x + rect.height <= canvas.columns
+    }
+
+    /// Mirrors or rotates the selection in place (one undo step); the selection follows the block.
+    @discardableResult
+    public func transformSelection(_ transform: CellTransform) -> Bool {
+        guard canTransformSelection(transform), let rect = selection else { return false }
+        let turned = canvas.region(rect).transformed(transform)
+        let vacated = vacatedCell
+        perform(transform.title) { editor in
+            if transform.swapsSize { editor.canvas.fill(rect) { _ in vacated } }
+            editor.canvas.paste(turned, x: rect.x, y: rect.y)
+        }
+        selection = canvas.clip(CellRect(x: rect.x, y: rect.y, width: turned.width, height: turned.height))
+        changed()
+        return true
+    }
+
+    /// Replaces the canvas (every layer) with the selection.
+    public func cropToSelection() {
+        guard floating == nil, let rect = selection else { return }
+        perform("Crop to Selection") { editor in
+            editor.equalizeLayerHeights()
+            editor.forEachLayer { $0.crop(to: rect) }
+        }
+        selection = canvas.clip(CellRect(x: 0, y: 0, width: rect.width, height: rect.height))
+        cursor = (0, 0)
         changed()
     }
 
@@ -298,7 +424,7 @@ public final class CanvasEditor {
 
     // MARK: Fill and clear
 
-    private var targetRect: CellRect {
+    var targetRect: CellRect {
         selection ?? CellRect(x: 0, y: 0, width: canvas.columns, height: canvas.height)
     }
 
@@ -329,18 +455,19 @@ public final class CanvasEditor {
 
     /// Starts a mouse stroke: everything painted until `endStroke` is one undo step.
     public func beginStroke() {
-        strokeStart = (canvas, revision)
+        strokeStart = snapshot
+        strokeName = "Draw"
     }
 
     public func endStroke() {
         guard let start = strokeStart else { return }
         strokeStart = nil
-        guard canvas != start.canvas else {
+        guard !snapshot.sameContent(as: start) else {
             revision = start.revision
             return
         }
         revision = newRevision()
-        registerUndo(restoring: start, name: "Draw")
+        registerUndo(restoring: start, name: strokeName)
         changed()
     }
 
@@ -359,16 +486,18 @@ public final class CanvasEditor {
     // MARK: Canvas and metadata
 
     public func resize(columns: Int, height: Int) {
-        perform("Canvas Size") { $0.canvas.resize(columns: columns, height: height) }
+        perform("Canvas Size") { $0.forEachLayer { $0.resize(columns: columns, height: height) } }
         clampToCanvas()
         changed()
     }
 
     public func setMetadata(title: String, author: String, group: String) {
         perform("Edit SAUCE") { editor in
-            editor.canvas.title = String(title.prefix(35))
-            editor.canvas.author = String(author.prefix(20))
-            editor.canvas.group = String(group.prefix(20))
+            editor.forEachLayer { canvas in
+                canvas.title = String(title.prefix(35))
+                canvas.author = String(author.prefix(20))
+                canvas.group = String(group.prefix(20))
+            }
         }
     }
 
@@ -378,25 +507,168 @@ public final class CanvasEditor {
         changed()
     }
 
+    // MARK: Layers (ruling 10)
+
+    /// The layer being edited (0 is the bottom). `canvas` is that layer's cells.
+    public private(set) var activeLayer = 0
+    /// Every layer; the active one's entry is refreshed from `canvas` when read.
+    private var layerStore: [CanvasLayer] = []
+
+    /// All layers, bottom first.
+    public var layers: [CanvasLayer] {
+        var list = layerStore
+        list[activeLayer].canvas = canvas
+        return list
+    }
+
+    /// What the layers look like together (visible layers only): what a plain save writes.
+    public var flattenedCanvas: EditCanvas {
+        layerStore.count == 1 ? canvas : LayerStack.composite(layers)
+    }
+
+    /// The layers as a project file.
+    public var project: ArtProject { ArtProject(layers: layers, activeLayer: activeLayer) }
+
+    public convenience init(project: ArtProject) {
+        self.init(canvas: project.layers[project.activeLayer].canvas)
+        layerStore = project.layers
+        activeLayer = project.activeLayer
+    }
+
+    /// Applies a change to every layer (size, iCE and metadata changes).
+    func forEachLayer(_ body: (inout EditCanvas) -> Void) {
+        body(&canvas)
+        for index in layerStore.indices where index != activeLayer { body(&layerStore[index].canvas) }
+    }
+
+    private func syncActiveLayer() { layerStore[activeLayer].canvas = canvas }
+
+    private func activate(_ index: Int) {
+        activeLayer = min(layerStore.count - 1, max(0, index))
+        canvas = layerStore[activeLayer].canvas
+    }
+
+    /// Edits another layer (not an undo step).
+    public func selectLayer(_ index: Int) {
+        guard floating == nil, layerStore.indices.contains(index), index != activeLayer else { return }
+        syncActiveLayer()
+        activate(index)
+        clampToCanvas()
+        changed()
+    }
+
+    /// Adds an empty layer above the active one and edits it.
+    public func addLayer(name: String? = nil) {
+        perform("Add Layer") { editor in
+            editor.syncActiveLayer()
+            var blank = editor.canvas
+            blank.clearCells()
+            let title = name ?? "Layer \(editor.layerStore.count + 1)"
+            editor.layerStore.insert(CanvasLayer(name: title, canvas: blank), at: editor.activeLayer + 1)
+            editor.activate(editor.activeLayer + 1)
+        }
+    }
+
+    public func duplicateLayer() {
+        perform("Duplicate Layer") { editor in
+            editor.syncActiveLayer()
+            var copy = editor.layerStore[editor.activeLayer]
+            copy.name += " copy"
+            editor.layerStore.insert(copy, at: editor.activeLayer + 1)
+            editor.activate(editor.activeLayer + 1)
+        }
+    }
+
+    /// Deletes the active layer; the last layer stays.
+    public func deleteLayer() {
+        guard layerStore.count > 1 else { return }
+        perform("Delete Layer") { editor in
+            editor.layerStore.remove(at: editor.activeLayer)
+            editor.activate(max(0, editor.activeLayer - 1))
+        }
+    }
+
+    /// Moves the active layer up (+1) or down (-1) in the stack.
+    public func moveLayer(by offset: Int) {
+        let target = activeLayer + offset
+        guard layerStore.indices.contains(target), offset != 0 else { return }
+        perform(offset > 0 ? "Move Layer Up" : "Move Layer Down") { editor in
+            editor.syncActiveLayer()
+            editor.layerStore.swapAt(editor.activeLayer, target)
+            editor.activate(target)
+        }
+    }
+
+    public func setLayerVisible(_ index: Int, _ visible: Bool) {
+        guard layerStore.indices.contains(index), layerStore[index].visible != visible else { return }
+        perform(visible ? "Show Layer" : "Hide Layer") { editor in
+            editor.syncActiveLayer()
+            editor.layerStore[index].visible = visible
+        }
+    }
+
+    public func renameLayer(_ index: Int, to name: String) {
+        guard layerStore.indices.contains(index), !name.isEmpty else { return }
+        perform("Rename Layer") { editor in
+            editor.syncActiveLayer()
+            editor.layerStore[index].name = name
+        }
+    }
+
+    /// Draws the active layer onto the one below and removes it.
+    public func mergeDown() {
+        guard activeLayer > 0 else { return }
+        perform("Merge Down") { editor in
+            editor.syncActiveLayer()
+            let upper = editor.layerStore.remove(at: editor.activeLayer)
+            editor.layerStore[editor.activeLayer - 1].canvas.overlay(upper.canvas)
+            editor.activate(editor.activeLayer - 1)
+        }
+    }
+
+    /// Replaces all layers with one holding what is visible.
+    public func flatten() {
+        guard layerStore.count > 1 else { return }
+        perform("Flatten") { editor in
+            let flat = editor.flattenedCanvas
+            editor.layerStore = [CanvasLayer(name: "Background", canvas: flat)]
+            editor.activate(0)
+        }
+    }
+
     // MARK: Helpers
 
-    /// Runs one undoable change. Nothing is registered when the canvas did not change. Nothing
+    /// Everything one undo step restores.
+    struct Snapshot {
+        var canvas: EditCanvas
+        var layers: [CanvasLayer]
+        var activeLayer: Int
+        var revision: Int
+
+        func sameContent(as other: Snapshot) -> Bool {
+            canvas == other.canvas && activeLayer == other.activeLayer && layers == other.layers
+        }
+    }
+
+    var snapshot: Snapshot { Snapshot(canvas: canvas, layers: layerStore, activeLayer: activeLayer, revision: revision) }
+
+    /// Runs one undoable change. Nothing is registered when nothing changed. Nothing
     /// runs while a paste floats: it is placed or cancelled first.
-    private func perform(_ name: String, _ change: (CanvasEditor) -> Void) {
+    func perform(_ name: String, _ change: (CanvasEditor) -> Void) {
         guard floating == nil else { return }
-        let before = (canvas, revision)
+        let before = snapshot
         change(self)
         clampToCanvas()
-        if canvas != before.0 {
+        if !snapshot.sameContent(as: before) {
             revision = newRevision()
             registerUndo(restoring: before, name: name)
         }
         changed()
     }
 
-    private func registerUndo(restoring state: (canvas: EditCanvas, revision: Int), name: String) {
+    private func registerUndo(restoring state: Snapshot, name: String) {
         undoManager.beginUndoGrouping()
-        let current = (canvas, revision)
+        let current = snapshot
         undoManager.registerUndo(withTarget: self) { editor in
             editor.restore(state, redo: current, name: name)
         }
@@ -409,9 +681,14 @@ public final class CanvasEditor {
         return nextRevision
     }
 
-    private func restore(_ state: (canvas: EditCanvas, revision: Int),
-                         redo: (canvas: EditCanvas, revision: Int), name: String) {
+    private func restore(_ state: Snapshot, redo: Snapshot, name: String) {
+        // Undo while a lifted selection floats puts it back first: it was lifted from the canvas
+        // being replaced. A pasted block (clipboard cells) stays, clamped (copy and paste ruling 5).
+        if floating?.liftedFrom != nil { floating = nil }
+        preview = nil
         canvas = state.canvas
+        layerStore = state.layers
+        activeLayer = state.activeLayer
         revision = state.revision
         undoManager.registerUndo(withTarget: self) { editor in
             editor.restore(redo, redo: state, name: name)
@@ -421,8 +698,10 @@ public final class CanvasEditor {
         changed()
     }
 
+
     /// Writes a character at the cursor in the current colours and advances, wrapping at the edge.
     private func write(_ code: UInt8) {
+        if insertMode { canvas.insertCell(x: cursor.x, y: cursor.y) }
         canvas.set(AnsiCell(code: code, fg: foregroundColor, bg: backgroundColor), x: cursor.x, y: cursor.y)
         if cursor.x + 1 >= canvas.columns {
             place(x: 0, y: cursor.y + 1)
@@ -432,19 +711,32 @@ public final class CanvasEditor {
     }
 
     /// Moves the cursor, clamped to the width and the row limit; rows are added below as needed.
-    private func place(x: Int, y: Int) {
+    func place(x: Int, y: Int) {
         let row = min(AnsiTerminal.maxRows - 1, max(0, y))
         canvas.ensureHeight(row + 1)
+        equalizeLayerHeights()
         cursor = (min(canvas.columns - 1, max(0, x)), row)
     }
 
-    private func clampToCanvas() {
+    /// Every layer has the height of the tallest one, so layers stay aligned (crop, project files).
+    func equalizeLayerHeights() {
+        guard layerStore.count > 1 else { return }
+        var tallest = canvas.height
+        for index in layerStore.indices where index != activeLayer { tallest = max(tallest, layerStore[index].canvas.height) }
+        canvas.ensureHeight(tallest)
+        for index in layerStore.indices where index != activeLayer && layerStore[index].canvas.height < tallest {
+            layerStore[index].canvas.ensureHeight(tallest)
+        }
+    }
+
+    func clampToCanvas() {
+        equalizeLayerHeights()
         cursor = (min(canvas.columns - 1, max(0, cursor.x)), min(canvas.height - 1, max(0, cursor.y)))
         if let rect = selection { selection = canvas.clip(rect) }
         if let block = floating, block.x >= canvas.columns { floating?.x = canvas.columns - 1 }
     }
 
-    private func changed() { onChange?() }
+    func changed() { onChange?() }
 
     // MARK: Cell data
 

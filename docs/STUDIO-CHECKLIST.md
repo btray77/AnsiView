@@ -33,21 +33,21 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | CP437 full set, VGA fonts, 80 col default, configurable size | done | plan 6 |
 | 16 colours, iCE | done | plan 6 |
 | Character editing, keyboard and mouse | done (harness verified; live keyboard check needs owner) | plan 6 |
-| Insert / overwrite / delete modes | planned | editor v2 |
-| Palette management, fg/bg swap | planned | editor v2 |
-| CP437 character picker | planned | editor v2 |
-| Configurable drawing characters / brushes | partial: F1-F10 block sets | editor v2 |
+| Insert / overwrite / delete modes | done (harness; live check needs owner), item 60 |
+| Palette management, fg/bg swap | done (harness; live check needs owner), item 60 |
+| CP437 character picker | done (harness; live check needs owner), item 60 |
+| Configurable drawing characters / brushes | done (harness; live check needs owner), item 60 |
 | Freehand drawing | done (half blocks) | plan 6; character brush in editor v2 |
-| Lines, rectangles, filled rectangles | planned | item 60 |
-| Box drawing, single/double, auto-joining | planned | item 60 |
-| Flood fill, colour replace, character replace | partial: fill selection | editor v2 |
+| Lines, rectangles, filled rectangles | done (harness; live check needs owner), item 60 |
+| Box drawing, single/double, auto-joining | done (harness; live check needs owner), item 60 |
+| Flood fill, colour replace, character replace | done (harness; live check needs owner), item 60 |
 | Text insertion | done | plan 6 |
 | Select, copy, cut, paste (cells, text, ANSI, image; editor and viewer; Copy As; floating and transparent paste; paste images) | done (harness verified; live check needs owner) | copy and paste, merged 39ef769 |
-| Move and resize selection | partial: move via floating paste; resize planned | editor v2 |
-| Mirror, flip, rotate (with box-character remapping) | planned | editor v2 |
-| Block operations | partial | editor v2 |
+| Move and resize selection | done (harness; live check needs owner), item 60 |
+| Mirror, flip, rotate (with box-character remapping) | done (harness; live check needs owner), item 60 |
+| Block operations | done (harness; live check needs owner), item 60 |
 | Undo / redo | done | plan 6 |
-| Layers (flattened on save, kept in a sidecar project file) | planned | editor v2 |
+| Layers (flattened on save, kept in a sidecar project file) | done (harness; live check needs owner), item 60 |
 | TDF font import, preview, insert, manage collection | planned | TDF fonts |
 | Other font formats (FIGlet .flf) | planned | TDF fonts |
 
@@ -107,16 +107,16 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | .ANS .ASC .TXT .BIN .XB SAUCE | done (read and write) |
 | .TDF | planned (TDF fonts) |
 | .ICE .ADF .IDF .PCB, Avatar, Wildcat | read done; write planned where useful |
-| Unsupported data preserved, never silently dropped (SAUCE comments, unknown SAUCE fields, trailing data) | planned audit | editor v2 |
+| Unsupported data preserved, never silently dropped (SAUCE comments, unknown SAUCE fields, trailing data) | done: SAUCE fields kept, losses shown on open/save (item 60) |
 
 ## 7. Interface
 
 | Requirement | Status |
 |---|---|
 | Toolbars, palette, zoom | done (basic) |
-| Pan, grid, cursor position indicator | partial (position shown) / planned |
-| Full screen editing, retro DOS preview mode | planned (editor v2) |
-| Configurable keyboard shortcuts | planned (editor v2) |
+| Pan, grid, cursor position indicator | done (item 60) |
+| Full screen editing, retro DOS preview mode | done in harness (full screen not observed), item 60 |
+| Configurable keyboard shortcuts | done (item 60) |
 | Context sensitive help, tooltips, glossary | planned (item 62) |
 | Light and dark themes | system appearance today; retro theme planned |
 | Font browser, character picker | planned |
@@ -152,5 +152,4 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 
 ## Running right now
 
-- Editor v2: TheDraw-class tools (`ansiview-2.0-editor-tools`)
 - File transfer protocol engines (`ansiview-2.0-transfers-core`)
