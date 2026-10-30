@@ -61,6 +61,10 @@ struct AnsiViewApp: App {
                 })
     }
 
+    init() {
+        Updates.start()
+    }
+
     var body: some Scene {
         DocumentGroup(viewing: AnsiDocument.self) { file in
             AnsiPlayerScene(source: file.document.source, fileURL: file.fileURL)
@@ -68,6 +72,11 @@ struct AnsiViewApp: App {
         // A DOS screen (640x400) at one and a half times size.
         .defaultSize(width: 960, height: 600)
         .commands {
+            if Updates.isIncluded {
+                CommandGroup(after: .appInfo) {
+                    Button("Check for Updates...") { Updates.checkForUpdates() }
+                }
+            }
             CommandGroup(after: .newItem) {
                 Button("Open Folder or Art Pack...") { GalleryWindowController.chooseAndOpen() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])

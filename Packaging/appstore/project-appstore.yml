@@ -1,0 +1,44 @@
+# Mac App Store variant: the same app without Sparkle (the store updates apps itself, and its
+# review rejects self updaters and temporary exception entitlements).
+#
+#   xcodegen generate --spec Packaging/appstore/project-appstore.yml
+#   xcodebuild -project Packaging/appstore/AnsiViewAppStore.xcodeproj -scheme AnsiView ...
+#
+# It includes project.yml and replaces only what differs: no Sparkle package or sign phase, no
+# SPARKLE_UPDATES condition (App/Updates.swift compiles to "no updater"), and entitlements without
+# Sparkle's mach-lookup exceptions. The SU keys left in Info.plist are inert without Sparkle.
+# Store signing (Apple Distribution certificate, provisioning profile) is set up separately.
+include:
+  - path: ../../project.yml
+    relativePaths: true
+name: AnsiViewAppStore
+packages:REPLACE:
+  AnsiCore:
+    path: ../../Packages/AnsiCore
+  libwebp:
+    url: https://github.com/SDWebImage/libwebp-Xcode
+    exactVersion: 1.6.0
+targets:
+  AnsiView:
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited)
+    postBuildScripts:REPLACE: []
+    entitlements:REPLACE:
+      path: AnsiView.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.application-groups: [47HEHK53W5.com.traynham.ansiview]
+        com.apple.security.network.client: true
+    dependencies:REPLACE:
+      - target: AnsiPreview
+      - target: AnsiThumbnail
+      - target: AnsiSpotlight
+      - target: AnsiImporter
+        embed: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Library/Spotlight
+      - package: AnsiCore
+      - package: libwebp

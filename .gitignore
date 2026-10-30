@@ -4,3 +4,4 @@ AnsiView.xcodeproj/
 .DS_Store
 *.xcuserstate
 xcuserdata/
+Packaging/appstore/AnsiViewAppStore.xcodeproj/

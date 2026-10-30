@@ -9,10 +9,14 @@ packages:
   libwebp:
     url: https://github.com/SDWebImage/libwebp-Xcode
     exactVersion: 1.6.0
+  # Updates for the direct download (DMG) build only; see Packaging/appstore for a build without it.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.1
 settings:
   base:
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "47"
+    CURRENT_PROJECT_VERSION: "48"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -39,6 +43,10 @@ targets:
       - path: Samples
         type: folder
         buildPhase: resources
+    settings:
+      base:
+        # Compiles App/Updates.swift's Sparkle code. The Mac App Store spec leaves it out.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SPARKLE_UPDATES
     entitlements:
       path: App/AnsiView.entitlements
       properties:
@@ -48,9 +56,18 @@ targets:
         # Outgoing connections only: File > Browse 16colo.rs (API and downloads) and Sparkle's
         # update checks. The extensions do not get it.
         com.apple.security.network.client: true
+        # Sparkle's installer XPC service in a sandboxed app (Sparkle's sandboxing guide).
+        com.apple.security.temporary-exception.mach-lookup.global-name:
+          - $(PRODUCT_BUNDLE_IDENTIFIER)-spks
+          - $(PRODUCT_BUNDLE_IDENTIFIER)-spki
     info:
       path: App/Info.plist
       properties:
+        # Sparkle. The key is a placeholder until the owner runs generate_keys (see README);
+        # with it, updates stay off. No Downloader service: the app has network.client.
+        SUFeedURL: https://raw.githubusercontent.com/btray77/AnsiView/main/docs/appcast.xml
+        SUPublicEDKey: REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY
+        SUEnableInstallerLauncherService: true
         CFBundleDisplayName: AnsiView
         CFBundleIconFile: AppIcon
         NSHumanReadableCopyright: Copyright 2026 Brad Traynham
@@ -79,6 +96,11 @@ targets:
             CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate
             LSItemContentTypes: [com.apple.macbinary-archive, com.amiga.adf-archive]
+    postBuildScripts:
+      - name: Sign Sparkle helpers
+        path: Packaging/sparkle/sign-sparkle.sh
+        basedOnDependencyAnalysis: false
+        showEnvVarsInLog: false
     dependencies:
       - target: AnsiPreview
       - target: AnsiThumbnail
@@ -92,6 +114,7 @@ targets:
           subpath: Contents/Library/Spotlight
       - package: AnsiCore
       - package: libwebp
+      - package: Sparkle
   AnsiPreview:
     type: app-extension
     platform: macOS
