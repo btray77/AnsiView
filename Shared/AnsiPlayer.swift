@@ -1,5 +1,6 @@
 import AnsiCore
 import AppKit
+import Combine
 import os
 
 /// Playback speeds in bits per second. 0 means draw instantly.
@@ -22,6 +23,24 @@ enum PlaybackSpeed {
     static let crtEffectKey = "crtEffect"
     static var crtEffect: Bool { defaults.bool(forKey: crtEffectKey) }
 
+    /// Speeds remembered per file (by `ArtFile.identity`), shared with Quick Look.
+    static let fileSpeedsKey = "fileSpeeds"
+    static var fileSpeeds: SpeedMemory { SpeedMemory(serialized: defaults.object(forKey: fileSpeedsKey)) }
+
+    /// The file's remembered speed, or the global speed when it has none (or a value not in `choices`).
+    static func speed(forFile key: String) -> Int {
+        if let baud = fileSpeeds.speed(for: key), choices.contains(baud) { return baud }
+        return current
+    }
+
+    /// Remembers the speed for this file and makes it the global speed for files without one.
+    static func remember(_ baud: Int, forFile key: String) {
+        var memory = fileSpeeds
+        memory.set(baud, for: key)
+        defaults.set(memory.serialized, forKey: fileSpeedsKey)
+        current = baud
+    }
+
     static func label(_ baud: Int) -> String {
         baud == 0 ? "Instant" : "\(baud) baud"
     }
@@ -33,6 +52,28 @@ enum PlaybackSpeed {
     }
 }
 
+/// The playback speed of one file's window. The app's speed commands act on the focused one.
+final class PlayerSpeed: ObservableObject {
+    let fileKey: String
+    @Published private(set) var baud: Int
+
+    init(fileKey: String) {
+        self.fileKey = fileKey
+        baud = PlaybackSpeed.speed(forFile: fileKey)
+    }
+
+    func set(_ baud: Int) {
+        PlaybackSpeed.remember(baud, forFile: fileKey)
+        if self.baud != baud { self.baud = baud }
+    }
+
+    /// Picks up a change made elsewhere (the global speed, or the same file in another window).
+    func refresh() {
+        let latest = PlaybackSpeed.speed(forFile: fileKey)
+        if latest != baud { baud = latest }
+    }
+}
+
 /// Shows an ANSI file in a scroll view. Animated files replay at modem speed and blinking text blinks.
 /// Clicking skips an animation to its end, or replays it once it has finished.
 final class AnsiPlayerViewController: NSViewController {
@@ -41,6 +82,7 @@ final class AnsiPlayerViewController: NSViewController {
 
     let analysis: AnsiAnalysis
     let source: ArtFile
+    let speed: PlayerSpeed
     /// Frame positions for the scrub bar and stepping; nil for static art, which has no bar.
     let timeline: PlaybackTimeline?
     /// The frame currently on screen.
@@ -57,12 +99,13 @@ final class AnsiPlayerViewController: NSViewController {
     private var byteCredit: Double = 0
     /// True while the finished art is on screen (before playback starts, or after it ends).
     private var screenIsFinal = true
-    private var shownBaud = PlaybackSpeed.current
+    private lazy var shownBaud = speed.baud
     private var shownCRT = PlaybackSpeed.crtEffect
     private var defaultsObserver: NSObjectProtocol?
 
-    init(source: ArtFile) {
+    init(source: ArtFile, speed: PlayerSpeed? = nil) {
         self.source = source
+        self.speed = speed ?? PlayerSpeed(fileKey: source.identity)
         self.analysis = AnsiAnalysis(source)
         self.timeline = analysis.isAnimated ? PlaybackTimeline(source) : nil
         var options = RenderOptions(for: analysis.finalScreen)
@@ -250,7 +293,7 @@ final class AnsiPlayerViewController: NSViewController {
     func replay() {
         stopPlayback()
         terminal = AnsiTerminal(source)
-        if PlaybackSpeed.current == 0 {
+        if speed.baud == 0 {
             skipToEnd()
             return
         }
@@ -259,8 +302,8 @@ final class AnsiPlayerViewController: NSViewController {
         redraw()
         updateTimeline()
         Logger(subsystem: "com.traynham.ansiview", category: "playback")
-            .info("Playback started at \(PlaybackSpeed.current, privacy: .public) baud")
-        showHUD("\(PlaybackSpeed.label(PlaybackSpeed.current))  \u{00B7}  click to skip")
+            .info("Playback started at \(self.speed.baud, privacy: .public) baud")
+        showHUD("\(PlaybackSpeed.label(speed.baud))  \u{00B7}  click to skip")
         startTimer()
     }
 
@@ -307,7 +350,7 @@ final class AnsiPlayerViewController: NSViewController {
             stopPlayback()
             showHUD("Paused")
         } else if isPaused {
-            showHUD(PlaybackSpeed.label(PlaybackSpeed.current))
+            showHUD(PlaybackSpeed.label(speed.baud))
             startTimer()
         } else {
             replay()
@@ -336,7 +379,7 @@ final class AnsiPlayerViewController: NSViewController {
 
     private func advanceFrame() {
         let now = ProcessInfo.processInfo.systemUptime
-        let baud = PlaybackSpeed.current
+        let baud = speed.baud
         guard baud > 0 else { skipToEnd(); return }
         // 8N1 serial framing: 10 bits on the wire per byte.
         byteCredit += (now - lastFrameTime) * Double(baud) / 10
@@ -357,7 +400,8 @@ final class AnsiPlayerViewController: NSViewController {
             shownCRT = PlaybackSpeed.crtEffect
             redraw()
         }
-        let baud = PlaybackSpeed.current
+        speed.refresh()
+        let baud = speed.baud
         guard baud != shownBaud else { return }
         shownBaud = baud
         showHUD(PlaybackSpeed.label(baud))

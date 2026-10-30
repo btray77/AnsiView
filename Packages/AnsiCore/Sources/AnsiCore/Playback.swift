@@ -65,3 +65,34 @@ public struct PlaybackTimeline {
         return low
     }
 }
+
+/// Playback speeds remembered per file, most recently set last, capped at `limit` files.
+/// Stored in user defaults as strings of the form "key=baud".
+public struct SpeedMemory {
+    public static let limit = 500
+
+    private var entries: [(key: String, baud: Int)] = []
+
+    /// Reads a stored value; anything that is not a list of "key=baud" strings is ignored.
+    public init(serialized: Any?) {
+        guard let list = serialized as? [Any] else { return }
+        for item in list {
+            guard let text = item as? String, let equals = text.lastIndex(of: "=") else { continue }
+            let key = String(text[..<equals])
+            guard !key.isEmpty, let baud = Int(text[text.index(after: equals)...]) else { continue }
+            set(baud, for: key)
+        }
+    }
+
+    public var serialized: [String] { entries.map { "\($0.key)=\($0.baud)" } }
+
+    public func speed(for key: String) -> Int? {
+        entries.last { $0.key == key }?.baud
+    }
+
+    public mutating func set(_ baud: Int, for key: String) {
+        entries.removeAll { $0.key == key }
+        entries.append((key, baud))
+        if entries.count > Self.limit { entries.removeFirst(entries.count - Self.limit) }
+    }
+}

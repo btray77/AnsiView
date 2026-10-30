@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// The kinds of art file AnsiView reads.
@@ -124,6 +125,9 @@ public struct ArtFile {
     public let ninePixel: Bool
     public let title: String?
     public let content: Content
+    /// Identifies the file by its bytes: the first 16 hex digits of their SHA-256. Survives renames
+    /// and moves, and is the same in the app and in Quick Look.
+    public let identity: String
 
     /// The byte stream for stream formats; empty for binary formats.
     public var stream: [UInt8] {
@@ -133,6 +137,7 @@ public struct ArtFile {
 
     public init(data: Data, fileExtension: String? = nil) {
         let raw = [UInt8](data)
+        identity = SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
         let (sauce, contentLength) = Sauce.read(raw)
         var body = Array(raw.prefix(contentLength))
         let format = ArtFormat.detect(bytes: body, fileExtension: fileExtension, sauce: sauce)

@@ -40,10 +40,20 @@ struct AnsiViewApp: App {
     private var baud = PlaybackSpeed.defaultBaud
     @AppStorage(PlaybackSpeed.crtEffectKey, store: PlaybackSpeed.defaults)
     private var crtEffect = false
+    /// The focused art window's speed; speed commands change that file's remembered speed.
+    @FocusedObject private var focusedSpeed: PlayerSpeed?
+
+    /// The focused file's speed, or the global speed when no art window is focused.
+    private var speedBinding: Binding<Int> {
+        Binding(get: { focusedSpeed?.baud ?? baud },
+                set: { newValue in
+                    if let focusedSpeed { focusedSpeed.set(newValue) } else { baud = newValue }
+                })
+    }
 
     var body: some Scene {
         DocumentGroup(viewing: AnsiDocument.self) { file in
-            AnsiPlayerView(source: file.document.source)
+            AnsiPlayerScene(source: file.document.source)
         }
         // A DOS screen (640x400) at one and a half times size.
         .defaultSize(width: 960, height: 600)
@@ -71,11 +81,11 @@ struct AnsiViewApp: App {
                 Button("Next Frame") { send(#selector(AnsiCanvasView.nextFrame(_:))) }
                     .keyboardShortcut(.rightArrow, modifiers: [])
                 Divider()
-                Button("Faster") { baud = PlaybackSpeed.step(baud, by: 1) }
+                Button("Faster") { speedBinding.wrappedValue = PlaybackSpeed.step(speedBinding.wrappedValue, by: 1) }
                     .keyboardShortcut("]")
-                Button("Slower") { baud = PlaybackSpeed.step(baud, by: -1) }
+                Button("Slower") { speedBinding.wrappedValue = PlaybackSpeed.step(speedBinding.wrappedValue, by: -1) }
                     .keyboardShortcut("[")
-                Picker("Speed", selection: $baud) {
+                Picker("Speed", selection: speedBinding) {
                     ForEach(PlaybackSpeed.choices, id: \.self) { choice in
                         Text(PlaybackSpeed.label(choice)).tag(choice)
                     }
@@ -85,11 +95,28 @@ struct AnsiViewApp: App {
     }
 }
 
+/// One document window: the player plus its per file speed, published to the menu commands.
+struct AnsiPlayerScene: View {
+    let source: ArtFile
+    @StateObject private var speed: PlayerSpeed
+
+    init(source: ArtFile) {
+        self.source = source
+        _speed = StateObject(wrappedValue: PlayerSpeed(fileKey: source.identity))
+    }
+
+    var body: some View {
+        AnsiPlayerView(source: source, speed: speed)
+            .focusedSceneObject(speed)
+    }
+}
+
 struct AnsiPlayerView: NSViewControllerRepresentable {
     let source: ArtFile
+    let speed: PlayerSpeed
 
     func makeNSViewController(context: Context) -> AnsiPlayerViewController {
-        AnsiPlayerViewController(source: source)
+        AnsiPlayerViewController(source: source, speed: speed)
     }
 
     func updateNSViewController(_ controller: AnsiPlayerViewController, context: Context) {}

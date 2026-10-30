@@ -94,3 +94,48 @@ func art(_ raw: [UInt8], ext: String? = nil) -> ArtFile { ArtFile(data: Data(raw
     #expect(timeline.position(atFraction: -1) == 0)
     #expect(timeline.position(atFraction: 2) == 64)
 }
+
+// MARK: Per file speed
+
+@Test func identityIsStableAndContentBased() {
+    let a = art(bytes("Hello"), ext: "ans")
+    let b = art(bytes("Hello"), ext: "asc")
+    let c = art(bytes("Hellp"), ext: "ans")
+    #expect(a.identity == b.identity)
+    #expect(a.identity != c.identity)
+    #expect(a.identity.count == 16)
+    #expect(a.identity.allSatisfy { "0123456789abcdef".contains($0) })
+}
+
+@Test func rememberAndRecall() {
+    var memory = SpeedMemory(serialized: nil)
+    #expect(memory.speed(for: "abc") == nil)
+    memory.set(9600, for: "abc")
+    #expect(memory.speed(for: "abc") == 9600)
+    let restored = SpeedMemory(serialized: memory.serialized)
+    #expect(restored.speed(for: "abc") == 9600)
+}
+
+@Test func setMovesToEnd() {
+    var memory = SpeedMemory(serialized: nil)
+    memory.set(300, for: "a")
+    memory.set(1200, for: "b")
+    memory.set(2400, for: "a")
+    #expect(memory.serialized == ["b=1200", "a=2400"])
+}
+
+@Test func limitDropsOldest() {
+    var memory = SpeedMemory(serialized: nil)
+    for i in 0...SpeedMemory.limit { memory.set(2400, for: "k\(i)") }
+    #expect(memory.speed(for: "k0") == nil)
+    #expect(memory.speed(for: "k\(SpeedMemory.limit)") == 2400)
+    #expect(memory.serialized.count == SpeedMemory.limit)
+}
+
+@Test func corruptEntriesAreIgnored() {
+    let memory = SpeedMemory(serialized: ["x", "a=b", "k=2400", 5] as [Any])
+    #expect(memory.speed(for: "k") == 2400)
+    #expect(memory.speed(for: "a") == nil)
+    #expect(memory.serialized == ["k=2400"])
+    #expect(SpeedMemory(serialized: 7).serialized.isEmpty)
+}

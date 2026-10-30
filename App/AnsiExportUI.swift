@@ -53,7 +53,7 @@ enum ExportController {
         let size = popup(sizeLabels, selected: 0)
         let speeds = PlaybackSpeed.choices.filter { $0 > 0 }
         let speed = popup(speeds.map(PlaybackSpeed.label),
-                          selected: speeds.firstIndex(of: PlaybackSpeed.current) ?? speeds.firstIndex(of: PlaybackSpeed.defaultBaud)!)
+                          selected: speeds.firstIndex(of: player.speed.baud) ?? speeds.firstIndex(of: PlaybackSpeed.defaultBaud)!)
         panel.accessoryView = accessory([("Format:", format), ("Size:", size), ("Speed:", speed)])
         panel.nameFieldStringValue = baseName(window) + ".gif"
         panel.allowedContentTypes = [AnimationFormat.gif.contentType]
