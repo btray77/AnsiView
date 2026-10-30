@@ -7,13 +7,30 @@ public enum ConnectionMode: String, Codable, CaseIterable {
     public var label: String { self == .telnet ? "Telnet" : "Raw TCP" }
 }
 
-/// One saved BBS. Passwords are never stored.
+/// Whether a BBS plays the dial and handshake sound while connecting.
+public enum ModemSoundChoice: String, Codable, CaseIterable {
+    /// Follows Playback > Modem Sounds.
+    case playbackSetting, on, off
+
+    public var label: String {
+        switch self {
+        case .playbackSetting: return "Same as Playback > Modem Sounds"
+        case .on: return "On"
+        case .off: return "Off"
+        }
+    }
+}
+
+/// One saved BBS in the dialing directory. Passwords are never stored here: they live in the
+/// Keychain under `credentialKey`.
 public struct BBSEntry: Codable, Equatable, Identifiable {
+    public static let defaultBusyText = "all nodes are busy|nodes are busy|no free nodes|system is busy"
+
     public var id: UUID
     public var name: String
     public var host: String
     public var port: Int
-    /// Typed by Terminal > Send Username.
+    /// Typed by Terminal > Send Username and by the login script.
     public var username: String?
     /// A bundled font (`BitmapFont.supportedNames`).
     public var fontName: String
@@ -24,6 +41,24 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     /// Received bytes are shown at this modem speed; 0 is unlimited.
     public var baud: Int
     public var backspaceSendsDelete: Bool
+    public var notes: String
+    /// Groups such as "Favourites" or "Trade Wars games".
+    public var tags: [String]
+    public var lastCalled: Date?
+    public var totalCalls: Int
+    /// Starts a capture into `captureFolderBookmark` as soon as the BBS answers.
+    public var captureOnConnect: Bool
+    /// A security scoped bookmark to the capture folder (only valid on this Mac).
+    public var captureFolderBookmark: Data?
+    public var captureFolderName: String?
+    public var modemSound: ModemSoundChoice
+    /// Option-1 ... Option-0 (`MacroSet.slotCount` strings, empty means unset), with `MacroText` escapes.
+    public var macros: [String]
+    /// Runs `loginScript` when the BBS answers (and a username is set).
+    public var autoLogin: Bool
+    public var loginScript: [LoginStep]
+    /// Text that means the BBS is full (`|` between alternatives); seeing it soon after connecting hangs up.
+    public var busyText: String
 
     public init(name: String, host: String, port: Int = 23) {
         id = UUID()
@@ -37,17 +72,37 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         mode = .telnet
         baud = 0
         backspaceSendsDelete = false
+        notes = ""
+        tags = []
+        lastCalled = nil
+        totalCalls = 0
+        captureOnConnect = false
+        captureFolderBookmark = nil
+        captureFolderName = nil
+        modemSound = .playbackSetting
+        macros = Array(repeating: "", count: MacroSet.slotCount)
+        autoLogin = true
+        loginScript = LoginScript.defaultSteps
+        busyText = Self.defaultBusyText
     }
 
     public var address: String {
         host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)"
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case id, name, host, port, username, fontName, columns, rows, encoding, mode, baud, backspaceSendsDelete
+    /// The Keychain key for this entry's password; nil without a username.
+    public var credentialKey: CredentialKey? {
+        guard let username, !username.isEmpty, !host.isEmpty else { return nil }
+        return CredentialKey(host: host, port: port, account: username)
     }
 
-    /// Missing or out of range fields fall back to the defaults, so older or hand edited books load.
+    private enum CodingKeys: String, CodingKey {
+        case id, name, host, port, username, fontName, columns, rows, encoding, mode, baud, backspaceSendsDelete
+        case notes, tags, lastCalled, totalCalls, captureOnConnect, captureFolderBookmark, captureFolderName
+        case modemSound, macros, autoLogin, loginScript, busyText
+    }
+
+    /// Missing or out of range fields fall back to the defaults, so older (plan 7) or hand edited books load.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(name: try c.decode(String.self, forKey: .name), host: try c.decode(String.self, forKey: .host))
@@ -61,6 +116,48 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         if let value = try? c.decode(ConnectionMode.self, forKey: .mode) { mode = value }
         if let value = try? c.decode(Int.self, forKey: .baud), value >= 0 { baud = value }
         if let value = try? c.decode(Bool.self, forKey: .backspaceSendsDelete) { backspaceSendsDelete = value }
+        if let value = try? c.decode(String.self, forKey: .notes) { notes = value }
+        if let value = try? c.decode([String].self, forKey: .tags) { tags = value }
+        lastCalled = try? c.decode(Date.self, forKey: .lastCalled)
+        if let value = try? c.decode(Int.self, forKey: .totalCalls), value >= 0 { totalCalls = value }
+        if let value = try? c.decode(Bool.self, forKey: .captureOnConnect) { captureOnConnect = value }
+        captureFolderBookmark = try? c.decode(Data.self, forKey: .captureFolderBookmark)
+        captureFolderName = try? c.decode(String.self, forKey: .captureFolderName)
+        if let value = try? c.decode(ModemSoundChoice.self, forKey: .modemSound) { modemSound = value }
+        if let value = try? c.decode([String].self, forKey: .macros) {
+            macros = Array((value + Array(repeating: "", count: MacroSet.slotCount)).prefix(MacroSet.slotCount))
+        }
+        if let value = try? c.decode(Bool.self, forKey: .autoLogin) { autoLogin = value }
+        if let value = try? c.decode([LoginStep].self, forKey: .loginScript) { loginScript = value }
+        if let value = try? c.decode(String.self, forKey: .busyText) { busyText = value }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(host, forKey: .host)
+        try c.encode(port, forKey: .port)
+        try c.encodeIfPresent(username, forKey: .username)
+        try c.encode(fontName, forKey: .fontName)
+        try c.encode(columns, forKey: .columns)
+        try c.encode(rows, forKey: .rows)
+        try c.encode(encoding, forKey: .encoding)
+        try c.encode(mode, forKey: .mode)
+        try c.encode(baud, forKey: .baud)
+        try c.encode(backspaceSendsDelete, forKey: .backspaceSendsDelete)
+        try c.encode(notes, forKey: .notes)
+        try c.encode(tags, forKey: .tags)
+        try c.encodeIfPresent(lastCalled, forKey: .lastCalled)
+        try c.encode(totalCalls, forKey: .totalCalls)
+        try c.encode(captureOnConnect, forKey: .captureOnConnect)
+        try c.encodeIfPresent(captureFolderBookmark, forKey: .captureFolderBookmark)
+        try c.encodeIfPresent(captureFolderName, forKey: .captureFolderName)
+        try c.encode(modemSound, forKey: .modemSound)
+        try c.encode(macros, forKey: .macros)
+        try c.encode(autoLogin, forKey: .autoLogin)
+        try c.encode(loginScript, forKey: .loginScript)
+        try c.encode(busyText, forKey: .busyText)
     }
 
     private static func clampSize(_ value: Int) -> Int {
@@ -68,7 +165,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     }
 }
 
-/// The saved BBS list, stored as JSON in the app's user defaults.
+/// The plan 7 address book: a JSON array of entries under `bbsAddressBook`. Kept so old data
+/// migrates into `DialingDirectory` (and a downgraded app still finds its book).
 public struct BBSAddressBook: Equatable {
     public static let defaultsKey = "bbsAddressBook"
     public var entries: [BBSEntry]

@@ -1,0 +1,33 @@
+; A SyncTERM style dialing directory written for AnsiView tests. Every host is fictional.
+
+[Example Telnet Board]
+	Address=telnet.example.com
+	Port=2323
+	ConnectionType=Telnet
+	Username=guest
+	Password=fixture-pass
+	Comment=Door games and message bases
+	BPSRate=2400
+	ScreenMode=80x50
+
+[Raw Socket Board]
+Address=raw.example.org
+ConnectionType=Raw
+
+[Secure Board]
+	Address=ssh.example.net
+	Port=22
+	ConnectionType=SSH
+
+[Old Modem Entry]
+	Address=555-0100
+	ConnectionType=Modem
+
+[Default Port Board]
+	Address = plain.example.com
+	ConnectionType = telnet
+	ScreenMode=132x37
+	BPSRate=0
+
+[Broken Entry]
+	ConnectionType=Telnet
