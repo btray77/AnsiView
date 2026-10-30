@@ -137,10 +137,16 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | WebSocket (ws and wss) | planned (transports) |
 | RLogin | planned (transports, small) |
 
+## Terminal dialing directory
+
+| Requirement | Status |
+|---|---|
+| Retro phonebook (list, tags, search, sort, notes, call stats), per-BBS settings, Keychain passwords, expect/send auto-login, dial queue with redial and busy detection, macros, JSON and SyncTERM import/export | done (local test server; real-BBS logins need owner), merged item 63 |
+| IEMSI, Sixel, iTerm2 images, SSH keys, TLS certs, RLogin | planned (transports) |
+
 ## Running right now
 
 - Editor v2: TheDraw-class tools (`ansiview-2.0-editor-tools`)
 - Image import v2 with live preview (`ansiview-2.0-image-import`)
-- Dialing directory (`ansiview-2.0-dialing-directory`)
 - File transfer protocol engines (`ansiview-2.0-transfers-core`)
 - ANSI music engine (`ansiview-2.0-music-core`)
