@@ -39,6 +39,8 @@ struct AnsiViewApp: App {
         DocumentGroup(viewing: AnsiDocument.self) { file in
             AnsiPlayerView(source: file.document.source)
         }
+        // A DOS screen (640x400) at one and a half times size.
+        .defaultSize(width: 960, height: 600)
         .commands {
             CommandGroup(after: .importExport) {
                 Button("Export Image...") { send(#selector(AnsiCanvasView.exportImage(_:))) }

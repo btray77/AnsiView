@@ -76,12 +76,23 @@ final class AnsiPlayerViewController: NSViewController {
     var isPlaying: Bool { frameTimer != nil }
     var isPaused: Bool { !isPlaying && terminal.position > 0 && !terminal.isFinished }
 
+    /// Art taller than this many lines is a "scroller": it fits the window width and scrolls.
+    static let scrollerRows = 50
+
+    private let scroll = NSScrollView()
+
     override func loadView() {
         let container = NSView()
-        let scroll = NSScrollView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.black.cgColor
+        let clip = CenteringClipView()
+        clip.drawsBackground = true
+        clip.backgroundColor = .black
+        scroll.contentView = clip
         scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = true
+        scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
         scroll.backgroundColor = .black
         scroll.drawsBackground = true
         scroll.translatesAutoresizingMaskIntoConstraints = false
@@ -107,14 +118,35 @@ final class AnsiPlayerViewController: NSViewController {
             hud.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
             hud.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
         ])
+        // No preferredContentSize here: AppKit turns it into priority 501 size constraints that
+        // would stop the window from resizing. Hosts use contentSize as a sizing hint instead.
         view = container
-        preferredContentSize = contentSize
         redraw()
 
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.speedMayHaveChanged() }
+        }
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        fitToWindow()
+    }
+
+    /// Scales the art to the window, keeping its proportions. Normal screens fit entirely and are
+    /// centered; scrollers fit the width and scroll vertically.
+    private func fitToWindow() {
+        let art = contentSize
+        let available = scroll.contentSize
+        guard art.width > 0, art.height > 0, available.width > 0, available.height > 0 else { return }
+        let widthScale = available.width / art.width
+        let isScroller = analysis.canvasRows > Self.scrollerRows && art.height * widthScale > available.height
+        let scale = isScroller ? widthScale : min(widthScale, available.height / art.height)
+        let size = CGSize(width: (art.width * scale).rounded(), height: (art.height * scale).rounded())
+        if canvas.frame.size != size {
+            canvas.setFrameSize(size)
         }
     }
 
@@ -264,6 +296,23 @@ final class AnsiPlayerViewController: NSViewController {
             padded.rows.append(Array(repeating: AnsiCell(), count: source.columns))
         }
         canvas.image = AnsiRenderer.render(padded, blinkVisible: blinkVisible, atlas: atlas)?.image
+    }
+}
+
+/// A top-down clip view that centers its document when the document is smaller than the window.
+final class CenteringClipView: NSClipView {
+    override var isFlipped: Bool { true }
+
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var rect = super.constrainBoundsRect(proposedBounds)
+        guard let document = documentView else { return rect }
+        if document.frame.width < proposedBounds.width {
+            rect.origin.x = (document.frame.width - proposedBounds.width) / 2
+        }
+        if document.frame.height < proposedBounds.height {
+            rect.origin.y = (document.frame.height - proposedBounds.height) / 2
+        }
+        return rect
     }
 }
 
