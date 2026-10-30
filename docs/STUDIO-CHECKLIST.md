@@ -68,15 +68,15 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 
 | Requirement | Status | Item / plan |
 |---|---|---|
-| XMODEM (checksum), XMODEM-CRC, XMODEM-1K | planned | transfers |
-| YMODEM, YMODEM batch | planned | transfers |
-| ZMODEM (with resume and auto-start detection) | planned | transfers |
-| Kermit | planned | transfers |
+| XMODEM (checksum), XMODEM-CRC, XMODEM-1K | engine done: both directions vs lrzsz lsx/lrx, SHA-256 match; terminal UI pending | transfers core |
+| YMODEM, YMODEM batch | engine done: both directions vs lrzsz lsb/lrb; YMODEM-G receive vs lsb (send only vs our own receiver); terminal UI pending | transfers core |
+| ZMODEM (with resume and auto-start detection) | engine done: both directions vs lrzsz lsz/lrz with options, resume both ways, auto-start; terminal UI pending | transfers core |
+| Kermit | engine done: both directions vs C-Kermit 9.0.302, long packets, windows up to 31, attributes; no text mode/RESEND/server mode; terminal UI pending | transfers core |
 | Progress, speed, ETA, logging, errors, cancel and cleanup | planned | transfers |
-| Path traversal protection, size limits, downloads folder in sandbox | planned | transfers |
-| Interop proof against independent implementations (lrzsz `sz`/`rz`, C-Kermit) | planned | transfers |
+| Path traversal protection, size limits, downloads folder in sandbox | done in engine (sanitizer, limits, marked .part resume) | transfers core |
+| Interop proof against independent implementations (lrzsz `sz`/`rz`, C-Kermit) | done: `Scripts/transfer-interop.sh`, 347/347 on the coordinator's run | transfers core |
 | Over telnet (with IAC escaping), raw TCP, SSH, WebSocket | planned | transports + transfers |
-| Others worth considering: YMODEM-G (no-ACK streaming), ZMODEM-8k, HS/Link and BiModem (bidirectional, closed specs: not planned) | research | transfers |
+| Others: YMODEM-G and ZMODEM-8k done; Hydra recommended if bidirectional is wanted; SEAlink low priority; BiModem and Puma have no public spec | researched | transfers core |
 
 ## 4. Screen designer
 
@@ -152,4 +152,3 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 
 ## Running right now
 
-- File transfer protocol engines (`ansiview-2.0-transfers-core`)
