@@ -55,6 +55,12 @@
 	<string>public.app-category.graphics-design</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright 2026 Brad Traynham</string>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/btray77/AnsiView/main/docs/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY</string>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>

@@ -61,6 +61,10 @@ struct AnsiViewApp: App {
                 })
     }
 
+    init() {
+        Updates.start()
+    }
+
     var body: some Scene {
         DocumentGroup(viewing: AnsiDocument.self) { file in
             AnsiPlayerScene(source: file.document.source, fileURL: file.fileURL)
@@ -68,9 +72,31 @@ struct AnsiViewApp: App {
         // A DOS screen (640x400) at one and a half times size.
         .defaultSize(width: 960, height: 600)
         .commands {
+            if Updates.isIncluded {
+                CommandGroup(after: .appInfo) {
+                    Button("Check for Updates...") { Updates.checkForUpdates() }
+                }
+            }
             CommandGroup(after: .newItem) {
                 Button("Open Folder or Art Pack...") { GalleryWindowController.chooseAndOpen() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
+                Button("Browse 16colo.rs...") {
+                    SixteenColorsWindowController.show(
+                        openPack: { url, _ in
+                            do { GalleryWindowController.open(collection: try ArtCollection.open(url, scoped: false)) }
+                            catch { NSAlert(error: error).runModal() }
+                        },
+                        openFile: { url in
+                            NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
+                                if let error { NSAlert(error: error).runModal() }
+                            }
+                        })
+                }
+                Menu("Open Sample") {
+                    ForEach(SampleArt.all(), id: \.url) { sample in
+                        Button(sample.title) { SampleArt.open(sample) }
+                    }
+                }
             }
             CommandGroup(after: .importExport) {
                 Button("Export Image...") { send(#selector(AnsiCanvasView.exportImage(_:))) }
@@ -87,6 +113,10 @@ struct AnsiViewApp: App {
                 Divider()
                 Button("Get Info") { send(#selector(AnsiPlayerViewController.showArtInfo(_:))) }
                     .keyboardShortcut("i")
+                Divider()
+                ForEach(ArtEditor.all, id: \.bundleIdentifier) { editor in
+                    Button(editor.menuTitle) { EditorHandoff.open(in: editor) }
+                }
             }
             CommandGroup(before: .toolbar) {
                 Toggle("CRT Effect", isOn: $crtEffect)

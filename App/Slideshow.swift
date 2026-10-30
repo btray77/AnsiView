@@ -83,6 +83,7 @@ final class SlideshowViewController: NSViewController {
         let source = collection.artFile(at: newIndex)
         let next = AnsiPlayerViewController(source: source, showsTimeline: !isPresentation)
         next.fileURL = collection.items.indices.contains(newIndex) ? collection.items[newIndex].fileURL : nil
+        next.artName = collection.items.indices.contains(newIndex) ? collection.items[newIndex].name : nil
         next.sound = makeSound?()
         next.handlesArrowKeys = false
         next.zoom = zoom

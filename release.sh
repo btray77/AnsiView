@@ -45,3 +45,5 @@ fi
 
 shasum -a 256 "$DMG"
 echo "Ready: $DMG"
+echo "For Sparkle updates: Packaging/sparkle/update-appcast.sh $DMG, attach the DMG to the GitHub"
+echo "release v$VERSION, then commit and push docs/appcast.xml."

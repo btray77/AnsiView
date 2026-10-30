@@ -46,6 +46,7 @@ final class PresentationController: NSObject {
         guard current == nil else { return }
         let presented = AnsiPlayerViewController(source: player.source, speed: player.speed, showsTimeline: false)
         presented.fileURL = player.fileURL
+        presented.artName = player.artName
         presented.sound = player.sound == nil ? nil : ModemSoundPlayer()
         let controller = PresentationController(screen: player.view.window?.screen, origin: player.view.window)
         controller.single = presented

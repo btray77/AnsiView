@@ -29,6 +29,34 @@ public enum ArtText {
     }
 }
 
+extension ArtText {
+    /// VoiceOver's value for the art view: the finished art's text as `plainText` gives it
+    /// (rows of Unicode, trailing spaces trimmed, blocks and box drawing as spaces), or "No text".
+    public static func accessibilityValue(_ screen: AnsiScreen) -> String {
+        let text = plainText(screen)
+        return text.allSatisfy(\.isWhitespace) ? "No text" : text
+    }
+
+    /// VoiceOver's description of the art view: `"Title" by Author, Group, ANSI art` from SAUCE
+    /// (empty parts left out); without SAUCE names, the file name (when known) and the format.
+    public static func accessibilityLabel(_ file: ArtFile, fileName: String?) -> String {
+        let kind = "\(file.format.displayName) art"
+        func nonEmpty(_ text: String?) -> String? { text.flatMap { $0.isEmpty ? nil : $0 } }
+        let title = nonEmpty(file.sauce?.title), author = nonEmpty(file.sauce?.author)
+        let group = nonEmpty(file.sauce?.group)
+        var parts: [String] = []
+        switch (title, author) {
+        case let (title?, author?): parts.append("\u{201C}\(title)\u{201D} by \(author)")
+        case let (title?, nil): parts.append("\u{201C}\(title)\u{201D}")
+        case let (nil, author?): parts.append("By \(author)")
+        case (nil, nil): break
+        }
+        if let group { parts.append(group) }
+        if parts.isEmpty, let name = nonEmpty(fileName) { parts.append(name) }
+        return (parts + [kind]).joined(separator: ", ")
+    }
+}
+
 /// What the Spotlight importer records for a file.
 public struct SpotlightFields {
     public let title: String?

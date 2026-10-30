@@ -60,3 +60,35 @@ struct ArtTextTests {
         #expect(blank.title == nil && blank.author == nil && blank.comment == nil && blank.fontName == nil)
     }
 }
+
+/// What VoiceOver reads for the art view (item 34).
+struct AccessibilityTextTests {
+    func file(_ raw: [UInt8], ext: String = "ans") -> ArtFile { ArtFile(data: Data(raw), fileExtension: ext) }
+
+    @Test func accessibilityValueTrimsRows() {
+        let art = file(bytes("  HELLO   \r\n\r\n") + [0xDB, 0xDB] + bytes(" WORLD  \r\n\r\n"))
+        #expect(ArtText.accessibilityValue(AnsiAnalysis(art).finalScreen) == "  HELLO\n\n   WORLD")
+    }
+
+    @Test func accessibilityLabelFromSauce() {
+        let art = file(bytes("HI") + [0x1A] + makeSauce(title: "Title", author: "Me", group: "Grp", date: "19960314"))
+        #expect(ArtText.accessibilityLabel(art, fileName: "X.ANS") == "\u{201C}Title\u{201D} by Me, Grp, ANSI art")
+        let noGroup = file(bytes("HI") + [0x1A] + makeSauce(title: "", author: "Me", group: "", date: "19960314"))
+        #expect(ArtText.accessibilityLabel(noGroup, fileName: "X.ANS") == "By Me, ANSI art")
+        let titleOnly = file(bytes("HI") + [0x1A] + makeSauce(title: "Only", author: "", group: "", date: "19960314"))
+        #expect(ArtText.accessibilityLabel(titleOnly, fileName: nil) == "\u{201C}Only\u{201D}, ANSI art")
+    }
+
+    @Test func accessibilityLabelWithoutSauce() {
+        #expect(ArtText.accessibilityLabel(file(bytes("HI")), fileName: "LOGO.ANS") == "LOGO.ANS, ANSI art")
+        #expect(ArtText.accessibilityLabel(file(bytes("HI")), fileName: nil) == "ANSI art")
+        // A SAUCE record with every name field blank counts as none.
+        let blank = file(bytes("HI") + [0x1A] + makeSauce(title: "", author: "", group: "", date: "19960314"))
+        #expect(ArtText.accessibilityLabel(blank, fileName: "B.ANS") == "B.ANS, ANSI art")
+    }
+
+    @Test func accessibilityEmptyArt() {
+        #expect(ArtText.accessibilityValue(AnsiAnalysis(file([])).finalScreen) == "No text")
+        #expect(ArtText.accessibilityValue(AnsiAnalysis(file([0xDB, 0xDB, 0xB1])).finalScreen) == "No text")
+    }
+}
