@@ -91,6 +91,24 @@ public enum BinaryFormats {
         return (result, font)
     }
 
+    /// The 16 colours a file brings with it: XBin with its palette flag, ADF, IDF; nil otherwise.
+    public static func embeddedPalette(_ bytes: [UInt8], format: ArtFormat) -> [RGB]? {
+        switch format {
+        case .xbin:
+            guard bytes.count >= 11 + 48, bytes[10] & 0x01 != 0 else { return nil }
+            return sixBitPalette(bytes[11..<59], indexes: Array(0..<16))
+        case .adf:
+            guard bytes.count >= 193 else { return nil }
+            return sixBitPalette(bytes[1..<193], indexes: [0, 1, 2, 3, 4, 5, 20, 7, 56, 57, 58, 59, 60, 61, 62, 63])
+        case .idf:
+            let trailer = 4096 + 48
+            guard bytes.count >= 12 + trailer else { return nil }
+            return sixBitPalette(bytes[(bytes.count - 48)...], indexes: Array(0..<16))
+        default:
+            return nil
+        }
+    }
+
     // MARK: Helpers
 
     /// Builds rows from char/attribute pairs. Attribute: low nibble foreground, bits 4-6 background,

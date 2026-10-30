@@ -1,5 +1,5 @@
 /// A 24 bit color.
-public struct RGB: Hashable {
+public struct RGB: Hashable, Codable {
     public var r: UInt8
     public var g: UInt8
     public var b: UInt8

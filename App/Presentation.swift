@@ -51,6 +51,7 @@ final class PresentationController: NSObject {
         presented.music = player.music == nil ? nil : AudioMusicOutput()
         presented.musicMuted = player.musicMuted
         ViewerCopy.enable(presented)
+        presented.paletteOverride = player.paletteOverride
         let controller = PresentationController(screen: player.view.window?.screen, origin: player.view.window)
         controller.single = presented
         controller.originPlayer = player

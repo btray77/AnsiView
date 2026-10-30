@@ -42,4 +42,13 @@ struct ThumbnailTests {
         #expect(image.width >= 1 && image.height >= 1)
         #expect(Thumbnail.render(ArtFile(data: Data()), maximum: .zero) == nil)
     }
+
+    @Test func renderFromAKnownScreenMatches() throws {
+        let file = lines(40)
+        let screen = AnsiAnalysis(file).finalScreen
+        let a = try #require(Thumbnail.render(file, maximum: CGSize(width: 128, height: 128)))
+        let b = try #require(Thumbnail.render(file, screen: screen, maximum: CGSize(width: 128, height: 128)))
+        #expect(a.width == b.width && a.height == b.height)
+        #expect(a.dataProvider?.data as Data? == b.dataProvider?.data as Data?)
+    }
 }

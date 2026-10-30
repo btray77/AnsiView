@@ -614,6 +614,11 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
             showPack(loaded)
             let groups = pack.groups.isEmpty ? "" : " by \(pack.groups.joined(separator: ", "))"
             finish("\(pack.name)\(groups): \(loaded.files.count) files.")
+            // Plan 9 ruling 13: the pack's FILE_ID file shows at once (one request in the lane,
+            // cancelled by any other selection).
+            if let id = loaded.fileID, let row = files.firstIndex(where: { $0.name == id }), files[row].isViewable {
+                _ = chooseFile(row)
+            }
         } catch {
             guard mine == generation else { return }
             failed(error) { [weak self] in await self?.selectPack(index) }
@@ -1195,4 +1200,33 @@ struct PictureLoad {
     let task: Task<Void, Never>
 
     func cancel() { task.cancel() }
+}
+
+// MARK: Artists and groups (plan 9 item 44)
+
+extension SixteenColorsClient {
+    /// The packs 16colo.rs lists for an artist; empty when it knows no one by that name.
+    func artistPacks(_ name: String) async throws -> [SixteenColors.RemotePack] {
+        guard let url = SixteenColors.artistURL(name) else { return [] }
+        do { return try SixteenColors.decodeArtist(try await json(url)) }
+        catch let error as HTTPError where error.status == 400 || error.status == 404 { return [] }
+    }
+
+    /// The packs of the group 16colo.rs files under this name (its tag or long name), with that
+    /// group; nil when it has none by that name.
+    func groupPacks(_ name: String) async throws -> (group: SixteenColors.GroupMatch, packs: [SixteenColors.RemotePack])? {
+        guard let search = SixteenColors.groupSearchURL(name) else { return nil }
+        let matches: [SixteenColors.GroupMatch]
+        do { matches = try SixteenColors.decodeGroupSearch(try await json(search)) }
+        catch let error as HTTPError where error.status == 400 || error.status == 404 { return nil }
+        guard let group = SixteenColors.bestGroup(matches, for: name) else { return nil }
+        guard let url = SixteenColors.groupPacksURL(tag: group.tag) else { return (group, []) }
+        do { return (group, try SixteenColors.decodeGroupPacks(try await json(url))) }
+        catch let error as HTTPError where error.status == 400 || error.status == 404 { return (group, []) }
+    }
+
+    /// Downloads a pack by name and opens it in a gallery.
+    func openPack(named name: String) async throws -> URL {
+        try await downloadPack(try await pack(named: name))
+    }
 }
