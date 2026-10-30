@@ -240,6 +240,8 @@ public struct FIGletFont: Equatable {
         var scalars = Array(text.unicodeScalars)
         if printDirection == 1 { scalars.reverse() }
         for scalar in scalars {
+            // Wider than any canvas: the rest would be clipped anyway (review I1).
+            if (output.first?.count ?? 0) > EditCanvas.maxColumns { break }
             guard let found = glyphCode(for: scalar) else {
                 missing.append(Character(scalar))
                 continue

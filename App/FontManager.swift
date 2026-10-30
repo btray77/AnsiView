@@ -49,8 +49,10 @@ final class FontManagerViewController: NSViewController, NSTableViewDataSource, 
     private(set) var rows: [FontEntry] = []
     private var observer: NSObjectProtocol?
 
+    private var sampleObserver: NSObjectProtocol?
+
     deinit {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
+        for token in [observer, sampleObserver].compactMap({ $0 }) { NotificationCenter.default.removeObserver(token) }
     }
 
     override func loadView() {
@@ -161,6 +163,12 @@ final class FontManagerViewController: NSViewController, NSTableViewDataSource, 
         observer = NotificationCenter.default.addObserver(forName: .fontLibraryChanged, object: nil, queue: .main) { [weak self] _ in
             self?.reload(nil)
         }
+        // The Text to ASCII window changed the shared sample text (review M14).
+        sampleObserver = NotificationCenter.default.addObserver(forName: .fontSampleChanged, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.sampleField.stringValue != self.library.sampleText else { return }
+            self.sampleField.stringValue = self.library.sampleText
+            self.selectionChanged(nil)
+        }
         reload(nil)
     }
 
@@ -229,6 +237,7 @@ final class FontManagerViewController: NSViewController, NSTableViewDataSource, 
 
     @objc func sampleChanged(_ sender: Any?) {
         library.sampleText = sampleField.stringValue
+        NotificationCenter.default.post(name: .fontSampleChanged, object: nil)
         selectionChanged(nil)
     }
 

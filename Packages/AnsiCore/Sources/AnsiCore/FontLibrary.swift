@@ -86,7 +86,10 @@ public final class FontLibrary {
         }
     }
 
-    public static let maxImportFiles = 2000
+    /// At most this many files (zip entries included) are looked at in one import.
+    public var maxImportFiles = 2000
+    /// Files larger than this are refused before they are read.
+    public var maxImportFileSize = 64 << 20
 
     public let directory: URL
     public private(set) var entries: [FontEntry] = []
@@ -96,6 +99,8 @@ public final class FontLibrary {
     public var sampleText = "AnsiView" { didSet { save() } }
     /// Warnings from reading the user's folder (damaged files).
     public private(set) var loadWarnings: [String] = []
+    /// Goes up every time the installed fonts are read again (an import or a removal).
+    public private(set) var revision = 0
 
     /// The folder in the app's container (sandbox safe), created when missing.
     public static var defaultDirectory: URL {
@@ -149,6 +154,7 @@ public final class FontLibrary {
             }
         }
         entries = list
+        revision += 1
     }
 
     // MARK: Import (ruling 15)
@@ -158,22 +164,35 @@ public final class FontLibrary {
     public func importFonts(from urls: [URL]) -> ImportReport {
         var report = ImportReport()
         var candidates: [(name: String, data: Data)] = []
+        var full: Bool { candidates.count + report.failures.count >= maxImportFiles }
+        /// Mac zips carry resource forks as `__MACOSX/._NAME` entries: not fonts (review M5).
+        func isResourceFork(_ path: String) -> Bool {
+            path.hasPrefix("__MACOSX/") || path.contains("/__MACOSX/") || (path as NSString).lastPathComponent.hasPrefix("._")
+        }
+        func tooLarge(_ url: URL) -> Bool {
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            guard size > maxImportFileSize else { return false }
+            report.failures.append(.init(file: url.lastPathComponent, reason: "This file is too large to be a font (\(size / 1_048_576) MB)."))
+            return true
+        }
         func consider(_ url: URL) {
-            guard candidates.count + report.failures.count < Self.maxImportFiles else { return }
+            guard !full else { return }
             let ext = url.pathExtension.lowercased()
             if ext == "zip" {
+                guard !tooLarge(url) else { return }
                 guard let data = try? Data(contentsOf: url), let zip = try? ZipArchive(data: data) else {
                     report.failures.append(.init(file: url.lastPathComponent, reason: "The ZIP archive could not be read."))
                     return
                 }
-                for entry in zip.entries where FontLoader.extensions.contains((entry.name as NSString).pathExtension.lowercased()) {
+                for entry in zip.entries where !full && !isResourceFork(entry.path)
+                    && FontLoader.extensions.contains((entry.name as NSString).pathExtension.lowercased()) {
                     if let bytes = try? zip.data(for: entry) {
                         candidates.append((entry.name, bytes))
                     } else {
                         report.failures.append(.init(file: entry.name, reason: "This ZIP entry could not be unpacked."))
                     }
                 }
-            } else if FontLoader.extensions.contains(ext) {
+            } else if FontLoader.extensions.contains(ext), !isResourceFork(url.lastPathComponent), !tooLarge(url) {
                 if let data = try? Data(contentsOf: url) { candidates.append((url.lastPathComponent, data)) }
             }
         }
@@ -181,8 +200,9 @@ public final class FontLibrary {
             var isFolder: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else { continue }
             if isFolder.boolValue {
-                let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
-                while let item = walker?.nextObject() as? URL { consider(item) }
+                // The walk stops at the cap (choosing the home folder must not walk all of it).
+                let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles])
+                while !full, let item = walker?.nextObject() as? URL { consider(item) }
             } else {
                 consider(url)
             }

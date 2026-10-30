@@ -50,180 +50,6 @@ final class TextToASCIIWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
-// MARK: Cards
-
-/// One font in the gallery: name, kind, favourite star, the rendered sample, missing characters.
-/// Laid out with frames, not constraints: hundreds of cards changing size on every keystroke
-/// must not go through the constraint solver.
-final class GalleryCardView: NSView, NSDraggingSource {
-    static let headerHeight: CGFloat = 24
-    static let padding: CGFloat = 8
-    static let maxImageHeight: CGFloat = 240
-
-    let entry: FontEntry
-    weak var owner: TextToASCIIViewController?
-    let star = NSButton(title: "", target: nil, action: nil)
-    let nameLabel: NSTextField
-    let kindLabel: NSTextField
-    let imageView = NSImageView()
-    let missingLabel = NSTextField(labelWithString: "")
-    private(set) var result: TextArtResult?
-    private var dragStart: NSPoint?
-
-    var isSelected = false { didSet { updateLook() } }
-    var isFavourite = false { didSet { star.title = isFavourite ? "★" : "☆" } }
-
-    init(entry: FontEntry, owner: TextToASCIIViewController) {
-        self.entry = entry
-        self.owner = owner
-        nameLabel = NSTextField(labelWithString: entry.name)
-        kindLabel = NSTextField(labelWithString: "\(entry.kindLabel)  \u{00B7}  \(entry.fileName)")
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = 6
-        layer?.borderWidth = 1
-        star.isBordered = false
-        star.font = NSFont.systemFont(ofSize: 15)
-        star.target = self
-        star.action = #selector(toggleStar(_:))
-        star.toolTip = "Favourite: favourites come first in the gallery"
-        nameLabel.font = NSFont.boldSystemFont(ofSize: 12)
-        nameLabel.lineBreakMode = .byTruncatingTail
-        kindLabel.font = NSFont.systemFont(ofSize: 11)
-        kindLabel.textColor = .secondaryLabelColor
-        kindLabel.lineBreakMode = .byTruncatingMiddle
-        missingLabel.font = NSFont.systemFont(ofSize: 11)
-        missingLabel.textColor = .systemOrange
-        missingLabel.lineBreakMode = .byTruncatingTail
-        missingLabel.toolTip = "Characters this font does not have; they are left as a gap (letters use the other case first)"
-        imageView.imageScaling = .scaleProportionallyUpOrDown
-        imageView.imageAlignment = .alignTopLeft
-        imageView.wantsLayer = true
-        imageView.layer?.backgroundColor = NSColor.black.cgColor
-        imageView.toolTip = "Click to select, double-click to copy as text, or drag the art out as text"
-        for view in [star, nameLabel, kindLabel, missingLabel, imageView] as [NSView] { addSubview(view) }
-        updateLook()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    override var isFlipped: Bool { true }
-
-    /// The art's size on screen for a card `width` wide: its own size, scaled down to fit.
-    func imageSize(forWidth width: CGFloat) -> NSSize {
-        guard let size = imageView.image?.size, size.width > 0, size.height > 0 else { return NSSize(width: 0, height: 16) }
-        let available = max(16, width - 2 * Self.padding)
-        let scale = min(1, available / size.width, Self.maxImageHeight / size.height)
-        return NSSize(width: floor(size.width * scale), height: floor(size.height * scale))
-    }
-
-    func height(forWidth width: CGFloat) -> CGFloat {
-        Self.headerHeight + imageSize(forWidth: width).height + Self.padding + 4
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        let changed = newSize != frame.size
-        super.setFrameSize(newSize)
-        if changed { needsLayout = true }
-    }
-
-    override func layout() {
-        super.layout()
-        let w = bounds.width, p = Self.padding
-        star.frame = NSRect(x: p - 2, y: 3, width: 20, height: 20)
-        let nameWidth = min(ceil(nameLabel.intrinsicContentSize.width) + 4, w * 0.45)
-        nameLabel.frame = NSRect(x: p + 20, y: 5, width: nameWidth, height: 16)
-        let missingWidth = missingLabel.stringValue.isEmpty ? 0 : min(missingLabel.intrinsicContentSize.width, w * 0.3)
-        missingLabel.frame = NSRect(x: w - p - missingWidth, y: 6, width: missingWidth, height: 15)
-        let kindX = nameLabel.frame.maxX + 8
-        kindLabel.frame = NSRect(x: kindX, y: 6, width: max(0, missingLabel.frame.minX - 8 - kindX), height: 15)
-        let size = imageSize(forWidth: w)
-        imageView.frame = NSRect(x: p, y: Self.headerHeight, width: size.width, height: size.height)
-    }
-
-    func show(_ result: TextArtResult, image: NSImage?) {
-        self.result = result
-        missingLabel.stringValue = result.missing.isEmpty ? "" : "missing: " + String(result.missing.prefix(12))
-        imageView.image = image
-        needsLayout = true
-    }
-
-    /// What dragging the card out drops: its art as plain text.
-    var dragText: String? { result.map { TextArtOutput.plainText($0.region) } }
-
-    func clearImage() {
-        result = nil
-        imageView.image = nil
-    }
-
-    private func updateLook() {
-        layer?.borderColor = (isSelected ? NSColor.controlAccentColor : NSColor.separatorColor).cgColor
-        layer?.borderWidth = isSelected ? 2 : 1
-        layer?.backgroundColor = (isSelected ? NSColor.controlAccentColor.withAlphaComponent(0.12) : NSColor.controlBackgroundColor).cgColor
-    }
-
-    @objc private func toggleStar(_ sender: Any?) { owner?.toggleFavourite(entry.id) }
-
-    override func mouseDown(with event: NSEvent) {
-        dragStart = convert(event.locationInWindow, from: nil)
-        owner?.select(entry.id)
-        if event.clickCount == 2 { owner?.copyText(nil) }
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard let start = dragStart, let result else { return }
-        let point = convert(event.locationInWindow, from: nil)
-        guard hypot(point.x - start.x, point.y - start.y) > 4 else { return }
-        dragStart = nil
-        let item = NSPasteboardItem()
-        item.setString(dragText ?? "", forType: .string)
-        let dragging = NSDraggingItem(pasteboardWriter: item)
-        dragging.setDraggingFrame(imageView.frame, contents: imageView.image)
-        beginDraggingSession(with: [dragging], event: event, source: self)
-    }
-
-    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        .copy
-    }
-}
-
-/// The gallery's document view: takes the keyboard for card navigation.
-final class GalleryDocumentView: NSView {
-    weak var owner: TextToASCIIViewController?
-    var cards: [GalleryCardView] = []
-    override var isFlipped: Bool { true }
-    override var acceptsFirstResponder: Bool { true }
-
-    /// Stacks the cards top to bottom at the scroll view's width and sizes itself to fit.
-    func layoutCards() {
-        let width = superview?.bounds.width ?? bounds.width
-        var y: CGFloat = 8
-        for card in cards {
-            let height = card.height(forWidth: width - 16)
-            card.frame = NSRect(x: 8, y: y, width: width - 16, height: height)
-            y += height + 8
-        }
-        setFrameSize(NSSize(width: width, height: max(y, superview?.bounds.height ?? 0)))
-    }
-
-    override func resize(withOldSuperviewSize oldSize: NSSize) {
-        super.resize(withOldSuperviewSize: oldSize)
-        layoutCards()
-    }
-
-    override func keyDown(with event: NSEvent) {
-        switch event.keyCode {
-        case 125, 124: owner?.moveSelection(by: 1)   // down, right
-        case 126, 123: owner?.moveSelection(by: -1)  // up, left
-        case 36, 76: owner?.copyText(nil)           // Return, Enter
-        default: super.keyDown(with: event)
-        }
-    }
-
-    override func mouseDown(with event: NSEvent) { window?.makeFirstResponder(self) }
-}
-
 // MARK: The window
 
 final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSSearchFieldDelegate {
@@ -242,6 +68,11 @@ final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSS
     let emptyNote = NSTextField(wrappingLabelWithString: FontHelp.emptyState)
     let gallery = GalleryDocumentView()
     private var layoutPending = false
+    let scrollRenderer = GalleryRenderer(concurrency: 2)
+    private var renderedKeys: [String: String] = [:]
+    private var cardsRevision = -1
+    private var sampleSave: DispatchWorkItem?
+    private var keyObserver: NSObjectProtocol?
     let galleryScroll = NSScrollView()
 
     // Detail pane
@@ -267,8 +98,7 @@ final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSS
     let insertButton = NSButton(title: "Insert into Editor", target: nil, action: nil)
     let statusLabel = NSTextField(labelWithString: "")
 
-    private(set) var cards: [GalleryCardView] = []
-    private var cardByID: [String: GalleryCardView] = [:]
+    private var states: [String: GalleryCardState] = [:]
     private(set) var selectedID: String?
     private(set) var options = TextArtOptions()
     private(set) weak var editorController: EditorViewController?
@@ -292,7 +122,7 @@ final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSS
     ]
 
     deinit {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
+        for token in [observer, keyObserver].compactMap({ $0 }) { NotificationCenter.default.removeObserver(token) }
     }
 
     var text: String { textView.string }
@@ -358,6 +188,7 @@ final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSS
 
         // Gallery.
         gallery.owner = self
+        gallery.imageSize = { [weak self] id in self?.cardImageSize(id) }
         gallery.autoresizingMask = [.width]
         galleryScroll.documentView = gallery
         galleryScroll.hasVerticalScroller = true
@@ -590,28 +421,32 @@ final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSS
         FontGallery.arrange(library.entries, query: query, favourites: library.favourites, recent: library.recent, sizes: sizes)
     }
 
-    /// Rebuilds the cards for the current query, then renders them.
+    /// The fonts in the gallery, in order (only those near the visible area have card views).
+    var entries: [FontEntry] { gallery.entries }
+
+    /// What a font's card shows now, when it has been drawn and is still kept.
+    func state(for id: String) -> GalleryCardState? { states[id] }
+
+    /// Fills a card view for `entry` (called by the gallery as it tiles).
+    func configure(_ card: GalleryCardView, entry: FontEntry) {
+        card.configure(entry: entry, state: states[entry.id], favourite: library.favourites.contains(entry.id),
+                       selected: entry.id == selectedID)
+    }
+
+    /// Rebuilds the gallery for the current query, then renders it.
     func rebuildCards() {
-        let entries = arrangedEntries
-        let existing = Dictionary(uniqueKeysWithValues: cards.map { ($0.entry.id, $0) })
-        for card in cards { card.removeFromSuperview() }
-        cards = entries.map { entry in
-            if let card = existing[entry.id], card.entry == entry { return card }
-            return GalleryCardView(entry: entry, owner: self)
+        // After an import or removal nothing drawn for the old fonts is kept (ids can be reused).
+        if library.revision != cardsRevision {
+            cardsRevision = library.revision
+            states = [:]
+            renderedKeys = [:]
         }
-        cardByID = Dictionary(uniqueKeysWithValues: cards.map { ($0.entry.id, $0) })
-        for card in cards {
-            card.isFavourite = library.favourites.contains(card.entry.id)
-            card.isSelected = card.entry.id == selectedID
-            gallery.addSubview(card)
-        }
-        gallery.cards = cards
-        gallery.layoutCards()
+        gallery.setEntries(arrangedEntries)
         emptyNote.isHidden = !library.userEntries.isEmpty
-        countLabel.stringValue = "\(cards.count) of \(library.entries.count) fonts"
-        if selectedID == nil || !cards.contains(where: { $0.entry.id == selectedID }) {
-            selectedID = cards.first?.entry.id
-            for card in cards { card.isSelected = card.entry.id == selectedID }
+        countLabel.stringValue = "\(entries.count) of \(library.entries.count) fonts"
+        if selectedID == nil || !entries.contains(where: { $0.id == selectedID }) {
+            selectedID = entries.first?.id
+            gallery.tile()
         }
         renderGallery()
         renderDetail()
@@ -619,67 +454,148 @@ final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSS
 
     /// Cards on screen now (rendered first).
     var visibleIDs: [String] {
-        let visible = galleryScroll.documentVisibleRect.insetBy(dx: 0, dy: -200)
-        return cards.filter { gallery.convert($0.bounds, from: $0).intersects(visible) }.map(\.entry.id)
+        gallery.indexes(in: galleryScroll.documentVisibleRect).map { entries[$0].id }
     }
 
-    /// Starts rendering every card (visible ones first); a newer call cancels this one.
+    /// Galleries up to this size render every card per keystroke; larger ones render the cards
+    /// near the visible part and the rest as they scroll into view (review I3).
+    static let renderAllLimit = 300
+
+    var galleryOptions: TextArtOptions {
+        var result = TextArtOptions()
+        result.foreground = options.foreground
+        result.background = options.background
+        result.outlineStyle = options.outlineStyle
+        result.gradient = options.gradient
+        result.iceColors = options.iceColors
+        return result
+    }
+
+    /// What a card shows: the text and the options that change gallery cards.
+    var renderKey: String {
+        let o = galleryOptions
+        return "\(text)\u{0}\(o.foreground),\(o.background),\(o.outlineStyle),\(o.iceColors),\(String(describing: o.gradient))"
+    }
+
+    /// Fonts near the visible part of the gallery: `screens` above and below.
+    func nearbyIDs(screens: CGFloat = 1) -> [String] {
+        let visible = galleryScroll.documentVisibleRect
+        return gallery.indexes(in: visible.insetBy(dx: 0, dy: -visible.height * screens)).map { entries[$0].id }
+    }
+
+    /// Starts rendering the cards (visible ones first); a newer call cancels this one.
     func renderGallery() {
-        let text = self.text
-        var galleryOptions = TextArtOptions()
-        galleryOptions.foreground = options.foreground
-        galleryOptions.background = options.background
-        galleryOptions.outlineStyle = options.outlineStyle
-        galleryOptions.gradient = options.gradient
-        galleryOptions.iceColors = options.iceColors
-        let entries = cards.map(\.entry)
+        let text = self.text, key = renderKey
+        let list = entries
+        let wanted = list.count <= Self.renderAllLimit ? list : nearbyIDs().compactMap { id in list.first { $0.id == id } }
         renderStart = CACurrentMediaTime()
         renderToken += 1
         let token = renderToken
         delivered = 0
-        expected = entries.count
+        expected = wanted.count
         firstCardSeconds = nil
         allCardsSeconds = nil
-        renderer.start(text: text, entries: entries, options: galleryOptions, priority: visibleIDs) { [weak self] id, result in
-            // Drawn here, off the main thread; only the hand-over happens on main.
-            let image = TextArtImages.image(result.region)
+        renderer.start(text: text, entries: wanted, options: galleryOptions, priority: visibleIDs) { [weak self] id, result in
+            // Drawn and scaled to display size here, off the main thread; only the hand-over is on main.
+            let image = TextArtImages.thumbnail(result.region)
             DispatchQueue.main.async {
                 // A newer keystroke started another run while this card was on its way: drop it.
                 guard let self, self.renderToken == token else { return }
-                self.deliver(id: id, result: result, image: image)
+                self.deliver(id: id, result: result, image: image, key: key, counted: true)
             }
         }
     }
 
-    private func deliver(id: String, result: TextArtResult, image: NSImage?) {
-        guard let card = cardByID[id] else { return }
-        card.show(result, image: image)
-        sizes[id] = GallerySize(columns: result.region.width, rows: result.region.height)
-        // Cards arriving together are laid out once.
-        if !layoutPending {
-            layoutPending = true
-            DispatchQueue.main.async { [weak self] in
-                self?.layoutPending = false
-                self?.gallery.layoutCards()
+    /// Cards scrolled into view that still show older text are drawn now (review M12).
+    @objc private func galleryScrolled(_ note: Notification) {
+        gallery.tile()
+        let key = renderKey, text = self.text
+        let ids = Set(nearbyIDs().filter { renderedKeys[$0] != key })
+        guard !ids.isEmpty else { return }
+        let stale = entries.filter { ids.contains($0.id) }
+        scrollRenderer.start(text: text, entries: stale, options: galleryOptions, priority: visibleIDs) { [weak self] id, result in
+            let image = TextArtImages.thumbnail(result.region)
+            DispatchQueue.main.async {
+                guard let self, self.renderKey == key else { return }
+                self.deliver(id: id, result: result, image: image, key: key, counted: false)
             }
         }
+    }
+
+    private func deliver(id: String, result: TextArtResult, image: NSImage?, key: String, counted: Bool) {
+        states[id] = GalleryCardState(result: result, image: image, key: key)
+        renderedKeys[id] = key
+        sizes[id] = GallerySize(columns: result.region.width, rows: result.region.height)
+        scheduleLayout()
+        guard counted else { return }
         delivered += 1
         let elapsed = CACurrentMediaTime() - renderStart
         if firstCardSeconds == nil { firstCardSeconds = elapsed }
         if delivered == expected {
             allCardsSeconds = elapsed
+            // Order and the Tall filter depend on sizes: arrange again now they are known (review M13).
+            if query.sort != .name || query.minimumRows != nil {
+                let order = arrangedEntries
+                if order.map(\.id) != entries.map(\.id) { gallery.setEntries(order) }
+                countLabel.stringValue = "\(entries.count) of \(library.entries.count) fonts"
+            }
             onGalleryComplete?()
         }
     }
 
-    func stopRendering() { renderer.cancel() }
+    /// Cards arriving together are laid out once; far away art is let go (memory stays bounded).
+    private func scheduleLayout() {
+        guard !layoutPending else { return }
+        layoutPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.layoutPending = false
+            self.evictFarStates()
+            self.gallery.relayout()
+        }
+    }
 
-    @objc private func galleryScrolled(_ note: Notification) {}
+    /// Keeps the drawn art of at most a few hundred fonts: those near the visible area and the
+    /// selected one. Card heights come from `sizes`, which stay.
+    private func evictFarStates() {
+        guard states.count > Self.renderAllLimit else { return }
+        var keep = Set(nearbyIDs(screens: 3))
+        if let selectedID { keep.insert(selectedID) }
+        for id in states.keys where !keep.contains(id) {
+            states[id] = nil
+            renderedKeys[id] = nil
+        }
+    }
+
+    /// The size a card's art has (drawn, or estimated from its last measured size).
+    func cardImageSize(_ id: String) -> NSSize? {
+        if let image = states[id]?.image { return image.size }
+        if let size = sizes[id], size.columns > 0 { return NSSize(width: size.columns * 8, height: size.rows * 16) }
+        return nil
+    }
+
+    func stopRendering() {
+        renderer.cancel()
+        scrollRenderer.cancel()
+        saveSampleNow()
+    }
 
     func textDidChange(_ notification: Notification) {
-        library.sampleText = text
+        // Saved a second after typing stops, not on every keystroke (review I2).
+        sampleSave?.cancel()
+        let save = DispatchWorkItem { [weak self] in self?.saveSampleNow() }
+        sampleSave = save
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: save)
         renderGallery()
         renderDetail()
+    }
+
+    func saveSampleNow() {
+        sampleSave?.cancel()
+        sampleSave = nil
+        guard library.sampleText != text else { return }
+        library.sampleText = text
+        NotificationCenter.default.post(name: .fontSampleChanged, object: nil)
     }
 
     func controlTextDidChange(_ obj: Notification) {
@@ -703,17 +619,19 @@ final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSS
 
     func select(_ id: String) {
         selectedID = id
-        for card in cards { card.isSelected = card.entry.id == id }
-        if let card = cards.first(where: { $0.entry.id == id }) { gallery.scrollToVisible(gallery.convert(card.bounds, from: card)) }
+        for card in gallery.live.values { card.isSelected = card.entry?.id == id }
+        if let frame = gallery.frame(of: id) { gallery.scrollToVisible(frame) }
+        gallery.tile()
         view.window?.makeFirstResponder(gallery)
         updateDetailControls()
         renderDetail()
     }
 
     func moveSelection(by step: Int) {
-        guard !cards.isEmpty else { return }
-        let index = cards.firstIndex { $0.entry.id == selectedID } ?? -step
-        select(cards[min(cards.count - 1, max(0, index + step))].entry.id)
+        let list = entries
+        guard !list.isEmpty else { return }
+        let index = list.firstIndex { $0.id == selectedID } ?? -step
+        select(list[min(list.count - 1, max(0, index + step))].id)
     }
 
     func toggleFavourite(_ id: String) {
@@ -742,8 +660,7 @@ final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSS
         foregroundPopup.isEnabled = mono
         gradientPopup.isEnabled = mono
         iceBox.isEnabled = !mono
-        insertButton.isEnabled = editorController != nil
-        transparentBox.isEnabled = editorController != nil
+        refreshEditorBinding()
     }
 
     @objc func optionsChanged(_ sender: Any?) {
@@ -763,6 +680,8 @@ final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSS
         options.outlineStyle = max(0, outlinePopup.indexOfSelectedItem)
         options.spacing = spacingPopup.indexOfSelectedItem > 0 ? spacingPopup.indexOfSelectedItem - 1 : nil
         options.iceColors = iceBox.state == .on
+        // The box is the editor's own Transparent paste setting (review M11).
+        if (sender as AnyObject?) === transparentBox { editorController?.editor.transparentPaste = transparentBox.state == .on }
         updateDetailControls()
         // Colours, outline style and gradient show on every card; layouts only in the detail.
         if sender == nil || [foregroundPopup, backgroundPopup, gradientPopup, outlinePopup, iceBox].contains(where: { $0 === sender as AnyObject }) {
@@ -860,7 +779,30 @@ final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSS
     }
 
     /// Floats the art in the bound editor at its cursor (ruling 17).
+    /// Insert names the bound document and is off once it has closed; Transparent shows the
+    /// editor's own setting, which T in the editor may have changed (review M10, M11).
+    func refreshEditorBinding() {
+        let bound = editorController
+        insertButton.isEnabled = bound != nil
+        transparentBox.isEnabled = bound != nil
+        if let bound {
+            transparentBox.state = bound.editor.transparentPaste ? .on : .off
+            let name = bound.view.window?.title ?? ""
+            insertButton.title = name.isEmpty ? "Insert into Editor" : "Insert into \(name)"
+        } else {
+            insertButton.title = "Insert into Editor"
+        }
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        guard keyObserver == nil, let window = view.window else { return }
+        keyObserver = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window,
+                                                             queue: .main) { [weak self] _ in self?.refreshEditorBinding() }
+    }
+
     @objc func insert(_ sender: Any?) {
+        refreshEditorBinding()
         guard let editorController, let region = currentRegion else { NSSound.beep(); return }
         let editor = editorController.editor
         editor.transparentPaste = transparentBox.state == .on

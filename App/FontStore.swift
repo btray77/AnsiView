@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 extension Notification.Name {
     /// The installed fonts, favourites or recent list changed.
     static let fontLibraryChanged = Notification.Name("AnsiViewFontLibraryChanged")
+    /// The sample text was changed in one window (the others show it).
+    static let fontSampleChanged = Notification.Name("AnsiViewFontSampleChanged")
 }
 
 /// The app's one font library (fonts plan ruling 15), used on the main thread.
