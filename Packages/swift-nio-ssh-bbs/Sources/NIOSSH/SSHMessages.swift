@@ -32,12 +32,19 @@ enum SSHMessage: Equatable {
     case keyExchange(KeyExchangeMessage)
     case keyExchangeInit(KeyExchangeECDHInitMessage)
     case keyExchangeReply(KeyExchangeECDHReplyMessage)
+    // AnsiView patch: RFC 4419 SSH_MSG_KEX_DH_GEX_GROUP (31, told apart from KEXDH_REPLY by its shape).
+    case keyExchangeDHGroupExchangeGroup(KeyExchangeDHGroupExchangeGroupMessage)
     case newKeys
     case userAuthRequest(UserAuthRequestMessage)
     case userAuthFailure(UserAuthFailureMessage)
     case userAuthSuccess
     case userAuthBanner(UserAuthBannerMessage)
     case userAuthPKOK(UserAuthPKOKMessage)
+    // AnsiView patch: RFC 4256 keyboard-interactive (60 and 61) and RFC 4252 section 8
+    // SSH_MSG_USERAUTH_PASSWD_CHANGEREQ (60), told apart from PK_OK by their shape.
+    case userAuthInfoRequest(UserAuthInfoRequestMessage)
+    case userAuthInfoResponse(UserAuthInfoResponseMessage)
+    case userAuthPasswordChangeRequest(UserAuthPasswordChangeRequestMessage)
     case globalRequest(GlobalRequestMessage)
     case requestSuccess(RequestSuccessMessage)
     case requestFailure
@@ -123,6 +130,33 @@ extension SSHMessage {
 
         // Q_C, client's ephemeral public key octet string
         var publicKey: ByteBuffer
+
+        // AnsiView patch: the same shape carries the finite field DH e (30, KEXDH_INIT), the group
+        // exchange e (32, KEX_DH_GEX_INIT) and, with no key, the group request (34, KEX_DH_GEX_REQUEST).
+        enum Kind: Equatable {
+            case ecdh
+            case groupExchangeInit
+            case groupExchangeRequest(minimum: UInt32, preferred: UInt32, maximum: UInt32)
+        }
+
+        var kind: Kind = .ecdh
+
+        var messageID: UInt8 {
+            switch self.kind {
+            case .ecdh: return 30
+            case .groupExchangeInit: return 32
+            case .groupExchangeRequest: return 34
+            }
+        }
+    }
+
+    // AnsiView patch: RFC 4419 SSH_MSG_KEX_DH_GEX_GROUP.
+    struct KeyExchangeDHGroupExchangeGroupMessage: Equatable {
+        static let id: UInt8 = 31
+
+        // mpint p and mpint g, as their bodies.
+        var prime: ByteBuffer
+        var generator: ByteBuffer
     }
 
     // RFC 5656 § 4
@@ -136,6 +170,9 @@ extension SSHMessage {
         var publicKey: ByteBuffer
         // the signature on the exchange hash
         var signature: NIOSSHSignature
+
+        // AnsiView patch: true for RFC 4419 SSH_MSG_KEX_DH_GEX_REPLY (33), same shape as 31.
+        var isGroupExchangeReply: Bool = false
     }
 
     struct UserAuthRequestMessage: Equatable {
@@ -146,6 +183,8 @@ extension SSHMessage {
             case none
             case publicKey(PublicKeyAuthType)
             case password(String)
+            // AnsiView patch: RFC 4256 section 3.1 (language tag sent empty).
+            case keyboardInteractive(submethods: String)
         }
 
         enum PublicKeyAuthType: Equatable {
@@ -178,6 +217,36 @@ extension SSHMessage {
         var message: String
 
         /// tag identifying language of banner, following RFC 3066
+        var languageTag: String
+    }
+
+    // AnsiView patch: RFC 4256 section 3.2 SSH_MSG_USERAUTH_INFO_REQUEST.
+    struct UserAuthInfoRequestMessage: Equatable {
+        static let id: UInt8 = 60
+
+        struct Prompt: Equatable {
+            var prompt: String
+            var echo: Bool
+        }
+
+        var name: String
+        var instruction: String
+        var languageTag: String
+        var prompts: [Prompt]
+    }
+
+    // AnsiView patch: RFC 4256 section 3.4 SSH_MSG_USERAUTH_INFO_RESPONSE.
+    struct UserAuthInfoResponseMessage: Equatable {
+        static let id: UInt8 = 61
+
+        var responses: [String]
+    }
+
+    // AnsiView patch: RFC 4252 section 8 SSH_MSG_USERAUTH_PASSWD_CHANGEREQ.
+    struct UserAuthPasswordChangeRequestMessage: Equatable {
+        static let id: UInt8 = 60
+
+        var prompt: String
         var languageTag: String
     }
 
@@ -413,10 +482,41 @@ extension ByteBuffer {
                 }
                 return .keyExchangeInit(message)
             case SSHMessage.KeyExchangeECDHReplyMessage.id:
+                // AnsiView patch: two strings and nothing else is a group exchange group.
+                if let group = self.readKeyExchangeDHGroupExchangeGroupMessage() {
+                    return .keyExchangeDHGroupExchangeGroup(group)
+                }
                 guard let message = try self.readKeyExchangeECDHReplyMessage() else {
                     return nil
                 }
                 return .keyExchangeReply(message)
+            case 32:
+                // AnsiView patch: RFC 4419 KEX_DH_GEX_INIT.
+                guard var message = self.readKeyExchangeECDHInitMessage() else {
+                    return nil
+                }
+                message.kind = .groupExchangeInit
+                return .keyExchangeInit(message)
+            case 33:
+                // AnsiView patch: RFC 4419 KEX_DH_GEX_REPLY.
+                guard var message = try self.readKeyExchangeECDHReplyMessage() else {
+                    return nil
+                }
+                message.isGroupExchangeReply = true
+                return .keyExchangeReply(message)
+            case 34:
+                // AnsiView patch: RFC 4419 KEX_DH_GEX_REQUEST.
+                guard let minimum = self.readInteger(as: UInt32.self), let preferred = self.readInteger(as: UInt32.self),
+                    let maximum = self.readInteger(as: UInt32.self)
+                else {
+                    return nil
+                }
+                return .keyExchangeInit(
+                    .init(
+                        publicKey: ByteBuffer(),
+                        kind: .groupExchangeRequest(minimum: minimum, preferred: preferred, maximum: maximum)
+                    )
+                )
             case SSHMessage.NewKeysMessage.id:
                 return .newKeys
             case SSHMessage.UserAuthRequestMessage.id:
@@ -437,10 +537,22 @@ extension ByteBuffer {
                 }
                 return .userAuthBanner(message)
             case SSHMessage.UserAuthPKOKMessage.id:
+                // AnsiView patch: 60 is also INFO_REQUEST and PASSWD_CHANGEREQ (by shape).
+                if let message = self.readUserAuthInfoRequestMessage() {
+                    return .userAuthInfoRequest(message)
+                }
+                if let message = self.readUserAuthPasswordChangeRequestMessage() {
+                    return .userAuthPasswordChangeRequest(message)
+                }
                 guard let message = try self.readUserAuthPKOKMessage() else {
                     return nil
                 }
                 return .userAuthPKOK(message)
+            case SSHMessage.UserAuthInfoResponseMessage.id:
+                guard let message = self.readUserAuthInfoResponseMessage() else {
+                    return nil
+                }
+                return .userAuthInfoResponse(message)
             case SSHMessage.GlobalRequestMessage.id:
                 guard let message = try self.readGlobalRequestMessage() else {
                     return nil
@@ -630,6 +742,78 @@ extension ByteBuffer {
         }
     }
 
+    /// AnsiView patch: exactly two strings (mpint p, mpint g) with nothing after them, the first
+    /// not a host key (a KEXDH_REPLY starts with one, also when only part of it has arrived).
+    mutating func readKeyExchangeDHGroupExchangeGroupMessage() -> SSHMessage.KeyExchangeDHGroupExchangeGroupMessage? {
+        self.rewindReaderOnNil { `self` in
+            guard let prime = self.readSSHString(), let generator = self.readSSHString(), self.readableBytes == 0 else {
+                return nil
+            }
+            var hostKeyProbe = prime
+            if (try? hostKeyProbe.readSSHHostKey()) != nil {
+                return nil
+            }
+            return SSHMessage.KeyExchangeDHGroupExchangeGroupMessage(prime: prime, generator: generator)
+        }
+    }
+
+    /// AnsiView patch: name, instruction, language, prompt count, prompts, using every byte.
+    mutating func readUserAuthInfoRequestMessage() -> SSHMessage.UserAuthInfoRequestMessage? {
+        self.rewindReaderOnNil { `self` in
+            guard let name = self.readSSHStringAsString(),
+                let instruction = self.readSSHStringAsString(),
+                let languageTag = self.readSSHStringAsString(),
+                let count = self.readInteger(as: UInt32.self),
+                Int(count) <= self.readableBytes / 5
+            else {
+                return nil
+            }
+            var prompts: [SSHMessage.UserAuthInfoRequestMessage.Prompt] = []
+            for _ in 0..<count {
+                guard let prompt = self.readSSHStringAsString(), let echo = self.readSSHBoolean() else {
+                    return nil
+                }
+                prompts.append(.init(prompt: prompt, echo: echo))
+            }
+            guard self.readableBytes == 0 else { return nil }
+            return SSHMessage.UserAuthInfoRequestMessage(
+                name: name,
+                instruction: instruction,
+                languageTag: languageTag,
+                prompts: prompts
+            )
+        }
+    }
+
+    /// AnsiView patch: two strings, the first not a public key algorithm (that would be PK_OK) and
+    /// the second a language tag (RFC 3066: letters, digits and hyphens, or empty).
+    mutating func readUserAuthPasswordChangeRequestMessage() -> SSHMessage.UserAuthPasswordChangeRequestMessage? {
+        self.rewindReaderOnNil { `self` in
+            guard let prompt = self.readSSHStringAsString(), let languageTag = self.readSSHStringAsString(),
+                self.readableBytes == 0,
+                languageTag.utf8.allSatisfy({ $0 == UInt8(ascii: "-") || (0x30...0x39).contains($0) || (0x41...0x5A).contains($0) || (0x61...0x7A).contains($0) }),
+                !NIOSSHPublicKey.knownAlgorithms.contains(where: { $0.elementsEqual(prompt.utf8) })
+            else {
+                return nil
+            }
+            return SSHMessage.UserAuthPasswordChangeRequestMessage(prompt: prompt, languageTag: languageTag)
+        }
+    }
+
+    mutating func readUserAuthInfoResponseMessage() -> SSHMessage.UserAuthInfoResponseMessage? {
+        self.rewindReaderOnNil { `self` in
+            guard let count = self.readInteger(as: UInt32.self), Int(count) <= self.readableBytes / 4 else {
+                return nil
+            }
+            var responses: [String] = []
+            for _ in 0..<count {
+                guard let response = self.readSSHStringAsString() else { return nil }
+                responses.append(response)
+            }
+            return SSHMessage.UserAuthInfoResponseMessage(responses: responses)
+        }
+    }
+
     mutating func readKeyExchangeECDHReplyMessage() throws -> SSHMessage.KeyExchangeECDHReplyMessage? {
         try self.rewindOnNilOrError { `self` in
             guard
@@ -678,6 +862,12 @@ extension ByteBuffer {
                 }
 
                 method = .password(password)
+            case "keyboard-interactive":
+                // AnsiView patch: string language tag (ignored), string submethods.
+                guard self.readSSHStringAsString() != nil, let submethods = self.readSSHStringAsString() else {
+                    return nil
+                }
+                method = .keyboardInteractive(submethods: submethods)
             case "publickey":
                 guard
                     let expectSignature = self.readSSHBoolean(),
@@ -1205,11 +1395,15 @@ extension ByteBuffer {
             writtenBytes += self.writeInteger(SSHMessage.KeyExchangeMessage.id)
             writtenBytes += self.writeKeyExchangeMessage(message)
         case .keyExchangeInit(let message):
-            writtenBytes += self.writeInteger(SSHMessage.KeyExchangeECDHInitMessage.id)
+            writtenBytes += self.writeInteger(message.messageID)
             writtenBytes += self.writeKeyExchangeECDHInitMessage(message)
         case .keyExchangeReply(let message):
-            writtenBytes += self.writeInteger(SSHMessage.KeyExchangeECDHReplyMessage.id)
+            writtenBytes += self.writeInteger(message.isGroupExchangeReply ? 33 : SSHMessage.KeyExchangeECDHReplyMessage.id)
             writtenBytes += self.writeKeyExchangeECDHReplyMessage(message)
+        case .keyExchangeDHGroupExchangeGroup(var message):
+            writtenBytes += self.writeInteger(SSHMessage.KeyExchangeDHGroupExchangeGroupMessage.id)
+            writtenBytes += self.writeSSHString(&message.prime)
+            writtenBytes += self.writeSSHString(&message.generator)
         case .newKeys:
             writtenBytes += self.writeInteger(21 as UInt8)
         case .userAuthRequest(let message):
@@ -1226,6 +1420,26 @@ extension ByteBuffer {
         case .userAuthPKOK(let message):
             writtenBytes += self.writeInteger(SSHMessage.UserAuthPKOKMessage.id)
             writtenBytes += self.writeUserAuthPKOKMessage(message)
+        case .userAuthInfoRequest(let message):
+            writtenBytes += self.writeInteger(SSHMessage.UserAuthInfoRequestMessage.id)
+            writtenBytes += self.writeSSHString(message.name.utf8)
+            writtenBytes += self.writeSSHString(message.instruction.utf8)
+            writtenBytes += self.writeSSHString(message.languageTag.utf8)
+            writtenBytes += self.writeInteger(UInt32(message.prompts.count))
+            for prompt in message.prompts {
+                writtenBytes += self.writeSSHString(prompt.prompt.utf8)
+                writtenBytes += self.writeSSHBoolean(prompt.echo)
+            }
+        case .userAuthInfoResponse(let message):
+            writtenBytes += self.writeInteger(SSHMessage.UserAuthInfoResponseMessage.id)
+            writtenBytes += self.writeInteger(UInt32(message.responses.count))
+            for response in message.responses {
+                writtenBytes += self.writeSSHString(response.utf8)
+            }
+        case .userAuthPasswordChangeRequest(let message):
+            writtenBytes += self.writeInteger(SSHMessage.UserAuthPasswordChangeRequestMessage.id)
+            writtenBytes += self.writeSSHString(message.prompt.utf8)
+            writtenBytes += self.writeSSHString(message.languageTag.utf8)
         case .globalRequest(let message):
             writtenBytes += self.writeInteger(SSHMessage.GlobalRequestMessage.id)
             writtenBytes += self.writeGlobalRequestMessage(message)
@@ -1325,6 +1539,10 @@ extension ByteBuffer {
 
     mutating func writeKeyExchangeECDHInitMessage(_ message: SSHMessage.KeyExchangeECDHInitMessage) -> Int {
         var message = message
+        if case .groupExchangeRequest(let minimum, let preferred, let maximum) = message.kind {
+            // AnsiView patch: RFC 4419 uint32 min, n, max.
+            return self.writeMultipleIntegers(minimum, preferred, maximum)
+        }
         return self.writeSSHString(&message.publicKey)
     }
 
@@ -1370,6 +1588,10 @@ extension ByteBuffer {
             writtenBytes += self.writeSSHString("password".utf8)
             writtenBytes += self.writeSSHBoolean(false)
             writtenBytes += self.writeSSHString(password.utf8)
+        case .keyboardInteractive(let submethods):
+            writtenBytes += self.writeSSHString("keyboard-interactive".utf8)
+            writtenBytes += self.writeSSHString("".utf8)
+            writtenBytes += self.writeSSHString(submethods.utf8)
         case .publicKey(.known(key: let key, signature: let signature)):
             writtenBytes += self.writeSSHString("publickey".utf8)
             writtenBytes += self.writeSSHBoolean(signature != nil)

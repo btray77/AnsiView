@@ -94,12 +94,19 @@ extension NIOSSHPublicKey {
             return digest.withUnsafeBytes { digestPtr in
                 key.isValidSignature(sig, for: digestPtr)
             }
+        case (.rsa(let key), .rsa(let algorithm, let sig)):
+            // AnsiView patch: RSA and DSA host keys sign the exchange hash's bytes.
+            return key.isValid(signature: sig, algorithm: algorithm, message: digest.withUnsafeBytes { Array($0) })
+        case (.dsa(let key), .dsa(let sig)):
+            return key.isValid(signature: sig, message: digest.withUnsafeBytes { Array($0) })
         case (.certified(let key), _):
             return key.isValidSignature(signature, for: digest)
         case (.ed25519, _),
             (.ecdsaP256, _),
             (.ecdsaP384, _),
-            (.ecdsaP521, _):
+            (.ecdsaP521, _),
+            (.rsa, _),
+            (.dsa, _):
             return false
         }
     }
@@ -116,12 +123,18 @@ extension NIOSSHPublicKey {
             return key.isValidSignature(sig, for: bytes.readableBytesView)
         case (.ecdsaP521(let key), .ecdsaP521(let sig)):
             return key.isValidSignature(sig, for: bytes.readableBytesView)
+        case (.rsa(let key), .rsa(let algorithm, let sig)):
+            return key.isValid(signature: sig, algorithm: algorithm, message: Array(bytes.readableBytesView))
+        case (.dsa(let key), .dsa(let sig)):
+            return key.isValid(signature: sig, message: Array(bytes.readableBytesView))
         case (.certified(let key), _):
             return key.isValidSignature(signature, for: bytes)
         case (.ed25519, _),
             (.ecdsaP256, _),
             (.ecdsaP384, _),
-            (.ecdsaP521, _):
+            (.ecdsaP521, _),
+            (.rsa, _),
+            (.dsa, _):
             return false
         }
     }
@@ -138,12 +151,18 @@ extension NIOSSHPublicKey {
             return key.isValidSignature(sig, for: payload.bytes.readableBytesView)
         case (.ecdsaP521(let key), .ecdsaP521(let sig)):
             return key.isValidSignature(sig, for: payload.bytes.readableBytesView)
+        case (.rsa(let key), .rsa(let algorithm, let sig)):
+            return key.isValid(signature: sig, algorithm: algorithm, message: Array(payload.bytes.readableBytesView))
+        case (.dsa(let key), .dsa(let sig)):
+            return key.isValid(signature: sig, message: Array(payload.bytes.readableBytesView))
         case (.certified(let key), _):
             return key.isValidSignature(signature, for: payload)
         case (.ed25519, _),
             (.ecdsaP256, _),
             (.ecdsaP384, _),
-            (.ecdsaP521, _):
+            (.ecdsaP521, _),
+            (.rsa, _),
+            (.dsa, _):
             return false
         }
     }
@@ -158,6 +177,21 @@ extension NIOSSHPublicKey {
         case ecdsaP384(P384.Signing.PublicKey)
         case ecdsaP521(P521.Signing.PublicKey)
         case certified(NIOSSHCertifiedPublicKey)  // This case recursively contains `NIOSSHPublicKey`.
+        // AnsiView patch: verification only host key types (NIOSSHLegacyPublicKeys.swift).
+        case rsa(NIOSSHRSAPublicKey)
+        case dsa(NIOSSHDSAPublicKey)
+    }
+
+    internal static let rsaPublicKeyPrefix = "ssh-rsa".utf8
+
+    internal static let dsaPublicKeyPrefix = "ssh-dss".utf8
+
+    /// AnsiView patch: the key type a host key algorithm uses (RFC 8332: rsa-sha2-* use ssh-rsa keys).
+    internal static func keyType<S: StringProtocol>(forHostKeyAlgorithm algorithm: S) -> String {
+        switch algorithm {
+        case "rsa-sha2-256", "rsa-sha2-512": return "ssh-rsa"
+        default: return String(algorithm)
+        }
     }
 
     /// The prefix of an Ed25519 public key.
@@ -184,13 +218,17 @@ extension NIOSSHPublicKey {
             return Self.ecdsaP521PublicKeyPrefix
         case .certified(let base):
             return base.keyPrefix
+        case .rsa:
+            return Self.rsaPublicKeyPrefix
+        case .dsa:
+            return Self.dsaPublicKeyPrefix
         }
     }
 
     internal static var knownAlgorithms: [String.UTF8View] {
         [
             Self.ed25519PublicKeyPrefix, Self.ecdsaP384PublicKeyPrefix, Self.ecdsaP256PublicKeyPrefix,
-            Self.ecdsaP521PublicKeyPrefix,
+            Self.ecdsaP521PublicKeyPrefix, Self.rsaPublicKeyPrefix, Self.dsaPublicKeyPrefix,
         ]
     }
 }
@@ -209,11 +247,17 @@ extension NIOSSHPublicKey.BackingKey: Equatable {
             return lhs.rawRepresentation == rhs.rawRepresentation
         case (.certified(let lhs), .certified(let rhs)):
             return lhs == rhs
+        case (.rsa(let lhs), .rsa(let rhs)):
+            return lhs == rhs
+        case (.dsa(let lhs), .dsa(let rhs)):
+            return lhs == rhs
         case (.ed25519, _),
             (.ecdsaP256, _),
             (.ecdsaP384, _),
             (.ecdsaP521, _),
-            (.certified, _):
+            (.certified, _),
+            (.rsa, _),
+            (.dsa, _):
             return false
         }
     }
@@ -236,6 +280,12 @@ extension NIOSSHPublicKey.BackingKey: Hashable {
             hasher.combine(pkey.rawRepresentation)
         case .certified(let pkey):
             hasher.combine(5)
+            hasher.combine(pkey)
+        case .rsa(let pkey):
+            hasher.combine(6)
+            hasher.combine(pkey)
+        case .dsa(let pkey):
+            hasher.combine(7)
             hasher.combine(pkey)
         }
     }
@@ -262,6 +312,12 @@ extension ByteBuffer {
             writtenBytes += self.writeECDSAP521PublicKey(baseKey: key)
         case .certified(let key):
             return self.writeCertifiedKey(key)
+        case .rsa(let key):
+            writtenBytes += self.writeSSHString(NIOSSHPublicKey.rsaPublicKeyPrefix)
+            writtenBytes += self.writeBytes(key.blobWithoutPrefix)
+        case .dsa(let key):
+            writtenBytes += self.writeSSHString(NIOSSHPublicKey.dsaPublicKeyPrefix)
+            writtenBytes += self.writeBytes(key.blobWithoutPrefix)
         }
 
         return writtenBytes
@@ -283,6 +339,10 @@ extension ByteBuffer {
             return self.writeECDSAP521PublicKey(baseKey: key)
         case .certified:
             preconditionFailure("Certified keys are the only callers of this method, and cannot contain themselves")
+        case .rsa(let key):
+            return self.writeBytes(key.blobWithoutPrefix)
+        case .dsa(let key):
+            return self.writeBytes(key.blobWithoutPrefix)
         }
     }
 
@@ -310,6 +370,32 @@ extension ByteBuffer {
                 return try buffer.readECDSAP384PublicKey()
             } else if keyIdentifierBytes.elementsEqual(NIOSSHPublicKey.ecdsaP521PublicKeyPrefix) {
                 return try buffer.readECDSAP521PublicKey()
+            } else if keyIdentifierBytes.elementsEqual(NIOSSHPublicKey.rsaPublicKeyPrefix) {
+                // AnsiView patch: mpint e, mpint n, kept byte for byte.
+                let before = buffer
+                guard let e = buffer.readSSHString(), let n = buffer.readSSHString() else { return nil }
+                let blob = before.getBytes(at: before.readerIndex, length: buffer.readerIndex - before.readerIndex)!
+                let key = try NIOSSHRSAPublicKey(
+                    exponentMPInt: Array(e.readableBytesView),
+                    modulusMPInt: Array(n.readableBytesView),
+                    blobWithoutPrefix: blob
+                )
+                return NIOSSHPublicKey(backingKey: .rsa(key))
+            } else if keyIdentifierBytes.elementsEqual(NIOSSHPublicKey.dsaPublicKeyPrefix) {
+                // AnsiView patch: mpint p, q, g, y, kept byte for byte.
+                let before = buffer
+                guard let p = buffer.readSSHString(), let q = buffer.readSSHString(), let g = buffer.readSSHString(),
+                    let y = buffer.readSSHString()
+                else { return nil }
+                let blob = before.getBytes(at: before.readerIndex, length: buffer.readerIndex - before.readerIndex)!
+                let key = try NIOSSHDSAPublicKey(
+                    p: Array(p.readableBytesView),
+                    q: Array(q.readableBytesView),
+                    g: Array(g.readableBytesView),
+                    y: Array(y.readableBytesView),
+                    blobWithoutPrefix: blob
+                )
+                return NIOSSHPublicKey(backingKey: .dsa(key))
             } else {
                 // We don't know this public key type. Maybe the certified keys do.
                 return try buffer.readCertifiedKeyWithoutKeyPrefix(keyIdentifierBytes).map(NIOSSHPublicKey.init)

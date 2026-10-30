@@ -42,6 +42,10 @@ extension NIOSSHSignature {
 
         case ecdsaP521(P521.Signing.ECDSASignature)
 
+        // AnsiView patch: RSA (the algorithm names the hash) and DSA (r || s, 40 bytes).
+        case rsa(RSASignatureAlgorithm, [UInt8])
+        case dsa([UInt8])
+
         internal enum RawBytes {
             case byteBuffer(ByteBuffer)
             case data(Data)
@@ -59,6 +63,21 @@ extension NIOSSHSignature {
 
     /// The prefix of a P521 ECDSA public key.
     fileprivate static let ecdsaP521SignaturePrefix = "ecdsa-sha2-nistp521".utf8
+
+    fileprivate static let dsaSignaturePrefix = "ssh-dss".utf8
+
+    /// AnsiView patch: the signature's algorithm name as sent (RFC 8332 requires it to match the
+    /// negotiated host key algorithm).
+    internal var algorithmName: String {
+        switch self.backingSignature {
+        case .ed25519: return "ssh-ed25519"
+        case .ecdsaP256: return "ecdsa-sha2-nistp256"
+        case .ecdsaP384: return "ecdsa-sha2-nistp384"
+        case .ecdsaP521: return "ecdsa-sha2-nistp521"
+        case .rsa(let algorithm, _): return algorithm.rawValue
+        case .dsa: return "ssh-dss"
+        }
+    }
 }
 
 extension NIOSSHSignature.BackingSignature.RawBytes: Equatable {
@@ -93,10 +112,16 @@ extension NIOSSHSignature.BackingSignature: Equatable {
             return lhs.rawRepresentation == rhs.rawRepresentation
         case (.ecdsaP521(let lhs), .ecdsaP521(let rhs)):
             return lhs.rawRepresentation == rhs.rawRepresentation
+        case (.rsa(let lhsAlgorithm, let lhs), .rsa(let rhsAlgorithm, let rhs)):
+            return lhsAlgorithm == rhsAlgorithm && lhs == rhs
+        case (.dsa(let lhs), .dsa(let rhs)):
+            return lhs == rhs
         case (.ed25519, _),
             (.ecdsaP256, _),
             (.ecdsaP384, _),
-            (.ecdsaP521, _):
+            (.ecdsaP521, _),
+            (.rsa, _),
+            (.dsa, _):
             return false
         }
     }
@@ -117,6 +142,13 @@ extension NIOSSHSignature.BackingSignature: Hashable {
         case .ecdsaP521(let sig):
             hasher.combine(3)
             hasher.combine(sig.rawRepresentation)
+        case .rsa(let algorithm, let sig):
+            hasher.combine(4)
+            hasher.combine(algorithm)
+            hasher.combine(sig)
+        case .dsa(let sig):
+            hasher.combine(5)
+            hasher.combine(sig)
         }
     }
 }
@@ -134,6 +166,10 @@ extension ByteBuffer {
             return self.writeECDSAP384Signature(baseSignature: sig)
         case .ecdsaP521(let sig):
             return self.writeECDSAP521Signature(baseSignature: sig)
+        case .rsa(let algorithm, let sig):
+            return self.writeSSHString(Array(algorithm.rawValue.utf8)) + self.writeSSHString(sig)
+        case .dsa(let sig):
+            return self.writeSSHString(NIOSSHSignature.dsaSignaturePrefix) + self.writeSSHString(sig)
         }
     }
 
@@ -229,6 +265,13 @@ extension ByteBuffer {
                 return try buffer.readECDSAP384Signature()
             } else if bytesView.elementsEqual(NIOSSHSignature.ecdsaP521SignaturePrefix) {
                 return try buffer.readECDSAP521Signature()
+            } else if let algorithm = RSASignatureAlgorithm(rawValue: String(decoding: bytesView, as: UTF8.self)) {
+                // AnsiView patch: RSA and DSA signatures are a single string of bytes.
+                guard let sig = buffer.readSSHString() else { return nil }
+                return NIOSSHSignature(backingSignature: .rsa(algorithm, Array(sig.readableBytesView)))
+            } else if bytesView.elementsEqual(NIOSSHSignature.dsaSignaturePrefix) {
+                guard let sig = buffer.readSSHString() else { return nil }
+                return NIOSSHSignature(backingSignature: .dsa(Array(sig.readableBytesView)))
             } else {
                 // We don't know this signature type.
                 let signature =

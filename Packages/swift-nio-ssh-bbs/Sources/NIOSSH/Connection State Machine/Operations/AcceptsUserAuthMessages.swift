@@ -118,6 +118,34 @@ extension AcceptsUserAuthMessages {
         return .event(NIOUserAuthBannerEvent(message: message.message, languageTag: message.languageTag))
     }
 
+    /// AnsiView patch: keyboard-interactive and password change messages.
+    mutating func receiveUserAuthInfoRequest(
+        _ message: SSHMessage.UserAuthInfoRequestMessage
+    ) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
+        let future = try self.userAuthStateMachine.receiveUserAuthInfoRequest(message)
+        return .possibleFutureMessage(future.map { SSHMultiMessage(.userAuthInfoResponse($0)) })
+    }
+
+    mutating func receiveUserAuthInfoResponse(
+        _ message: SSHMessage.UserAuthInfoResponseMessage
+    ) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
+        let future = try self.userAuthStateMachine.receiveUserAuthInfoResponse(message)
+        let banner: SSHServerConfiguration.UserAuthBanner?
+        if case .server(let config) = role {
+            banner = config.banner
+        } else {
+            banner = nil
+        }
+        return .possibleFutureMessage(future.map { Self.transform($0, banner: banner) })
+    }
+
+    mutating func receiveUserAuthPasswordChangeRequest(
+        _ message: SSHMessage.UserAuthPasswordChangeRequestMessage
+    ) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
+        try self.userAuthStateMachine.receiveUserAuthPasswordChangeRequest(message)
+        return .noMessage
+    }
+
     private static func transform(
         _ result: NIOSSHUserAuthenticationResponseMessage,
         banner: SSHServerConfiguration.UserAuthBanner? = nil
@@ -140,6 +168,8 @@ extension AcceptsUserAuthMessages {
             return SSHMultiMessage(.userAuthPKOK(message))
         case .disconnect(let disconnect):
             return SSHMultiMessage(.disconnect(disconnect))
+        case .infoRequest(let message):
+            return SSHMultiMessage(.userAuthInfoRequest(message))
         }
     }
 

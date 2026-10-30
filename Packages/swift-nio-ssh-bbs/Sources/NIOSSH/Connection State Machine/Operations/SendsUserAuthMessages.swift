@@ -59,6 +59,23 @@ extension SendsUserAuthMessages {
         try self.serializer.serialize(message: .userAuthBanner(message), to: &buffer)
     }
 
+    /// AnsiView patch: keyboard-interactive (RFC 4256).
+    mutating func writeUserAuthInfoRequest(
+        _ message: SSHMessage.UserAuthInfoRequestMessage,
+        into buffer: inout ByteBuffer
+    ) throws {
+        self.userAuthStateMachine.sendUserAuthInfoRequest(message)
+        try self.serializer.serialize(message: .userAuthInfoRequest(message), to: &buffer)
+    }
+
+    mutating func writeUserAuthInfoResponse(
+        _ message: SSHMessage.UserAuthInfoResponseMessage,
+        into buffer: inout ByteBuffer
+    ) throws {
+        self.userAuthStateMachine.sendUserAuthInfoResponse(message)
+        try self.serializer.serialize(message: .userAuthInfoResponse(message), to: &buffer)
+    }
+
     mutating func writeUserAuthPKOK(_ message: SSHMessage.UserAuthPKOKMessage, into buffer: inout ByteBuffer) throws {
         self.userAuthStateMachine.sendUserAuthPKOK(message)
         try self.serializer.serialize(message: .userAuthPKOK(message), to: &buffer)

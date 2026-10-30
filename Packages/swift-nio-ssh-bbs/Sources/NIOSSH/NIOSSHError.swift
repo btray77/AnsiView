@@ -27,6 +27,9 @@ public struct NIOSSHError: Error {
     public var type: ErrorType
 
     private var diagnostics: String?
+
+    /// AnsiView patch: the detail text (for example what the server offered when negotiation failed).
+    public var diagnosticMessage: String? { self.diagnostics }
 }
 
 // MARK: - Internal helper functions for error construction.
@@ -86,6 +89,18 @@ extension NIOSSHError {
     @inline(never)
     internal static func protocolViolation(protocolName: String, violation: String) -> NIOSSHError {
         NIOSSHError(type: .protocolViolation, diagnostics: "Protocol \(protocolName) violated due to \(violation)")
+    }
+
+    /// AnsiView patch: names what could not be agreed and what the server offered.
+    @inline(never)
+    internal static func keyExchangeNegotiationFailure(_ diagnostics: String) -> NIOSSHError {
+        NIOSSHError(type: .keyExchangeNegotiationFailure, diagnostics: diagnostics)
+    }
+
+    /// AnsiView patch: RFC 4252 section 8 SSH_MSG_USERAUTH_PASSWD_CHANGEREQ.
+    @inline(never)
+    internal static func passwordChangeRequested(prompt: String) -> NIOSSHError {
+        NIOSSHError(type: .passwordChangeRequested, diagnostics: prompt)
     }
 
     internal static let keyExchangeNegotiationFailure = NIOSSHError(
@@ -192,6 +207,7 @@ extension NIOSSHError {
             case invalidPacketFormat
             case protocolViolation
             case keyExchangeNegotiationFailure
+            case passwordChangeRequested
             case unsupportedVersion
             case channelSetupRejected
             case flowControlViolation
@@ -259,6 +275,9 @@ extension NIOSSHError {
 
         /// No suitable key exchange negotiation protocols were found.
         public static let keyExchangeNegotiationFailure: ErrorType = .init(.keyExchangeNegotiationFailure)
+
+        /// AnsiView patch: the server asks for a new password (RFC 4252 section 8).
+        public static let passwordChangeRequested: ErrorType = .init(.passwordChangeRequested)
 
         /// The SSH version offered by the remote peer is unsupported by this implementation.
         public static let unsupportedVersion: ErrorType = .init(.unsupportedVersion)

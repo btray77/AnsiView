@@ -347,6 +347,22 @@ struct SSHConnectionStateMachine {
                         self = .userAuthentication(state)
                         return result
 
+                    // AnsiView patch: keyboard-interactive and password change.
+                    case .userAuthInfoRequest(let message):
+                        let result = try state.receiveUserAuthInfoRequest(message)
+                        self = .userAuthentication(state)
+                        return result
+
+                    case .userAuthInfoResponse(let message):
+                        let result = try state.receiveUserAuthInfoResponse(message)
+                        self = .userAuthentication(state)
+                        return result
+
+                    case .userAuthPasswordChangeRequest(let message):
+                        let result = try state.receiveUserAuthPasswordChangeRequest(message)
+                        self = .userAuthentication(state)
+                        return result
+
                     case .disconnect:
                         self = .receivedDisconnect(state.role)
                         return .disconnect
@@ -973,6 +989,14 @@ struct SSHConnectionStateMachine {
 
             case .userAuthPKOK(let message):
                 try state.writeUserAuthPKOK(message, into: &buffer)
+                self.state = .userAuthentication(state)
+
+            case .userAuthInfoRequest(let message):
+                try state.writeUserAuthInfoRequest(message, into: &buffer)
+                self.state = .userAuthentication(state)
+
+            case .userAuthInfoResponse(let message):
+                try state.writeUserAuthInfoResponse(message, into: &buffer)
                 self.state = .userAuthentication(state)
 
             case .disconnect:

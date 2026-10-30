@@ -33,6 +33,9 @@ public struct NIOSSHAvailableUserAuthenticationMethods: OptionSet, Sendable {
     /// Host-based authentication is acceptable.
     public static let hostBased: NIOSSHAvailableUserAuthenticationMethods = .init(rawValue: 1 << 2)
 
+    /// AnsiView patch: keyboard-interactive (RFC 4256) is acceptable. Not part of `.all`.
+    public static let keyboardInteractive: NIOSSHAvailableUserAuthenticationMethods = .init(rawValue: 1 << 3)
+
     /// A short-hand for all supported authentication types.
     public static let all: NIOSSHAvailableUserAuthenticationMethods = [.publicKey, .password, .hostBased]
 }
@@ -49,6 +52,8 @@ extension NIOSSHAvailableUserAuthenticationMethods {
                 self.insert(.password)
             case "hostbased":
                 self.insert(.hostBased)
+            case "keyboard-interactive":
+                self.insert(.keyboardInteractive)
             default:
                 // This is an unknown method, which we ignore.
                 break
@@ -73,6 +78,9 @@ extension NIOSSHAvailableUserAuthenticationMethods {
         }
         if self.contains(.hostBased) {
             methods.append("hostbased")
+        }
+        if self.contains(.keyboardInteractive) {
+            methods.append("keyboard-interactive")
         }
 
         return methods
@@ -112,6 +120,20 @@ extension NIOSSHUserAuthenticationRequest {
 
         /// The client believes it does not need authentication.
         case none
+
+        /// AnsiView patch: the client's answers to keyboard-interactive prompts.
+        case keyboardInteractive(KeyboardInteractive)
+    }
+}
+
+extension NIOSSHUserAuthenticationRequest.Request {
+    /// AnsiView patch: answers to the prompts from `NIOSSHServerKeyboardInteractiveDelegate`.
+    public struct KeyboardInteractive: Sendable, Hashable {
+        public var responses: [String]
+
+        public init(responses: [String]) {
+            self.responses = responses
+        }
     }
 }
 
@@ -187,6 +209,10 @@ extension NIOSSHUserAuthenticationOffer {
 
         /// The client believes it does not need authentication.
         case none
+
+        /// AnsiView patch: keyboard-interactive (RFC 4256); prompts go to the delegate's
+        /// `NIOSSHClientKeyboardInteractiveDelegate` conformance.
+        case keyboardInteractive
     }
 }
 
@@ -256,6 +282,8 @@ extension SSHMessage.UserAuthRequestMessage {
             fatalError("Unsupported")
         case .none:
             self.method = .none
+        case .keyboardInteractive:
+            self.method = .keyboardInteractive(submethods: "")
         }
     }
 }
@@ -279,6 +307,8 @@ enum NIOSSHUserAuthenticationResponseMessage {
     case failure(SSHMessage.UserAuthFailureMessage)
     case publicKeyOK(SSHMessage.UserAuthPKOKMessage)
     case disconnect(SSHMessage.DisconnectMessage)
+    // AnsiView patch: a keyboard-interactive challenge.
+    case infoRequest(SSHMessage.UserAuthInfoRequestMessage)
 }
 
 extension NIOSSHUserAuthenticationResponseMessage {

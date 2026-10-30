@@ -361,6 +361,9 @@ extension NIOSSHCertifiedPublicKey {
             return Self.p521KeyPrefix
         case .certified:
             preconditionFailure("base key cannot be certified")
+        case .rsa, .dsa:
+            // AnsiView patch: certificates for these key types are not read (baseKeyPrefixForKeyPrefix).
+            preconditionFailure("RSA and DSA certificates are not supported")
         }
     }
 

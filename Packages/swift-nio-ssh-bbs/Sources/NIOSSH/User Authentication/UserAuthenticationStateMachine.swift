@@ -24,6 +24,13 @@ struct UserAuthenticationStateMachine {
     /// disconnecting. Taken from `SSHServerConfiguration`; `.max` for clients, which never enforce it.
     private let maxAuthAttempts: Int
 
+    /// AnsiView patch: client side, whether the request in flight is keyboard-interactive.
+    private var keyboardInteractiveInFlight = false
+
+    /// AnsiView patch: server side, the user and service of a keyboard-interactive challenge
+    /// that waits for its SSH_MSG_USERAUTH_INFO_RESPONSE.
+    private var keyboardInteractiveChallenge: (username: String, service: String)?
+
     init(role: SSHConnectionRole, loop: EventLoop, sessionID: ByteBuffer) {
         self.state = .idle
         self.delegate = UserAuthDelegate(role: role)
@@ -168,6 +175,10 @@ extension UserAuthenticationStateMachine {
                 return self.loop.makeSucceededFuture(.disconnect(Self.tooManyTriesDisconnect))
             }
             self.state = .awaitingResponses(attempts: attempts + 1, pending: 1)
+            self.keyboardInteractiveChallenge = nil
+            if case .keyboardInteractive = message.method {
+                return self.keyboardInteractiveResponse(request: message, delegate: delegate)
+            }
             return self.nextAuthResponse(request: message, delegate: delegate)
 
         case (.server(let delegate), .awaitingResponses(let attempts, let pending)):
@@ -266,6 +277,86 @@ extension UserAuthenticationStateMachine {
         }
     }
 
+    /// AnsiView patch: client side, a keyboard-interactive question set (RFC 4256 section 3.2).
+    mutating func receiveUserAuthInfoRequest(
+        _ message: SSHMessage.UserAuthInfoRequestMessage
+    ) throws -> EventLoopFuture<SSHMessage.UserAuthInfoResponseMessage> {
+        guard case .client(let delegate) = self.delegate, case .awaitingResponses = self.state,
+            self.keyboardInteractiveInFlight
+        else {
+            throw NIOSSHError.protocolViolation(
+                protocolName: Self.protocolName,
+                violation: "unexpected keyboard-interactive request"
+            )
+        }
+        let request = NIOSSHKeyboardInteractiveRequest(message)
+        let promise = self.loop.makePromise(of: [String].self)
+        if let responder = delegate as? NIOSSHClientKeyboardInteractiveDelegate {
+            responder.respond(to: request, responsePromise: promise)
+        } else {
+            promise.succeed(Array(repeating: "", count: request.prompts.count))
+        }
+        let count = request.prompts.count
+        return promise.futureResult.flatMapThrowing { responses in
+            guard responses.count == count else {
+                throw NIOSSHError.protocolViolation(
+                    protocolName: Self.protocolName,
+                    violation: "keyboard-interactive answers do not match the prompts"
+                )
+            }
+            return SSHMessage.UserAuthInfoResponseMessage(responses: responses)
+        }
+    }
+
+    /// AnsiView patch: client side, RFC 4252 section 8. The password must be changed first;
+    /// this client does not do that in the password method, so the login ends with the prompt.
+    func receiveUserAuthPasswordChangeRequest(_ message: SSHMessage.UserAuthPasswordChangeRequestMessage) throws {
+        throw NIOSSHError.passwordChangeRequested(prompt: message.prompt)
+    }
+
+    /// AnsiView patch: server side, the answers to our keyboard-interactive challenge.
+    mutating func receiveUserAuthInfoResponse(
+        _ message: SSHMessage.UserAuthInfoResponseMessage
+    ) throws -> EventLoopFuture<NIOSSHUserAuthenticationResponseMessage> {
+        guard case .server(let delegate) = self.delegate, case .awaitingNextRequest(let attempts) = self.state,
+            let challenge = self.keyboardInteractiveChallenge
+        else {
+            throw NIOSSHError.protocolViolation(
+                protocolName: Self.protocolName,
+                violation: "unexpected keyboard-interactive response"
+            )
+        }
+        self.keyboardInteractiveChallenge = nil
+        self.state = .awaitingResponses(attempts: attempts, pending: 1)
+        let request = NIOSSHUserAuthenticationRequest(
+            username: challenge.username,
+            serviceName: challenge.service,
+            request: .keyboardInteractive(.init(responses: message.responses))
+        )
+        let promise = self.loop.makePromise(of: NIOSSHUserAuthenticationOutcome.self)
+        delegate.requestReceived(request: request, responsePromise: promise)
+        let supportedMethods = delegate.supportedAuthenticationMethods
+        return promise.futureResult.map { outcome in
+            .init(outcome, supportedMethods: supportedMethods)
+        }
+    }
+
+    private mutating func keyboardInteractiveResponse(
+        request: SSHMessage.UserAuthRequestMessage,
+        delegate: NIOSSHServerUserAuthenticationDelegate
+    ) -> EventLoopFuture<NIOSSHUserAuthenticationResponseMessage> {
+        guard let challenger = delegate as? NIOSSHServerKeyboardInteractiveDelegate,
+            delegate.supportedAuthenticationMethods.contains(.keyboardInteractive),
+            let challenge = challenger.keyboardInteractiveChallenge(username: request.username)
+        else {
+            return self.loop.makeSucceededFuture(
+                .failure(.init(authentications: delegate.supportedAuthenticationMethods.strings, partialSuccess: false))
+            )
+        }
+        self.keyboardInteractiveChallenge = (request.username, request.service)
+        return self.loop.makeSucceededFuture(.infoRequest(challenge.message))
+    }
+
     mutating func receiveUserAuthBanner(_: SSHMessage.UserAuthBannerMessage) throws {
         switch (self.delegate, self.state) {
         case (.client, .idle), (.client, .authenticationSucceeded):
@@ -324,10 +415,15 @@ extension UserAuthenticationStateMachine {
         }
     }
 
-    mutating func sendUserAuthRequest(_: SSHMessage.UserAuthRequestMessage) {
+    mutating func sendUserAuthRequest(_ message: SSHMessage.UserAuthRequestMessage) {
         switch (self.delegate, self.state) {
         case (.client, .awaitingNextRequest(let attempts)):
             self.state = .awaitingResponses(attempts: attempts, pending: 1)
+            if case .keyboardInteractive = message.method {
+                self.keyboardInteractiveInFlight = true
+            } else {
+                self.keyboardInteractiveInFlight = false
+            }
         case (.client, .idle),
             (.client, .awaitingServiceAcceptance):
             preconditionFailure("Sent an auth request without asking us first")
@@ -366,6 +462,24 @@ extension UserAuthenticationStateMachine {
         case (.client, _):
             preconditionFailure("Clients never send auth responses")
         }
+    }
+
+    /// AnsiView patch: client side; the request stays in flight until success or failure.
+    mutating func sendUserAuthInfoResponse(_: SSHMessage.UserAuthInfoResponseMessage) {
+        guard case .client = self.delegate, case .awaitingResponses = self.state, self.keyboardInteractiveInFlight else {
+            preconditionFailure("Keyboard-interactive answers sent without a request")
+        }
+    }
+
+    /// AnsiView patch: server side; like PK_OK it answers one request, and the client's
+    /// SSH_MSG_USERAUTH_INFO_RESPONSE counts as the next one.
+    mutating func sendUserAuthInfoRequest(_ message: SSHMessage.UserAuthInfoRequestMessage) {
+        guard case .server = self.delegate, case .awaitingResponses(let attempts, let pending) = self.state else {
+            preconditionFailure("Keyboard-interactive challenge sent without a request")
+        }
+        self.state =
+            pending > 1
+            ? .awaitingResponses(attempts: attempts, pending: pending - 1) : .awaitingNextRequest(attempts: attempts)
     }
 
     mutating func sendUserAuthSuccess() {
@@ -533,6 +647,12 @@ extension UserAuthenticationStateMachine {
             // This is a weird wrinkle in public key auth: it's a request to ask whether a given key is valid, but not to validate that key itself.
             // For now we do a shortcut: we just say that all keys are acceptable, rather than ask the delegate.
             return self.loop.makeSucceededFuture(.publicKeyOK(.init(key: key)))
+
+        case .keyboardInteractive:
+            // AnsiView patch: handled by keyboardInteractiveResponse before this is called.
+            return self.loop.makeSucceededFuture(
+                .failure(.init(authentications: delegate.supportedAuthenticationMethods.strings, partialSuccess: false))
+            )
 
         case .publicKey(.unknown):
             // We don't known the algorithm, the auth attempt has failed.

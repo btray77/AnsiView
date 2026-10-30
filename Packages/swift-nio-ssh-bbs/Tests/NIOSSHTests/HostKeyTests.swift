@@ -254,7 +254,8 @@ final class HostKeyTests: XCTestCase {
 
     func testUnrecognisedKey() throws {
         var buffer = ByteBufferAllocator().buffer(capacity: 1024)
-        buffer.writeSSHString("ssh-rsa".utf8)
+        // AnsiView patch: ssh-rsa is known now; use a name no one implements.
+        buffer.writeSSHString("ssh-unknown-type".utf8)
 
         XCTAssertThrowsError(try buffer.readSSHHostKey()) { error in
             XCTAssertEqual((error as? NIOSSHError).map { $0.type }, .unknownPublicKey)
@@ -293,7 +294,8 @@ final class HostKeyTests: XCTestCase {
 
     func testUnrecognisedSignature() throws {
         var buffer = ByteBufferAllocator().buffer(capacity: 1024)
-        buffer.writeSSHString("ssh-rsa".utf8)
+        // AnsiView patch: ssh-rsa is known now; use a name no one implements.
+        buffer.writeSSHString("ssh-unknown-type".utf8)
 
         XCTAssertThrowsError(try buffer.readSSHSignature()) { error in
             XCTAssertEqual((error as? NIOSSHError).map { $0.type }, .unknownSignature)

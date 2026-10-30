@@ -37,7 +37,16 @@ public enum Constants: Sendable {
     public static let bundledTransportProtectionSchemes: [(NIOSSHTransportProtection & _NIOSSHSendableMetatype).Type] =
         [
             AES256GCMOpenSSHTransportProtection.self, AES128GCMOpenSSHTransportProtection.self,
-        ]
+        ] + Self.legacyTransportProtectionSchemes
+
+    /// AnsiView patch: AES-CTR and AES-CBC with HMAC, offered after AES-GCM (PATCHES.md).
+    static var legacyTransportProtectionSchemes: [(NIOSSHTransportProtection & _NIOSSHSendableMetatype).Type] {
+        #if canImport(CommonCrypto)
+        return AESCBCCTRSchemes.all
+        #else
+        return []
+        #endif
+    }
 
     /// The default value for `SSHServerConfiguration.maxAuthAttempts`: the maximum number of
     /// `SSH_MSG_USERAUTH_REQUEST` messages a server processes on a single connection before

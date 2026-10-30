@@ -259,6 +259,8 @@ final class UserAuthenticationStateMachineTests: XCTestCase {
                 XCTFail("Unexpected success")
             case .success(.disconnect):
                 XCTFail("Unexpected disconnect")
+            case .success(.infoRequest):
+                XCTFail("Unexpected keyboard-interactive request")
             case .failure(let error):
                 XCTFail("Unexpected error: \(error)")
             }
@@ -289,6 +291,8 @@ final class UserAuthenticationStateMachineTests: XCTestCase {
                 XCTFail("Unexpected failure")
             case .success(.disconnect):
                 XCTFail("Unexpected disconnect")
+            case .success(.infoRequest):
+                XCTFail("Unexpected keyboard-interactive request")
             case .failure(let error):
                 XCTFail("Unexpected error: \(error)")
             }
@@ -320,6 +324,8 @@ final class UserAuthenticationStateMachineTests: XCTestCase {
                 XCTFail("Unexpected failure")
             case .success(.disconnect):
                 XCTFail("Unexpected disconnect")
+            case .success(.infoRequest):
+                XCTFail("Unexpected keyboard-interactive request")
             case .failure(let error):
                 XCTFail("Unexpected error: \(error)")
             }
@@ -351,6 +357,8 @@ final class UserAuthenticationStateMachineTests: XCTestCase {
                 XCTFail("Unexpected public key ok")
             case .success(.success):
                 XCTFail("Unexpected success")
+            case .success(.infoRequest):
+                XCTFail("Unexpected keyboard-interactive request")
             case .failure(let error):
                 XCTFail("Unexpected error: \(error)")
             }
