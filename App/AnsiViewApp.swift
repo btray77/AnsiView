@@ -280,6 +280,19 @@ struct AnsiViewApp: App {
                     Button("Capture Session...") { TerminalWindowController.focused?.startCapture() }
                     Button("Stop Capture") { TerminalWindowController.focused?.stopCapture() }
                     Button("Clear Scrollback") { TerminalWindowController.focused?.clearScrollback() }
+                    Divider()
+                    Button("Upload File(s)...") { TerminalWindowController.focused?.transfers.chooseUpload() }
+                        .keyboardShortcut("u", modifiers: [.command, .option])
+                        .help("Sends files to the BBS with XMODEM, YMODEM, ZMODEM or Kermit. Start the upload on the BBS first.")
+                    Button("Download...") { TerminalWindowController.focused?.transfers.chooseDownload() }
+                        .keyboardShortcut("d", modifiers: [.command, .option])
+                        .help("Receives files from the BBS. ZMODEM and Kermit downloads usually start by themselves.")
+                    Button("Cancel Transfer") { TerminalWindowController.focused?.transfers.cancel() }
+                        .help("Stops the running file transfer and tells the BBS to stop (Escape does the same).")
+                    Button("Transfer Log") {
+                        if let terminal = TerminalWindowController.focused { TransferLogWindowController.show(entry: terminal.entry) }
+                    }
+                    .help("Every file transfer with this BBS: protocol details, retries, results and SHA-256 checksums.")
                 }
                 CommandGroup(after: .windowArrangement) {
                     Button("Dialing Directory") { DialingDirectoryWindowController.show() }

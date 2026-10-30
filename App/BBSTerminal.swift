@@ -140,7 +140,12 @@ final class TerminalView: NSView {
 final class TerminalViewController: NSViewController {
     static let sizes: [(columns: Int, rows: Int)] = [(80, 25), (80, 43), (80, 50), (132, 25), (132, 50)]
 
-    let entry: BBSEntry
+    /// The BBS; transfer choices made in the terminal update it (see `updateEntry`).
+    private(set) var entry: BBSEntry
+    /// Called when the terminal changed the entry (transfer protocol, download folder).
+    var onEntryChange: ((BBSEntry) -> Void)?
+    /// File transfers (App/TerminalTransfers.swift).
+    private(set) lazy var transfers = TerminalTransfers(terminal: self)
     private(set) var emulator: TerminalEmulator
     private(set) var client: BBSClient?
     let terminalView = TerminalView()
@@ -234,6 +239,7 @@ final class TerminalViewController: NSViewController {
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         container.addSubview(terminalView)
         container.addSubview(statusLabel)
+        transfers.install(over: terminalView, in: container)
         NSLayoutConstraint.activate([
             terminalView.topAnchor.constraint(equalTo: container.topAnchor),
             terminalView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -259,6 +265,7 @@ final class TerminalViewController: NSViewController {
             old.onData = nil
             old.disconnect()
         }
+        transfers.reset()
         pacer = LinePacer(baud: baud)
         music.reset(mode: entry.musicMode)
         emulator = TerminalEmulator(columns: emulator.columns, rows: emulator.rows, encoding: entry.encoding)
@@ -420,6 +427,7 @@ final class TerminalViewController: NSViewController {
             stateText = "Connected"
             answered()
         case .closed(let error):
+            transfers.connectionClosed()
             sound?.playbackStateChanged(.quiet)
             loginRunner = nil
             busyMatcher = nil
@@ -451,8 +459,14 @@ final class TerminalViewController: NSViewController {
         }
     }
 
-    /// Bytes from the BBS (telnet already removed): captured as they arrive, shown at the line speed.
+    /// Bytes from the BBS (telnet already removed): to a running file transfer, held while the
+    /// transfer bar asks, or to the screen.
     func receive(_ bytes: [UInt8]) {
+        transfers.received(bytes)
+    }
+
+    /// Terminal output: captured as it arrives, shown at the line speed.
+    func showIncoming(_ bytes: [UInt8]) {
         if let capture {
             do { try capture.write(contentsOf: Data(bytes)) } catch { captureFailed(error) }
         }
@@ -464,6 +478,8 @@ final class TerminalViewController: NSViewController {
 
     /// One display step: releases paced bytes into the emulator, answers status requests and redraws.
     func tick(elapsed: TimeInterval) {
+        // A file transfer has the line: the screen, music and login script wait.
+        if transfers.isActive { return }
         // Foreground ANSI music holds the line: nothing more is released until it ends.
         let due = music.screenBytes(music.isHolding ? [] : pacer.release(elapsed: elapsed))
         if !due.isEmpty {
@@ -516,6 +532,39 @@ final class TerminalViewController: NSViewController {
         terminalView.needsDisplay = true
     }
 
+    // MARK: File transfers
+
+    /// A transfer takes the line: what waited for the screen is drawn now (music bytes removed,
+    /// not played), and nothing more is drawn until `resumeAfterTransfer`.
+    func pauseForTransfer() {
+        let saved = pacer.baud
+        pacer.baud = 0
+        let backlog = pacer.release(elapsed: 0)
+        pacer.baud = saved
+        let due = music.suspend(drawing: backlog)
+        if !due.isEmpty {
+            shownBytes += due.count
+            emulator.feed(due)
+            let replies = emulator.takeReplies()
+            if !replies.isEmpty { client?.send(replies) }
+        }
+        terminalView.needsDisplay = true
+        updateStatus()
+    }
+
+    func resumeAfterTransfer() {
+        music.resumeAfterTransfer()
+        lastTick = now()
+        updateStatus()
+        view.window?.makeFirstResponder(terminalView)
+    }
+
+    /// Changes the entry (from the transfer choosers) and tells the directory.
+    func updateEntry(_ change: (inout BBSEntry) -> Void) {
+        change(&entry)
+        onEntryChange?(entry)
+    }
+
     // MARK: Screen
 
     func visibleScreen() -> AnsiScreen {
@@ -553,6 +602,11 @@ final class TerminalViewController: NSViewController {
     // MARK: Input
 
     func handleKey(_ event: NSEvent) {
+        // During a file transfer only Escape (Cancel) does anything.
+        if transfers.isActive {
+            if event.keyCode == 53 { transfers.cancel() } else { NSSound.beep() }
+            return
+        }
         let flags = event.modifierFlags
         let ignoring = event.charactersIgnoringModifiers ?? ""
         let scalar = ignoring.unicodeScalars.first.map { Int($0.value) } ?? 0
@@ -686,6 +740,8 @@ final class TerminalViewController: NSViewController {
 
     // MARK: Status
 
+    func refreshStatus() { updateStatus() }
+
     private func updateStatus() {
         var parts = [entry.address, stateText, baud == 0 ? "Unlimited" : "\(baud) baud",
                      "\(emulator.columns)x\(emulator.rows)", entry.encoding.label]
@@ -695,6 +751,7 @@ final class TerminalViewController: NSViewController {
         if scrollOffset > 0 { parts.append("Scrollback -\(scrollOffset)") }
         if let captureProblem { parts.append(captureProblem) }
         if let loginText { parts.append(loginText) }
+        if let transferText = transfers.statusText { parts.append(transferText) }
         statusText = parts.joined(separator: "  |  ")
         statusLabel.stringValue = statusText
         statusLabel.toolTip = statusText
@@ -722,6 +779,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
         controller.terminal.passwords = store.passwords
         if store.directory.entries.contains(where: { $0.id == entry.id }) {
             controller.terminal.callRecorder = { [weak store] id in store?.recordCall(id) }
+            // Only the transfer choices are written back, so edits made in the directory meanwhile stay.
+            controller.terminal.onEntryChange = { [weak store] changed in
+                store?.update { d in
+                    guard let i = d.entries.firstIndex(where: { $0.id == changed.id }) else { return }
+                    d.entries[i].transferProtocol = changed.transferProtocol
+                    d.entries[i].downloadFolderBookmark = changed.downloadFolderBookmark
+                    d.entries[i].downloadFolderName = changed.downloadFolderName
+                }
+            }
         }
         open.insert(controller)
         return controller
@@ -778,6 +844,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     func windowWillClose(_ notification: Notification) {
+        terminal.transfers.reset()
         terminal.stopCapture()
         terminal.disconnect()
         Self.open.remove(self)

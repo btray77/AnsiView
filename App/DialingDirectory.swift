@@ -401,6 +401,22 @@ final class DialingDirectoryViewController: NSViewController {
                 refresh()
                 return
             }
+            if action == "chooseDownloadFolder" {
+                guard let url = TransferFolders.ask(message: "Choose the download folder for this BBS. AnsiView remembers your permission to save there.") else { return }
+                let (applied, password) = EntryForm.apply(form, to: draft)
+                var entry = applied
+                guard let bookmark = TransferFolders.bookmark(url), TransferFolders.writeCheck(url) == nil else {
+                    var shown = form
+                    shown.info = "AnsiView cannot save files in \(url.lastPathComponent). Choose another folder."
+                    mode = .edit(form: shown, draft: draft, original: original)
+                    refresh()
+                    return
+                }
+                entry.downloadFolderBookmark = bookmark
+                entry.downloadFolderName = (url.path as NSString).abbreviatingWithTildeInPath
+                rebuild(entry: entry, password: password, original: original, selecting: "chooseDownloadFolder", from: form)
+                return
+            }
             if action == "chooseFolder" {
                 chooseCaptureFolder { url in
                     guard let url, case .edit(let current, let draft, let original) = self.mode else { return }
