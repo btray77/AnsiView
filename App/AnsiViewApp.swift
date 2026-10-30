@@ -114,6 +114,16 @@ struct AnsiViewApp: App {
                     }
                 }
             }
+            CommandGroup(after: .pasteboard) {
+                // Sent to the focused editor or viewer canvas; Copy writes all of these at once.
+                Menu("Copy As") {
+                    Button("Text") { send(#selector(EditorCanvasView.copyAsText(_:))) }
+                    Button("ANSI (escape codes, for terminals)") { send(#selector(EditorCanvasView.copyAsANSI(_:))) }
+                        .keyboardShortcut("c", modifiers: [.command, .option, .shift])
+                    Button("Image") { send(#selector(EditorCanvasView.copyAsImage(_:))) }
+                        .keyboardShortcut("c", modifiers: [.command, .option])
+                }
+            }
             CommandGroup(after: .importExport) {
                 Button("Export Image...") { send(#selector(AnsiCanvasView.exportImage(_:))) }
                     .keyboardShortcut("e")
@@ -237,6 +247,7 @@ struct AnsiPlayerView: NSViewControllerRepresentable {
         let controller = AnsiPlayerViewController(source: source, speed: speed)
         controller.fileURL = fileURL
         controller.sound = ModemSoundPlayer()
+        ViewerCopy.enable(controller)
         return controller
     }
 

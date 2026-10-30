@@ -86,6 +86,7 @@ final class SlideshowViewController: NSViewController {
         next.artName = collection.items.indices.contains(newIndex) ? collection.items[newIndex].name : nil
         next.sound = makeSound?()
         next.handlesArrowKeys = false
+        ViewerCopy.enable(next)
         next.zoom = zoom
         next.onZoomChange = { [weak self] zoom in self?.zoom = zoom }
         next.onFinished = { [weak self] in self?.scheduleAdvance() }
