@@ -28,6 +28,7 @@ import UniformTypeIdentifiers
 // ansirender --figlet-gallery "TEXT" [--font-dir <folder>]   (every bundled font, headed by its name)
 // ansirender --export-original-fonts <folder>   (writes AnsiView's original fonts as .tdf and .flf)
 // ansirender --sixel|--kitty [--scale N] <input>   (the finished art as sixel or kitty graphics on stdout)
+// ansirender --wallpaper WxH centred|tiled [--scale N] <input> <output.png>   (a desktop picture of exactly WxH pixels)
 // ansirender --version
 let args = CommandLine.arguments
 func fail(_ message: String, _ code: Int32) -> Never {
@@ -406,6 +407,33 @@ if args[1] == "--sixel" || args[1] == "--kitty" {
         text = TerminalGraphics.kitty(png: png)
     }
     FileHandle.standardOutput.write(Data((text + "\n").utf8))
+    exit(0)
+}
+
+if args[1] == "--wallpaper" {
+    var rest = Array(args.dropFirst(2))
+    var scale = 1
+    if let index = rest.firstIndex(of: "--scale") {
+        guard index + 1 < rest.count, let n = Int(rest[index + 1]), (1...8).contains(n) else { fail("--scale takes 1 to 8", 2) }
+        scale = n
+        rest.removeSubrange(index...(index + 1))
+    }
+    let usage = "usage: ansirender --wallpaper WxH centred|tiled [--scale N] <input> <output.png>"
+    guard rest.count == 4, let size = Wallpaper.parseSize(rest[0]) else { fail(usage, 2) }
+    let mode: WallpaperMode
+    switch rest[1] {
+    case "centred", "centered", "center", "centre": mode = .centred
+    case "tiled", "tile": mode = .tiled
+    default: fail(usage, 2)
+    }
+    let screen = AnsiAnalysis(loadArt(rest[2])).finalScreen
+    do {
+        let image = try WallpaperRenderer.image(screen, width: size.0, height: size.1, mode: mode, scale: scale)
+        try WallpaperRenderer.writePNG(image, to: URL(fileURLWithPath: rest[3]))
+        print("wrote \(rest[3]): \(image.width)x\(image.height) px, \(mode.rawValue)")
+    } catch {
+        fail("\(rest[2]): \(error.localizedDescription)", 1)
+    }
     exit(0)
 }
 

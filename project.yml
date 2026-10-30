@@ -249,7 +249,7 @@ targets:
   ansirender:
     type: tool
     platform: macOS
-    sources: [Tool, Shared, App/AnsiExport.swift, App/BatchExport.swift, App/ArtCollection.swift, App/ThumbnailStore.swift]
+    sources: [Tool, Shared, App/AnsiExport.swift, App/BatchExport.swift, App/ArtCollection.swift, App/ThumbnailStore.swift, App/Wallpaper.swift]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.traynham.ansirender

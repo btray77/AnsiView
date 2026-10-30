@@ -195,6 +195,8 @@ struct AnsiViewApp: App {
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                 Button("Export Text...") { send(#selector(AnsiCanvasView.exportText(_:))) }
                     .keyboardShortcut("e", modifiers: [.command, .option, .shift])
+                Button("Export Wallpaper...") { send(#selector(AnsiCanvasView.exportWallpaper(_:))) }
+                    .help("A PNG the exact pixel size of a display, the art centred or tiled; it can be set as the desktop picture.")
                 Button("Batch Export...") { BatchExportController.start() }
                     .keyboardShortcut("e", modifiers: [.command, .option])
                 Divider()
