@@ -26,7 +26,7 @@ public struct TelnetTransferChannel {
         session.start() + session.requestBinary()
     }
 
-    public mutating func requestBinary() -> [UInt8] { session.requestBinary() }
+    public mutating func requestBinary() -> [UInt8] { Self.requestBinary(&session) }
 
     /// Bytes from the network: the data for the engine and the telnet replies to send back.
     public mutating func decode(_ bytes: [UInt8]) -> (data: [UInt8], reply: [UInt8]) {
@@ -37,5 +37,20 @@ public struct TelnetTransferChannel {
     public func encode(_ bytes: [UInt8]) -> [UInt8] { session.encode(bytes) }
 
     /// Both directions are in BINARY mode.
-    public var isByteClean: Bool { session.localEnabled(.binary) && session.remoteEnabled(.binary) }
+    public var isByteClean: Bool { Self.isByteClean(session) }
+
+    // The same operations on a session the caller owns. The terminal must use these with its
+    // live `TelnetSession` (not a channel holding a copy), so option state stays in one place.
+
+    public static func requestBinary(_ session: inout TelnetSession) -> [UInt8] { session.requestBinary() }
+
+    public static func decode(_ bytes: [UInt8], session: inout TelnetSession) -> (data: [UInt8], reply: [UInt8]) {
+        session.receive(bytes)
+    }
+
+    public static func encode(_ bytes: [UInt8], session: TelnetSession) -> [UInt8] { session.encode(bytes) }
+
+    public static func isByteClean(_ session: TelnetSession) -> Bool {
+        session.localEnabled(.binary) && session.remoteEnabled(.binary)
+    }
 }

@@ -72,14 +72,22 @@ public struct TransferredFile: Equatable, Sendable {
     public var url: URL?
     /// Bytes that were already on disk from an earlier attempt (ZMODEM crash recovery).
     public var resumedFrom: Int
+    /// The size the sender announced, when it did.
+    public var announcedSize: Int?
 
-    public init(name: String, remoteName: String, bytes: Int, sha256: String, url: URL? = nil, resumedFrom: Int = 0) {
+    /// Fewer bytes arrived than announced: the sender's file changed, or it stopped early.
+    /// The UI must not present such a file as a good download.
+    public var isShort: Bool { announcedSize.map { bytes < $0 } ?? false }
+
+    public init(name: String, remoteName: String, bytes: Int, sha256: String, url: URL? = nil, resumedFrom: Int = 0,
+                announcedSize: Int? = nil) {
         self.name = name
         self.remoteName = remoteName
         self.bytes = bytes
         self.sha256 = sha256
         self.url = url
         self.resumedFrom = resumedFrom
+        self.announcedSize = announcedSize
     }
 }
 
@@ -187,7 +195,21 @@ public class TransferEngine {
     /// Bytes from the line.
     public func receive(_ bytes: [UInt8]) {
         guard status == .running, !bytes.isEmpty else { return }
+        hashStep()
         handle(bytes)
+    }
+
+    /// The file being sent, hashed one step per engine call (see `OutgoingFile.advanceHash`).
+    var hashingFile: OutgoingFile?
+
+    func hashStep() {
+        guard let file = hashingFile else { return }
+        do { try file.advanceHash() } catch { hashingFile = nil }
+    }
+
+    /// The finished hash of a sent file ("unavailable" if it could not be read).
+    func finalHash(_ file: OutgoingFile) -> String {
+        (try? file.sha256()) ?? "unavailable"
     }
 
     /// Fires the timer if it has expired. Call it regularly (a 10 Hz timer is plenty).
@@ -200,7 +222,10 @@ public class TransferEngine {
     /// Takes up to `max` bytes to send. Streaming protocols generate more only when asked, so how
     /// fast the caller writes is the flow control.
     public func takeOutput(max: Int = 65536) -> [UInt8] {
-        if status == .running, outbox.count - outHead < max { refill(max - (outbox.count - outHead)) }
+        if status == .running, outbox.count - outHead < max {
+            hashStep()
+            refill(max - (outbox.count - outHead))
+        }
         let available = outbox.count - outHead
         guard available > 0 else { return [] }
         let count = Swift.min(max, available)

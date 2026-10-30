@@ -396,8 +396,8 @@ public enum KermitAttributes {
             let end = min(data.count, i + 2 + length)
             let value = String(decoding: data[(i + 2)..<end], as: UTF8.self)
             switch tag {
-            case UInt8(ascii: "1"): info.size = Int(value)
-            case UInt8(ascii: "!"): kilobytes = Int(value)
+            case UInt8(ascii: "1"): info.size = Int(value).flatMap { $0 >= 0 ? $0 : nil }
+            case UInt8(ascii: "!"): kilobytes = Int(value).flatMap { $0 >= 0 ? $0 : nil }
             case UInt8(ascii: "\""): info.type = value
             case UInt8(ascii: "#"):
                 for format in dateFormats {
@@ -410,7 +410,11 @@ public enum KermitAttributes {
             }
             i = end
         }
-        if info.size == nil, let kilobytes { info.size = kilobytes * 1024 }
+        if info.size == nil, let kilobytes {
+            // A hostile value must not overflow; Int.max is refused by any size limit.
+            let bytes = kilobytes.multipliedReportingOverflow(by: 1024)
+            info.size = bytes.overflow ? Int.max : bytes.partialValue
+        }
         return info
     }
 }
@@ -441,7 +445,6 @@ public final class KermitSender: TransferEngine {
     private var acknowledged = 0
     private var retries = 0
     private var skipFile = false
-    private var fileHash = ""
     /// Data characters per new packet: halved after a retransmission, doubled back after clean ACKs.
     private var packetBudget = 0
     private var cleanAcks = 0
@@ -554,7 +557,7 @@ public final class KermitSender: TransferEngine {
             }
         case .eof:
             if !skipFile {
-                emit(.fileCompleted(TransferredFile(name: file.name, remoteName: file.name, bytes: file.size, sha256: fileHash)))
+                emit(.fileCompleted(TransferredFile(name: file.name, remoteName: file.name, bytes: file.size, sha256: finalHash(file))))
                 progress.filesCompleted += 1
             }
             fileIndex += 1
@@ -593,10 +596,7 @@ public final class KermitSender: TransferEngine {
             sendNew(KType.eot, [])
             return
         }
-        do { fileHash = try file.sha256() } catch {
-            fail("cannot read \(file.name): \(error)")
-            return
-        }
+        hashingFile = file
         skipFile = false
         position = 0
         acknowledged = 0
@@ -809,7 +809,12 @@ public final class KermitReceiver: TransferEngine {
             }
             arm(options.kermitTimeout)
         } else if ahead >= 64 - max(settings.window, 1) - 1, let ack = acks[packet.seq] {
-            // Already have it: the ACK was lost.
+            // Already have it: the ACK was lost. A peer repeating it forever is a failure.
+            retries += 1
+            if retries > options.maxRetries + settings.window {
+                fail("packet \(packet.seq) repeated too often")
+                return
+            }
             emit(.recovered("duplicate packet \(packet.seq)"))
             send(ack)
             arm(options.kermitTimeout)
@@ -822,6 +827,7 @@ public final class KermitReceiver: TransferEngine {
         switch packet.type {
         case KType.file:
             guard let name = data else { return protocolError("unreadable file name") }
+            abortUnfinished()
             fileName = TransferFileName.decode(name)
             announcedSize = nil
             skipping = false
@@ -866,6 +872,7 @@ public final class KermitReceiver: TransferEngine {
             skipping = false
             fileName = nil
         case KType.eot:
+            abortUnfinished()
             acks[packet.seq] = reply(KType.ack, packet.seq)
             complete()
             return
@@ -897,6 +904,14 @@ public final class KermitReceiver: TransferEngine {
             emit(.fileSkipped(name: name, reason: reason))
             return false
         }
+    }
+
+    /// A file that never got its Z packet is not kept.
+    private func abortUnfinished() {
+        guard fileOpen else { return }
+        sink.abort(resumable: false)
+        fileOpen = false
+        emit(.fileSkipped(name: fileName ?? "?", reason: "the sender moved on before the end of the file"))
     }
 
     private func protocolError(_ message: String) {

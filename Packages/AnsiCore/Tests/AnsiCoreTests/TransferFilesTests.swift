@@ -134,7 +134,12 @@ func directoryNames(_ dir: URL) -> [String] {
 
     @Test func resumesFromAKeptPartialAndHashesTheWholeFile() throws {
         let dir = makeTransferTempDir()
-        try Data([1, 2, 3]).write(to: dir.appendingPathComponent("r.bin.part"))
+        var keep = DownloadsDirectorySink.Options()
+        keep.keepPartialForResume = true
+        let first = DownloadsDirectorySink(directory: dir, options: keep)
+        _ = first.open(FileOffer(name: "r.bin", size: 5))
+        try first.write([1, 2, 3])
+        first.abort(resumable: true)
         let sink = DownloadsDirectorySink(directory: dir)
         #expect(sink.open(FileOffer(name: "r.bin", size: 5, resumeRequested: true)) == .accept(offset: 3))
         try sink.write([4, 5])

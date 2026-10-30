@@ -78,7 +78,6 @@ public final class XModemSender: TransferEngine {
     private var gMode = false
     private var retries = 0
     private var cancelCount = 0
-    private var fileHash = ""
     private var sentEndOfBatch = false
     private var announced = false
 
@@ -106,10 +105,7 @@ public final class XModemSender: TransferEngine {
     }
 
     private func prepareFile() {
-        do { fileHash = try file.sha256() } catch {
-            fail("cannot read \(file.name): \(error)")
-            return
-        }
+        hashingFile = file
         progress.fileName = file.name
         progress.fileSize = file.size
         progress.fileBytes = 0
@@ -300,7 +296,7 @@ public final class XModemSender: TransferEngine {
     }
 
     private func fileDone() {
-        emit(.fileCompleted(TransferredFile(name: file.name, remoteName: file.name, bytes: file.size, sha256: fileHash)))
+        emit(.fileCompleted(TransferredFile(name: file.name, remoteName: file.name, bytes: file.size, sha256: finalHash(file))))
         progress.filesCompleted += 1
         progress.fileBytes = file.size
         fileIndex += 1
@@ -366,6 +362,7 @@ public final class XModemReceiver: TransferEngine {
     private var announced = false
     private var smallBlocks = 0
     private var bigBlocks = 0
+    private var purgeStarted: TimeInterval = 0
 
     public override var protocolName: String { kind.displayName }
 
@@ -418,7 +415,9 @@ public final class XModemReceiver: TransferEngine {
                 } else {
                     cancelCount = 0
                 }
-                arm(options.purgeTime)
+                // Wait for silence, but not forever: a line that never goes quiet gets its NAK
+                // after one block timeout, and each NAK counts as a retry.
+                if clock.now - purgeStarted < options.blockTimeout { arm(options.purgeTime) }
             case .starting, .ready:
                 if byte == XModemByte.SOH || byte == XModemByte.STX {
                     cancelCount = 0
@@ -458,6 +457,7 @@ public final class XModemReceiver: TransferEngine {
         }
         emit(.recovered(reason))
         phase = .purging
+        purgeStarted = clock.now
         arm(options.purgeTime)
     }
 
@@ -483,6 +483,11 @@ public final class XModemReceiver: TransferEngine {
             if number == 0 {
                 handleHeader(data)
             } else if number == expectedBlock &- 1, !gMode {
+                retries += 1
+                if retries > options.maxRetries {
+                    fail("block \(number) repeated too often")
+                    return
+                }
                 send(XModemByte.ACK)
                 arm(options.blockTimeout)
             } else {
@@ -498,6 +503,12 @@ public final class XModemReceiver: TransferEngine {
             if dataLength == 1024 { bigBlocks += 1 } else { smallBlocks += 1 }
             accept(data)
         } else if number == expectedBlock &- 1 {
+            // A peer that repeats a block forever must not keep the transfer alive forever.
+            retries += 1
+            if retries > options.maxRetries {
+                fail("block \(number) repeated too often")
+                return
+            }
             emit(.recovered("duplicate block \(number)"))
             if !gMode {
                 send(XModemByte.ACK)
@@ -597,7 +608,7 @@ public final class XModemReceiver: TransferEngine {
             }
             return
         }
-        if batch, !gMode, eotCount == 0 {
+        if (batch && !gMode && eotCount == 0) || (!batch && !gotBlock && eotCount == 0) {
             // YMODEM: NAK the first EOT, ACK the repeat (a lone noise EOT cannot end the file).
             eotCount = 1
             send(XModemByte.NAK)

@@ -45,7 +45,8 @@ public final class ZModemSender: TransferEngine {
     private var retries = 0
     private var rewindsWithoutProgress = 0
     private var furthestRewind = -1
-    private var fileHash = ""
+    /// ZMODEM file positions are 32 bit.
+    public static let maxFileSize = Int(UInt32.max)
     private var blockSize: Int
     private var fileAccepted = false
     private var fileSentAt: TimeInterval = 0
@@ -187,10 +188,14 @@ public final class ZModemSender: TransferEngine {
             return
         }
         if !fileAccepted, phase != .waitFileResponse {
-            do { fileHash = try file.sha256() } catch {
-                fail("cannot read \(file.name): \(error)")
+            if file.size > Self.maxFileSize {
+                // ZMODEM positions are 32 bits: a larger file would wrap silently.
+                emit(.fileSkipped(name: file.name, reason: "ZMODEM cannot send files of 4 GiB or more"))
+                fileIndex += 1
+                sendFile()
                 return
             }
+            hashingFile = file
             progress.fileName = file.name
             progress.fileSize = file.size
             progress.fileBytes = 0
@@ -286,7 +291,7 @@ public final class ZModemSender: TransferEngine {
     }
 
     private func fileDone() {
-        emit(.fileCompleted(TransferredFile(name: file.name, remoteName: file.name, bytes: file.size, sha256: fileHash)))
+        emit(.fileCompleted(TransferredFile(name: file.name, remoteName: file.name, bytes: file.size, sha256: finalHash(file))))
         progress.filesCompleted += 1
         nextFile()
     }

@@ -59,13 +59,16 @@ public enum TransferFileName {
 
     static func capped(_ name: String) -> String {
         guard name.utf8.count > maxLength else { return name }
+        // The extension is kept only when it is short in bytes (a single character can carry
+        // hundreds of combining marks). Trimming works on whole characters, never past empty.
         var ext = ""
-        if let dot = name.lastIndex(of: "."), name.distance(from: dot, to: name.endIndex) <= 16, dot != name.startIndex {
+        if let dot = name.lastIndex(of: "."), dot != name.startIndex, name[dot...].utf8.count <= 16 {
             ext = String(name[dot...])
         }
         var stem = String(name.dropLast(ext.count))
-        while stem.utf8.count + ext.utf8.count > maxLength { stem.removeLast() }
-        return stem + ext
+        while !stem.isEmpty, stem.utf8.count + ext.utf8.count > maxLength { stem.removeLast() }
+        let result = stem + ext
+        return result.isEmpty || result.utf8.count > maxLength || stem.isEmpty ? fallback : result
     }
 
     /// `name-1.ext`, `name-2.ext`, ... for the given attempt (0 returns the name itself).
@@ -152,6 +155,9 @@ public final class DownloadsDirectorySink: TransferSink {
         var hasher: SHA256
     }
 
+    /// Extended attribute set on every `.part` this sink creates.
+    public static let partialMarker = "com.traynham.ansiview.partial"
+
     public let directory: URL
     public let options: Options
     public private(set) var completed: [TransferredFile] = []
@@ -180,6 +186,8 @@ public final class DownloadsDirectorySink: TransferSink {
             let candidate = directory.appendingPathComponent(TransferFileName.variant(name, attempt) + ".part")
             let fd = Darwin.open(candidate.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
             if fd >= 0 {
+                // Mark it as ours: only marked partials can be resumed later.
+                _ = Self.partialMarker.withCString { fsetxattr(fd, $0, "1", 1, 0, 0) }
                 current = Current(fd: fd, partURL: candidate, name: name, remoteName: offer.name, announced: offer.size,
                                   written: 0, resumedFrom: 0, hasher: SHA256())
                 return .accept(offset: 0)
@@ -196,6 +204,15 @@ public final class DownloadsDirectorySink: TransferSink {
         guard existing > 0, offer.size.map({ existing < $0 }) ?? true, existing <= options.maxFileSize else { return nil }
         let fd = Darwin.open(part.path, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
         guard fd >= 0 else { return nil }
+        // A .part that this sink did not create (a browser's download, the user's own file) is
+        // never appended to, whatever the sender asks.
+        var marker: UInt8 = 0
+        var check = stat()
+        guard Self.partialMarker.withCString({ fgetxattr(fd, $0, &marker, 1, 0, 0) }) == 1, marker == UInt8(ascii: "1"),
+              fstat(fd, &check) == 0, (check.st_mode & S_IFMT) == S_IFREG, check.st_nlink == 1 else {
+            close(fd)
+            return nil
+        }
         var hasher = SHA256()
         var buffer = [UInt8](repeating: 0, count: 1 << 16)
         var total = 0
@@ -242,7 +259,7 @@ public final class DownloadsDirectorySink: TransferSink {
             if renamex_np(file.partURL.path, target.path, UInt32(RENAME_EXCL)) == 0 {
                 let result = TransferredFile(name: finalName, remoteName: file.remoteName, bytes: file.written,
                                              sha256: TransferHash.hex(file.hasher.finalize()), url: target,
-                                             resumedFrom: file.resumedFrom)
+                                             resumedFrom: file.resumedFrom, announcedSize: file.announced)
                 completed.append(result)
                 return result
             }
@@ -282,7 +299,7 @@ public final class MemoryTransferSink: TransferSink {
         offers.append(offer)
         let name = TransferFileName.sanitize(offer.name)
         if refuse.contains(name) { return .skip(reason: "refused") }
-        if let size = offer.size, size > maxFileSize { return .skip(reason: "too large") }
+        if let size = offer.size, size > maxFileSize || size < 0 { return .skip(reason: "bad size") }
         if offer.resumeRequested, let part = partials[name], !part.isEmpty, offer.size.map({ part.count < $0 }) ?? true {
             current = (name, offer.name, offer.size, part, part.count)
             return .accept(offset: part.count)
@@ -304,7 +321,7 @@ public final class MemoryTransferSink: TransferSink {
         files.append((file.name, file.data))
         partials[file.name] = nil
         return TransferredFile(name: file.name, remoteName: file.remote, bytes: file.data.count,
-                               sha256: TransferHash.sha256Hex(file.data), resumedFrom: file.resumed)
+                               sha256: TransferHash.sha256Hex(file.data), resumedFrom: file.resumed, announcedSize: file.size)
     }
 
     public func abort(resumable: Bool) {
@@ -361,16 +378,28 @@ public final class OutgoingFile {
         return [UInt8](data)
     }
 
-    public func sha256() throws -> String {
-        if let memory { return TransferHash.sha256Hex(memory) }
-        var hasher = SHA256()
-        var offset = 0
-        while offset < size {
-            let chunk = try read(offset: offset, count: 1 << 20)
-            if chunk.isEmpty { break }
+    /// Bytes hashed per `advanceHash()` step: engines take one step per call, so a large file is
+    /// hashed alongside the transfer instead of in one blocking pass before it.
+    public static let hashStep = 256 * 1024
+    private var hasher = SHA256()
+    public private(set) var hashedBytes = 0
+    private var digest: String?
+
+    /// Hashes the next step of the file (no-op once done).
+    public func advanceHash() throws {
+        guard digest == nil else { return }
+        if hashedBytes < size {
+            let chunk = try read(offset: hashedBytes, count: min(Self.hashStep, size - hashedBytes))
+            guard !chunk.isEmpty else { throw TransferFileError.io("\(name) ended early") }
             hasher.update(data: chunk)
-            offset += chunk.count
+            hashedBytes += chunk.count
         }
-        return TransferHash.hex(hasher.finalize())
+        if hashedBytes >= size { digest = TransferHash.hex(hasher.finalize()) }
+    }
+
+    /// The SHA-256 of the whole file, finishing whatever steps are left.
+    public func sha256() throws -> String {
+        while digest == nil { try advanceHash() }
+        return digest!
     }
 }

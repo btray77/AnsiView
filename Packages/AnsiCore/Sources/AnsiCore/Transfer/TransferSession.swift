@@ -47,6 +47,7 @@ public final class FileTransferSession {
     /// Seconds between progress callbacks.
     public var progressInterval: TimeInterval = 0.25
 
+    public static let maxLogEntries = 5000
     public private(set) var log: [LogEntry] = []
     public private(set) var outcome: Outcome?
     private var files: [TransferredFile] = []
@@ -136,7 +137,9 @@ public final class FileTransferSession {
             return "file \(name)" + (size.map { " (\($0) bytes)" } ?? "") + (offset > 0 ? " resuming at \(offset)" : "")
         case .fileCompleted(let file):
             return "done \(file.name): \(file.bytes) bytes, sha256 \(file.sha256)"
-                + (file.resumedFrom > 0 ? ", resumed from \(file.resumedFrom)" : "") + (file.url.map { ", saved as \($0.path)" } ?? "")
+                + (file.resumedFrom > 0 ? ", resumed from \(file.resumedFrom)" : "")
+                + (file.isShort ? ", SHORT: \(file.announcedSize ?? 0) bytes were announced" : "")
+                + (file.url.map { ", saved as \($0.path)" } ?? "")
         case .fileSkipped(let name, let reason): return "skipped \(name): \(reason)"
         case .recovered(let text): return "recovered: \(text)"
         case .completed: return "transfer complete"
@@ -160,6 +163,8 @@ public final class FileTransferSession {
 
     private func record(_ event: TransferEvent) {
         log.append(LogEntry(time: clock.now - startTime, event: event))
+        // Bounded: a hostile or broken peer can cause endless recoveries. The oldest half goes.
+        if log.count > Self.maxLogEntries { log.removeFirst(log.count - Self.maxLogEntries / 2) }
         onEvent?(event)
     }
 
@@ -169,7 +174,12 @@ public final class FileTransferSession {
             record(event)
         }
         let now = clock.now
-        samples.append((now, engine.progress.sessionBytes))
+        // One rate sample per 50 ms at most, so the window stays small at any feed rate.
+        if let last = samples.last, now - last.time < 0.05, samples.count > 1 {
+            samples[samples.count - 1] = (now, engine.progress.sessionBytes)
+        } else {
+            samples.append((now, engine.progress.sessionBytes))
+        }
         while let first = samples.first, now - first.time > 5, samples.count > 2 { samples.removeFirst() }
         if outcome == nil, now - lastProgressReport >= progressInterval {
             let current = progress
