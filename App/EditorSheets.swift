@@ -110,3 +110,77 @@ final class CanvasSizeSheetController: EditorSheetController {
         return true
     }
 }
+
+/// File > Import Image...: the conversion options, shown as an alert's accessory view.
+/// The choices are remembered for the next import.
+final class ImageImportOptionsView: NSView {
+    private static let defaultsKey = "imageImportOptions"
+    private let widthField = EditorSheetController.field("80", width: 70)
+    private let modePopup = NSPopUpButton()
+    private let palettePopup = NSPopUpButton()
+    private let ditherPopup = NSPopUpButton()
+    private let iceBox = NSButton(checkboxWithTitle: "iCE colours (bright backgrounds)", target: nil, action: nil)
+    private let aspectBox = NSButton(checkboxWithTitle: "Correct for the 8x16 character cell", target: nil, action: nil)
+
+    init(options: ImageToAnsi.Options = ImageImportOptionsView.remembered) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 420, height: 190))
+        modePopup.addItems(withTitles: ImageToAnsi.Mode.allCases.map(\.label))
+        palettePopup.addItems(withTitles: ImageToAnsi.PaletteChoice.allCases.map(\.label))
+        ditherPopup.addItems(withTitles: ImageToAnsi.Dither.allCases.map(\.label))
+        widthField.stringValue = String(options.columns)
+        modePopup.selectItem(at: ImageToAnsi.Mode.allCases.firstIndex(of: options.mode) ?? 0)
+        palettePopup.selectItem(at: ImageToAnsi.PaletteChoice.allCases.firstIndex(of: options.palette) ?? 0)
+        ditherPopup.selectItem(at: ImageToAnsi.Dither.allCases.firstIndex(of: options.dither) ?? 0)
+        iceBox.state = options.iceColors ? .on : .off
+        aspectBox.state = options.aspectCorrection ? .on : .off
+        let grid = NSGridView(views: [
+            [NSTextField(labelWithString: "Width (columns):"), widthField],
+            [NSTextField(labelWithString: "Characters:"), modePopup],
+            [NSTextField(labelWithString: "Colours:"), palettePopup],
+            [NSTextField(labelWithString: "Dithering:"), ditherPopup],
+            [NSGridCell.emptyContentView, iceBox],
+            [NSGridCell.emptyContentView, aspectBox],
+        ])
+        grid.column(at: 0).xPlacement = .trailing
+        grid.rowSpacing = 6
+        let size = grid.fittingSize
+        setFrameSize(size)
+        grid.frame = NSRect(origin: .zero, size: size)
+        addSubview(grid)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    /// The chosen options, or nil when the width is not 1 to 1000.
+    var options: ImageToAnsi.Options? {
+        guard let columns = Int(widthField.stringValue), (1...EditCanvas.maxColumns).contains(columns) else { return nil }
+        var options = ImageToAnsi.Options()
+        options.columns = columns
+        options.mode = ImageToAnsi.Mode.allCases[max(0, modePopup.indexOfSelectedItem)]
+        options.palette = ImageToAnsi.PaletteChoice.allCases[max(0, palettePopup.indexOfSelectedItem)]
+        options.dither = ImageToAnsi.Dither.allCases[max(0, ditherPopup.indexOfSelectedItem)]
+        options.iceColors = iceBox.state == .on
+        options.aspectCorrection = aspectBox.state == .on
+        return options
+    }
+
+    static var remembered: ImageToAnsi.Options {
+        var options = ImageToAnsi.Options()
+        guard let saved = UserDefaults.standard.dictionary(forKey: defaultsKey) else { return options }
+        if let columns = saved["columns"] as? Int, (1...EditCanvas.maxColumns).contains(columns) { options.columns = columns }
+        if let mode = (saved["mode"] as? String).flatMap(ImageToAnsi.Mode.init) { options.mode = mode }
+        if let palette = (saved["palette"] as? String).flatMap(ImageToAnsi.PaletteChoice.init) { options.palette = palette }
+        if let dither = (saved["dither"] as? String).flatMap(ImageToAnsi.Dither.init) { options.dither = dither }
+        if let ice = saved["ice"] as? Bool { options.iceColors = ice }
+        if let aspect = saved["aspect"] as? Bool { options.aspectCorrection = aspect }
+        return options
+    }
+
+    static func remember(_ options: ImageToAnsi.Options) {
+        UserDefaults.standard.set([
+            "columns": options.columns, "mode": options.mode.rawValue, "palette": options.palette.rawValue,
+            "dither": options.dither.rawValue, "ice": options.iceColors, "aspect": options.aspectCorrection,
+        ] as [String: Any], forKey: defaultsKey)
+    }
+}

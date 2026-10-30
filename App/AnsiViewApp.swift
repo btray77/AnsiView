@@ -83,6 +83,8 @@ struct AnsiViewApp: App {
                     .keyboardShortcut("n", modifiers: [.command, .option])
                 Button("Edit Art") { EditorWindowController.editFocusedArt() }
                     .keyboardShortcut("d", modifiers: [.command, .shift])
+                Button("Import Image...") { EditorWindowController.importImage() }
+                    .keyboardShortcut("i", modifiers: [.command, .shift])
                 Divider()
                 Button("Open Folder or Art Pack...") { GalleryWindowController.chooseAndOpen() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])

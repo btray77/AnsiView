@@ -530,6 +530,36 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
              suggestedFormat: SaveFormat.suggested(for: player.source.format))
     }
 
+    /// File > Import Image...: converts a picture to block characters and opens it for touching up.
+    static func importImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.message = "Choose an image to convert to ANSI art."
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let alert = NSAlert()
+        alert.messageText = "Import \(url.lastPathComponent)"
+        alert.informativeText = "The image becomes block characters in a new editor window."
+        alert.addButton(withTitle: "Import")
+        alert.addButton(withTitle: "Cancel")
+        let optionsView = ImageImportOptionsView()
+        alert.accessoryView = optionsView
+        while true {
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            if optionsView.options != nil { break }
+            NSSound.beep()
+        }
+        guard let options = optionsView.options else { return }
+        ImageImportOptionsView.remember(options)
+        do {
+            let name = url.deletingPathExtension().lastPathComponent
+            let canvas = try ImageToAnsi.convert(data: try Data(contentsOf: url), options: options, title: name)
+            open(canvas: canvas, name: "\(name) (imported)")
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
     private static func focusedPlayer() -> AnsiPlayerViewController? {
         func find(_ view: NSView) -> AnsiPlayerViewController? {
             if let canvas = view as? AnsiCanvasView { return canvas.player }
