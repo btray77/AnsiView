@@ -36,12 +36,52 @@ public struct DialingDirectory: Equatable {
     /// Loads the stored directory; when there is none, migrates the plan 7 address book; when
     /// neither exists, the example. A stored directory that cannot be read gives an empty one.
     public init(stored: Data?, legacy: Data?) {
+        self = Self.load(stored: stored, legacy: legacy).directory
+    }
+
+    /// As `init(stored:legacy:)`, and whether the stored data could not be read at all (the
+    /// caller keeps a copy before saving over it). Entries that cannot be read are skipped
+    /// one by one, so one bad entry does not empty the directory.
+    public static func load(stored: Data?, legacy: Data?) -> (directory: DialingDirectory, unreadable: Bool) {
         if let stored {
-            self = (try? Self.decoder.decode(Stored.self, from: stored))?.directory ?? DialingDirectory()
-        } else if let legacy {
-            self = DialingDirectory(entries: BBSAddressBook(data: legacy).entries)
-        } else {
-            self = .example
+            guard let decoded = try? decoder.decode(Stored.self, from: stored) else { return (DialingDirectory(), true) }
+            return (decoded.directory, false)
+        }
+        if let legacy {
+            let entries = (try? JSONDecoder().decode([LossyEntry].self, from: legacy))?.compactMap(\.entry) ?? []
+            return (DialingDirectory(entries: entries), false)
+        }
+        return (.example, false)
+    }
+
+    /// The edited `draft` with the call history currently stored for it (calls recorded while
+    /// the editor was open are kept).
+    public func keepingHistory(_ draft: BBSEntry) -> BBSEntry {
+        guard let stored = entries.first(where: { $0.id == draft.id }) else { return draft }
+        var merged = draft
+        merged.totalCalls = stored.totalCalls
+        merged.lastCalled = stored.lastCalled
+        return merged
+    }
+
+    /// Saves `entry`'s password after an edit (ruling 3). The new item is written before the
+    /// old one is removed, so a failed write loses nothing. An empty password removes the item
+    /// only when this entry already owned that key and no other entry shares it.
+    public static func saveCredential(password: String, for entry: BBSEntry, original: BBSEntry?,
+                                      in directory: DialingDirectory, store: PasswordStore) throws {
+        let key = entry.credentialKey
+        if let key {
+            if password.isEmpty {
+                if original?.credentialKey == key, !directory.sharesCredential(key, excluding: entry.id),
+                   store.password(for: key) != nil {
+                    try store.removePassword(for: key)
+                }
+            } else if store.password(for: key) != password {
+                try store.setPassword(password, for: key, label: "AnsiView BBS: \(entry.name)")
+            }
+        }
+        if let oldKey = original?.credentialKey, oldKey != key, !directory.sharesCredential(oldKey, excluding: entry.id) {
+            try store.removePassword(for: oldKey)
         }
     }
 
@@ -220,9 +260,25 @@ public struct DialingDirectory: Equatable {
         var entries: [BBSEntry]
     }
 
+    /// An entry that decodes to nil instead of failing the whole list.
+    struct LossyEntry: Codable {
+        var entry: BBSEntry?
+        init(_ entry: BBSEntry) { self.entry = entry }
+        init(from decoder: Decoder) throws { entry = try? BBSEntry(from: decoder) }
+        func encode(to encoder: Encoder) throws { try entry?.encode(to: encoder) }
+    }
+
     private struct Stored: Codable {
         var version: Int
-        var entries: [BBSEntry]
+        var entries: [BBSEntry] {
+            get { lossy.compactMap(\.entry) }
+            set { lossy = newValue.map(LossyEntry.init) }
+        }
+        private var lossy: [LossyEntry] = []
+
+        private enum CodingKeys: String, CodingKey {
+            case version, lossy = "entries", globalMacros, showAtLaunch, redialAttempts, redialDelay
+        }
         var globalMacros: [String]?
         var showAtLaunch: Bool?
         var redialAttempts: Int?

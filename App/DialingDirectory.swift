@@ -15,9 +15,16 @@ final class DialingDirectoryStore {
     init(defaults: UserDefaults = .standard, passwords: PasswordStore = KeychainPasswordStore()) {
         self.defaults = defaults
         self.passwords = passwords
-        directory = DialingDirectory(stored: defaults.data(forKey: DialingDirectory.defaultsKey),
-                                     legacy: defaults.data(forKey: BBSAddressBook.defaultsKey))
+        let stored = defaults.data(forKey: DialingDirectory.defaultsKey)
+        let loaded = DialingDirectory.load(stored: stored, legacy: defaults.data(forKey: BBSAddressBook.defaultsKey))
+        directory = loaded.directory
+        // Data this build cannot read is kept aside before anything is saved over it.
+        if loaded.unreadable, let stored, defaults.data(forKey: Self.unreadableKey) == nil {
+            defaults.set(stored, forKey: Self.unreadableKey)
+        }
     }
+
+    static let unreadableKey = DialingDirectory.defaultsKey + ".unreadable"
 
     func update(_ change: (inout DialingDirectory) -> Void) {
         change(&directory)
@@ -60,19 +67,10 @@ final class DialingDirectoryStore {
     /// Saves an entry (new or edited) and its password. The Keychain item follows a change of
     /// host, port or username; an empty password removes it.
     func save(_ draft: BBSEntry, password: String, original: BBSEntry?) throws {
-        let entry = try validated(draft, password: password)
+        // Calls recorded while the editor was open are kept.
+        let entry = directory.keepingHistory(try validated(draft, password: password))
         do {
-            if let oldKey = original?.credentialKey, oldKey != entry.credentialKey,
-               !directory.sharesCredential(oldKey, excluding: entry.id) {
-                try passwords.removePassword(for: oldKey)
-            }
-            if let key = entry.credentialKey {
-                if password.isEmpty {
-                    if passwords.password(for: key) != nil { try passwords.removePassword(for: key) }
-                } else if passwords.password(for: key) != password {
-                    try passwords.setPassword(password, for: key, label: "AnsiView BBS: \(entry.name)")
-                }
-            }
+            try DialingDirectory.saveCredential(password: password, for: entry, original: original, in: directory, store: passwords)
         } catch {
             throw SaveProblem.keychain(error)
         }
@@ -110,18 +108,25 @@ final class DialingDirectoryStore {
         let parsed = SyncTermImport.parse(text)
         guard !parsed.entries.isEmpty || !parsed.skipped.isEmpty else { throw DialingDirectory.ImportError.unreadable }
         var added = 0, duplicates = 0
+        var unsaved: [String] = []
         for item in parsed.entries {
             var result: (added: [BBSEntry], skipped: Int) = ([], 0)
             update { result = $0.merge([item.entry]) }
             duplicates += result.skipped
             guard let entry = result.added.first else { continue }
             added += 1
-            if let password = item.password, let key = entry.credentialKey {
-                try? passwords.setPassword(password, for: key, label: "AnsiView BBS: \(entry.name)")
+            guard let password = item.password else { continue }
+            if let key = entry.credentialKey,
+               (try? passwords.setPassword(password, for: key, label: "AnsiView BBS: \(entry.name)")) != nil {
+                continue
             }
+            unsaved.append(entry.name)
         }
         var summary = "Imported \(added) BBSes from the SyncTERM directory."
         if duplicates > 0 { summary += " \(duplicates) were already here." }
+        if !unsaved.isEmpty {
+            summary += " Passwords not saved (no username, or the Keychain refused): " + unsaved.joined(separator: ", ") + "."
+        }
         if !parsed.skipped.isEmpty {
             summary += " Not imported (AnsiView speaks telnet and raw TCP only): " + parsed.skipped.joined(separator: ", ") + "."
         }
@@ -355,7 +360,15 @@ final class DialingDirectoryViewController: NSViewController {
                     guard let url, case .edit(let current, let draft, let original) = self.mode else { return }
                     let (applied, password) = EntryForm.apply(current, to: draft)
                     var entry = applied
-                    entry.captureFolderBookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+                    guard let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil,
+                                                               relativeTo: nil) else {
+                        var shown = current
+                        shown.info = "AnsiView could not keep permission for \(url.lastPathComponent). Choose another folder."
+                        self.mode = .edit(form: shown, draft: draft, original: original)
+                        self.refresh()
+                        return
+                    }
+                    entry.captureFolderBookmark = bookmark
                     entry.captureFolderName = (url.path as NSString).abbreviatingWithTildeInPath
                     self.rebuild(entry: entry, password: password, original: original, selecting: "chooseFolder", from: current)
                 }

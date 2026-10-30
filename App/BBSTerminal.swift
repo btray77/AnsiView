@@ -181,6 +181,8 @@ final class TerminalViewController: NSViewController {
     static let busyWindow: TimeInterval = 30
     private(set) var loginRunner: LoginScriptRunner?
     private(set) var loginText: String?
+    /// Why capture on connect did not start (kept apart from the login status).
+    private(set) var captureProblem: String?
     private var busyMatcher: PromptMatcher?
     private var connectedAt: TimeInterval = 0
     private var captureFolder: URL?
@@ -262,6 +264,7 @@ final class TerminalViewController: NSViewController {
         shownBells = 0
         loginRunner = nil
         loginText = nil
+        captureProblem = nil
         busyMatcher = nil
         terminalView.needsDisplay = true
         let client = BBSClient(host: entry.host, port: entry.port, mode: entry.mode,
@@ -279,8 +282,9 @@ final class TerminalViewController: NSViewController {
     private func answered() {
         connectedAt = now()
         callRecorder?(entry.id)
+        // Busy text matters only to the dialer, which hangs up and dials the next BBS.
         let busy = LoginStep.patterns(in: entry.busyText)
-        busyMatcher = busy.isEmpty ? nil : PromptMatcher(patterns: busy, encoding: entry.encoding)
+        busyMatcher = busy.isEmpty || onBusy == nil ? nil : PromptMatcher(patterns: busy, encoding: entry.encoding)
         if entry.captureOnConnect { startCaptureOnConnect() }
         if entry.autoLogin, let name = entry.username, !name.isEmpty { runLogin() }
     }
@@ -310,11 +314,7 @@ final class TerminalViewController: NSViewController {
     }
 
     private func watch(_ bytes: [UInt8]) {
-        if var runner = loginRunner, runner.isRunning {
-            let actions = runner.feed(bytes, now: now())
-            loginRunner = runner
-            perform(actions)
-        }
+        // Busy first, so a full BBS is not sent the username.
         if busyMatcher != nil {
             if now() - connectedAt > Self.busyWindow {
                 busyMatcher = nil
@@ -324,19 +324,25 @@ final class TerminalViewController: NSViewController {
                 loginText = "The BBS is busy"
                 updateStatus()
                 onBusy?()
+                return
             }
+        }
+        if var runner = loginRunner, runner.isRunning {
+            let actions = runner.feed(bytes, now: now())
+            loginRunner = runner
+            perform(actions)
         }
     }
 
     private func startCaptureOnConnect() {
         guard let bookmark = entry.captureFolderBookmark else {
-            loginText = "Capture on connect is on, but no capture folder is chosen"
+            captureProblem = "Capture on connect is on, but no capture folder is chosen"
             return
         }
         var stale = false
         guard let folder = try? URL(resolvingBookmarkData: bookmark, options: .withSecurityScope, relativeTo: nil,
                                     bookmarkDataIsStale: &stale) else {
-            loginText = "The capture folder could not be found. Choose it again in the dialing directory"
+            captureProblem = "The capture folder could not be found. Choose it again in the dialing directory"
             return
         }
         if captureFolder != folder {
@@ -350,7 +356,7 @@ final class TerminalViewController: NSViewController {
         let url = folder.appendingPathComponent("\(safeName) \(formatter.string(from: Date())).ans")
         guard FileManager.default.createFile(atPath: url.path, contents: nil),
               let handle = try? FileHandle(forWritingTo: url) else {
-            loginText = "The capture folder \(folder.lastPathComponent) cannot be written, so this session is not captured"
+            captureProblem = "The capture folder \(folder.lastPathComponent) cannot be written, so this session is not captured"
             return
         }
         startCapture(handle: handle, name: url.lastPathComponent)
@@ -654,6 +660,7 @@ final class TerminalViewController: NSViewController {
         if entry.mode == .raw { parts.append("Raw TCP") }
         if let captureName { parts.append("Capturing to \(captureName)") }
         if scrollOffset > 0 { parts.append("Scrollback -\(scrollOffset)") }
+        if let captureProblem { parts.append(captureProblem) }
         if let loginText { parts.append(loginText) }
         statusText = parts.joined(separator: "  |  ")
         statusLabel.stringValue = statusText

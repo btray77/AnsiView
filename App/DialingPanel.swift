@@ -241,10 +241,17 @@ final class DialSession: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        panelClosed = true
         if case .dialing = queue.state { stop(nil) } else if case .waiting = queue.state { stop(nil) }
+        // A finished session stayed alive only for its panel (for example "No answer").
+        if finished { Self.active.remove(self) }
     }
 
+    /// True while the session is kept alive (dialing, watching for busy text, or showing its panel).
+    var isActive: Bool { Self.active.contains(self) }
+
     private var finished = false
+    private var panelClosed = false
 
     private func finish() {
         guard !finished else { return }
@@ -258,6 +265,7 @@ final class DialSession: NSObject, NSWindowDelegate {
         }
         redraw()
         onFinish?(queue.state)
-        Self.active.remove(self)
+        // The panel's buttons and delegate are weak: keep the session until the panel closes.
+        if panel == nil || panelClosed { Self.active.remove(self) }
     }
 }
