@@ -66,8 +66,8 @@ public struct EditCanvas: Equatable {
     public static let blockUpper: UInt8 = 223
     public static let blockLower: UInt8 = 220
 
-    public private(set) var columns: Int
-    public private(set) var rows: [[AnsiCell]]
+    public internal(set) var columns: Int
+    public internal(set) var rows: [[AnsiCell]]
     /// The blink bit selects bright backgrounds instead of blinking.
     public private(set) var iceColors = false
     public var title = ""
