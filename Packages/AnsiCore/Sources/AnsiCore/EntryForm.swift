@@ -49,6 +49,7 @@ public enum EntryForm {
         fields.append(.text("username", section: login, label: "Username", hint: "Your name or handle on this BBS. The login script and Terminal > Send Username type it.", value: e.username ?? "", maxLength: 80))
         fields.append(.secret("password", section: login, label: "Password", hint: "Saved only in your Mac's Keychain, never in the directory or an export. Needs a username. Terminal > Send Password types it.", value: password, maxLength: 120))
         fields.append(.toggle("showPassword", section: login, label: "Show password", hint: "Shows the password on screen while you check it. It is hidden again the next time the editor opens.", isOn: false, revealsSecrets: true))
+        fields.append(.toggle("iemsi", section: login, label: "IEMSI login", hint: "Answers a BBS that asks for IEMSI (an automatic login some RemoteAccess, Maximus and Mystic boards offer) with your username and saved password.", isOn: e.iemsi))
         fields.append(.toggle("autoLogin", section: login, label: "Log in automatically", hint: "Runs the login script below as soon as the BBS answers. Terminal > Log In runs it again at any time.", isOn: e.autoLogin))
         fields.append(.text("busyText", section: login, label: "Busy text", hint: "Text that means the BBS is full, such as: all nodes are busy. Seen in the first 30 seconds, it hangs up and dials the next BBS. Separate choices with |.", value: e.busyText, maxLength: 200))
 
@@ -117,6 +118,7 @@ public enum EntryForm {
             e.username = trimmed.isEmpty ? nil : trimmed
         }
         if let f = form.field("autoLogin") { e.autoLogin = f.isOn }
+        if let f = form.field("iemsi") { e.iemsi = f.isOn }
         if let v = text("busyText") { e.busyText = v }
         for i in e.loginScript.indices {
             if let v = text("step.\(i).expect") { e.loginScript[i].expect = v }

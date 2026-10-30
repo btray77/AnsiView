@@ -180,6 +180,8 @@ final class TerminalViewController: NSViewController {
     private(set) var suggestedEmulation: TerminalEmulation?
     /// Called when the terminal type was switched here, to save it in the directory.
     var onEmulationChange: ((BBSEntry) -> Void)?
+    /// The IEMSI handshake, when the entry turns it on and has a username and saved password.
+    private var iemsi: IEMSIClient?
     /// Asks about TLS certificates macOS does not trust (the harness swaps in one that answers by itself).
     lazy var certificates = CertificatePrompt(window: { [weak self] in self?.view.window })
     private(set) var client: BBSClient?
@@ -313,6 +315,12 @@ final class TerminalViewController: NSViewController {
         terminalView.font = emulator.font ?? BitmapFont.named(entry.fontName)
         detector = TerminalDetector()
         sessionStart = []
+        iemsi = nil
+        if entry.iemsi, let name = entry.username, !name.isEmpty,
+           let password = entry.credentialKey.flatMap({ passwords?.password(for: $0) }), !password.isEmpty {
+            iemsi = IEMSIClient(login: IEMSI.Login(name: name, password: password, rows: emulator.rows,
+                                                   columns: emulator.columns, emulation: IEMSI.crtName(entry.emulation)))
+        }
         hideSuggestion()
         scrollOffset = 0
         shownBells = 0
@@ -518,8 +526,17 @@ final class TerminalViewController: NSViewController {
         // Prompts are matched as they arrive, not as the speed emulation shows them.
         watch(bytes)
         if sessionStart.count < Self.replayLimit { sessionStart += bytes.prefix(Self.replayLimit - sessionStart.count) }
-        if !detector.isFinished, let suggestion = detector.feed(bytes), suggestion != entry.emulation {
+        if !detector.isFinished, let suggestion = detector.feed(bytes), suggestion != entry.emulation,
+           !(suggestion == .petscii64 && entry.emulation == .petscii128) {
             suggest(suggestion)
+        }
+        if iemsi != nil, var client = iemsi {
+            let reply = client.feed(bytes)
+            iemsi = client
+            if !reply.isEmpty {
+                client.isFinished ? (loginText = "IEMSI login sent") : ()
+                send(reply)
+            }
         }
         pacer.push(bytes)
         if baud == 0 { tick(elapsed: 0) }

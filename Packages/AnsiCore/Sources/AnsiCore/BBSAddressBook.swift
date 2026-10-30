@@ -117,6 +117,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     public var emulation: TerminalEmulation
     /// Telnet: the connection is wrapped in TLS ("telnets", usually port 992).
     public var telnetSecure: Bool
+    /// Answers a BBS's IEMSI request (**EMSI_IRQ) with the username and saved password.
+    public var iemsi: Bool
 
     public static let standardTerminalTypes = ["ANSI", "ANSI-BBS", "VT100"]
 
@@ -170,6 +172,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         zmodemAutoAccept = false
         emulation = .ansiBBS
         telnetSecure = false
+        iemsi = false
     }
 
     /// The protocol's secure variant is on (wss or telnets).
@@ -205,7 +208,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         case webSocketTelnet, rloginClientUser, rloginServerUser, rloginClientIsPassword
         case musicMode
         case transferProtocol, downloadFolderBookmark, downloadFolderName, zmodemAutoAccept
-        case emulation, telnetSecure
+        case emulation, telnetSecure, iemsi
     }
 
     /// Missing or out of range fields fall back to the defaults, so older (plan 7) or hand edited books load.
@@ -255,6 +258,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         if let value = try? c.decode(Bool.self, forKey: .zmodemAutoAccept) { zmodemAutoAccept = value }
         if let value = try? c.decode(TerminalEmulation.self, forKey: .emulation) { emulation = value }
         if let value = try? c.decode(Bool.self, forKey: .telnetSecure) { telnetSecure = value }
+        if let value = try? c.decode(Bool.self, forKey: .iemsi) { iemsi = value }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -302,6 +306,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         try c.encode(zmodemAutoAccept, forKey: .zmodemAutoAccept)
         try c.encode(emulation, forKey: .emulation)
         try c.encode(telnetSecure, forKey: .telnetSecure)
+        try c.encode(iemsi, forKey: .iemsi)
     }
 
     private static func clampSize(_ value: Int) -> Int {

@@ -25,7 +25,9 @@ public struct PETSCIITerminal: TerminalEngine {
     private var colour: Int
     private var reverse = false
     private var flash = false
-    public private(set) var lowerCaseSet = false
+    /// C64 terminal programs (CCGMS, Novaterm) start in the lower and upper case set, and boards
+    /// such as Synchronet's PETSCII port rely on it without sending 0x0E.
+    public private(set) var lowerCaseSet = true
     public private(set) var changeCount = 0
     public private(set) var bells = 0
     public var cursorVisible: Bool { true }

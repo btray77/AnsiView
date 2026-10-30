@@ -12,8 +12,17 @@ private func row(_ t: PETSCIITerminal, _ r: Int, _ n: Int) -> String {
     String(decoding: t.screen(scrollOffset: 0).rows[r].prefix(n).map(\.code), as: UTF8.self)
 }
 
+@Test func petsciiStartsInTheLowerCaseSetLikeC64TerminalPrograms() {
+    // Synchronet's PETSCII port sends "sYNCHRONET" without a 0x0E first: CCGMS starts in lower case.
+    let t = pet(Array("sYNC".utf8))
+    let cells = t.screen(scrollOffset: 0).rows[0]
+    #expect(String(decoding: cells.prefix(4).map(\.code), as: UTF8.self) == "Sync")
+    #expect(Int(cells[0].glyph ?? 0) == 128 + 0x53)
+    #expect(Int(cells[1].glyph ?? 0) == 128 + 0x19)
+}
+
 @Test func petsciiPrintsUpperCaseAndClears() {
-    let t = pet(Array("HELLO".utf8) + [0x93] + Array("HI".utf8))
+    let t = pet([0x8E] + Array("HELLO".utf8) + [0x93] + Array("HI".utf8))
     #expect(row(t, 0, 5) == "HI   ")
     let cell = t.screen(scrollOffset: 0).rows[0][0]
     #expect(cell.glyph == 8)  // screen code of H in the upper case set
@@ -37,7 +46,7 @@ private func row(_ t: PETSCIITerminal, _ r: Int, _ n: Int) -> String {
 }
 
 @Test func petsciiLowerCaseSetSwitchesTheWholeScreen() {
-    let t = pet(Array("A".utf8) + [0x0E] + Array("A".utf8) + [0xC1])
+    let t = pet([0x8E] + Array("A".utf8) + [0x0E] + Array("A".utf8) + [0xC1])
     let cells = t.screen(scrollOffset: 0).rows[0]
     // 0x41 in the lower case set is a lower case a (screen code 1 in the second set).
     #expect(cells[0].glyph == 128 + 1 && cells[0].code == UInt8(ascii: "a"))
@@ -45,13 +54,13 @@ private func row(_ t: PETSCIITerminal, _ r: Int, _ n: Int) -> String {
 }
 
 @Test func petsciiGraphicsCharacters() {
-    let t = pet([0x60, 0xA0, 0xFF, 0x7E])
+    let t = pet([0x8E, 0x60, 0xA0, 0xFF, 0x7E])
     let cells = t.screen(scrollOffset: 0).rows[0]
     #expect(cells.prefix(4).map(\.glyph) == [0x40, 0x60, 0x5E, 0x5E])
 }
 
 @Test func petsciiCursorMovement() {
-    var bytes: [UInt8] = [0x11, 0x11, 0x1D, 0x1D, 0x41, 0x91, 0x9D, 0x42, 0x13, 0x43]
+    var bytes: [UInt8] = [0x8E, 0x11, 0x11, 0x1D, 0x1D, 0x41, 0x91, 0x9D, 0x42, 0x13, 0x43]
     bytes += [0x9D]  // left at home stays
     let t = pet(bytes)
     let rows = t.screen(scrollOffset: 0).rows
@@ -61,18 +70,18 @@ private func row(_ t: PETSCIITerminal, _ r: Int, _ n: Int) -> String {
 }
 
 @Test func petsciiWrapsAndScrollsAtTheBottom() {
-    var bytes = [UInt8](repeating: 0x41, count: 40) + [0x42]
+    var bytes = [0x8E] + [UInt8](repeating: 0x41, count: 40) + [0x42]
     let t = pet(bytes)
     #expect(row(t, 1, 1) == "B")
     bytes = [UInt8](repeating: 0x0D, count: 24) + Array("X".utf8) + [0x0D] + Array("Y".utf8)
-    let u = pet(Array("TOP".utf8) + bytes)
+    let u = pet([0x8E] + Array("TOP".utf8) + bytes)
     #expect(row(u, 23, 1) == "X")
     #expect(row(u, 24, 1) == "Y")
     #expect(u.scrollbackCount == 1)
 }
 
 @Test func petsciiInsertAndDelete() {
-    let t = pet(Array("ABCD".utf8) + [0x9D, 0x9D, 0x14] + [0x94] + Array("X".utf8))
+    let t = pet([0x8E] + Array("ABCD".utf8) + [0x9D, 0x9D, 0x14] + [0x94] + Array("X".utf8))
     #expect(row(t, 0, 5) == "AXCD ")
 }
 
@@ -97,6 +106,7 @@ private func row(_ t: PETSCIITerminal, _ r: Int, _ n: Int) -> String {
 
 @Test func petsciiTypedTextFollowsTheCharacterSet() {
     var t = PETSCIITerminal(model: .c64)
+    t.feed([0x8E])
     #expect(t.text("Ab1\n", encoding: .cp437) == [0x41, 0x42, 0x31, 0x0D])
     #expect(t.text("a\r\nb", encoding: .cp437) == [0x41, 0x0D, 0x42])
     t.feed([0x0E])

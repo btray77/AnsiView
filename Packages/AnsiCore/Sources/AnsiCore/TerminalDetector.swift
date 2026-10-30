@@ -16,6 +16,9 @@ public struct TerminalDetector {
     private var newlines = 0
     private var viewdataAttributes = 0
     private var avatarCommands = 0
+    /// Words like "yOU" or "cOMMODORE": lower case set PETSCII text read as ASCII.
+    private var swappedCaseWords = 0
+    private var wordLetters: [UInt8] = []
     private var suggested = false
 
     public init() {}
@@ -39,6 +42,15 @@ public struct TerminalDetector {
             if b == 0x93 { petsciiClear = true }
             if b == 0x9B { atasciiEOL += 1 }
             if b == 0x0D || b == 0x0A { newlines += 1 }
+            if (0x41...0x5A).contains(b) || (0x61...0x7A).contains(b) {
+                wordLetters.append(b)
+            } else {
+                if wordLetters.count >= 3, (0x61...0x7A).contains(wordLetters[0]),
+                   wordLetters.dropFirst().allSatisfy({ (0x41...0x5A).contains($0) }) {
+                    swappedCaseWords += 1
+                }
+                wordLetters.removeAll()
+            }
             // `!|` counts at the start of a line (the `!` itself may follow a line break).
             if b != UInt8(ascii: "!") { lineStart = b == 0x0D || b == 0x0A }
             previous = b
@@ -53,7 +65,8 @@ public struct TerminalDetector {
         if rip { return .ripscrip }
         if ansi { return nil }
         if petsciiClear, petscii >= 3 { return .petscii64 }
-        if atasciiEOL >= 2, atasciiEOL > newlines { return .atascii }
+        if swappedCaseWords >= 3 { return .petscii64 }
+        if atasciiEOL >= 2 { return .atascii }
         if viewdataAttributes >= 3 { return .viewdata }
         if avatarCommands >= 2 { return .avatar }
         return nil

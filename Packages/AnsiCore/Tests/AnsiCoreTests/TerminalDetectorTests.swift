@@ -7,6 +7,22 @@ import Testing
     #expect(d.feed([0x93, 0x05] + Array("WELCOME".utf8) + [0x0D, 0x1C]) == .petscii64)
 }
 
+@Test func detectsPETSCIIFromSwappedCaseText() {
+    // A Color 64 board's greeting in lower case set PETSCII, seen as ASCII: capitals and small letters swapped.
+    var d = TerminalDetector()
+    #expect(d.feed(Array("\r\nyOU HAVE CONNECTED TO A\r\n   cOMMODORE 64 uLTIMATE!\r\nwELCOME tO cOMMODORE64bbs.COM!".utf8)) == .petscii64)
+}
+
+@Test func ordinaryMixedCaseIsNotPETSCII() {
+    var d = TerminalDetector()
+    #expect(d.feed(Array("Welcome to the BBS, iPhone and eBay users: Press RETURN to continue.\r\n".utf8)) == nil)
+}
+
+@Test func detectsATASCIIWithAFewCarriageReturns() {
+    var d = TerminalDetector()
+    #expect(d.feed([0x0D] + Array("ATA".utf8) + [0x0D, 0x0D, 0x0A, 0x9B] + Array("Press Return".utf8) + [0x9B]) == .atascii)
+}
+
 @Test func detectsATASCIIClearAndEOL() {
     var d = TerminalDetector()
     #expect(d.feed([0x7D] + Array("ATARI BBS".utf8) + [0x9B, 0x9B]) == .atascii)

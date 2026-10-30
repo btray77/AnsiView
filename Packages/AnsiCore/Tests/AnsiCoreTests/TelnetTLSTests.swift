@@ -58,8 +58,18 @@ final class RecordingCertificateVerifier: CertificateVerifying {
     }
 }
 
+final class LockedText: @unchecked Sendable {
+    private let lock = NSLock()
+    private var text = ""
+    func append(_ more: String) -> String {
+        lock.lock(); defer { lock.unlock() }
+        text += more
+        return text
+    }
+}
+
 /// A local `openssl s_server` with a fresh self signed certificate.
-final class LocalTLSServer {
+final class LocalTLSServer: @unchecked Sendable {
     let port: Int
     private let process = Process()
 
@@ -82,17 +92,38 @@ final class LocalTLSServer {
         }
         port = Int.random(in: 41000...48000)
         process.executableURL = URL(fileURLWithPath: openssl)
-        process.arguments = ["s_server", "-accept", "\(port)", "-cert", cert, "-key", key, "-quiet", "-naccept", "1"]
+        process.arguments = ["s_server", "-accept", "\(port)", "-cert", cert, "-key", key, "-naccept", "1"]
         let input = Pipe()
         process.standardInput = input
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else { return nil }
+        // Wait until the port listens (lsof never connects, so the single accept is kept for the test).
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline, !Self.listening(port) { Thread.sleep(forTimeInterval: 0.1) }
         input.fileHandleForWriting.write(Data(greeting.utf8))
-        Thread.sleep(forTimeInterval: 0.8)
     }
 
     deinit { if process.isRunning { process.terminate() } }
+
+    static func listening(_ port: Int) -> Bool {
+        let lsof = Process()
+        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lsof.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-t"]
+        let out = Pipe()
+        lsof.standardOutput = out
+        lsof.standardError = FileHandle.nullDevice
+        guard (try? lsof.run()) != nil else { return true }
+        lsof.waitUntilExit()
+        return !out.fileHandleForReading.readDataToEndOfFile().isEmpty
+    }
+
+    /// Starts a server off the Swift concurrency threads (it blocks while openssl starts).
+    static func start(greeting: String, folder: URL) async -> LocalTLSServer? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async { continuation.resume(returning: LocalTLSServer(greeting: greeting, folder: folder)) }
+        }
+    }
 }
 
 private func connect(port: Int, verifier: RecordingCertificateVerifier) async -> (BBSClientState, [UInt8]) {
@@ -126,7 +157,7 @@ private func connect(port: Int, verifier: RecordingCertificateVerifier) async ->
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tls-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     let verifier = RecordingCertificateVerifier()
-    guard let first = LocalTLSServer(greeting: "HELLO\r\n", folder: folder) else { return }
+    guard let first = await LocalTLSServer.start(greeting: "HELLO\r\n", folder: folder) else { return }
     let (state, bytes) = await connect(port: first.port, verifier: verifier)
     #expect(state == .connected)
     #expect(String(decoding: bytes, as: UTF8.self).contains("HELLO"))
@@ -139,7 +170,7 @@ private func connect(port: Int, verifier: RecordingCertificateVerifier) async ->
     // Same certificate again: no question.
     let firstPort = first.port
     _ = firstPort
-    guard let second = LocalTLSServer(greeting: "HELLO\r\n", folder: folder) else { return }
+    guard let second = await LocalTLSServer.start(greeting: "HELLO\r\n", folder: folder) else { return }
     verifier.store = KnownCertificates(text: "")
     verifier.store.trust(host: "127.0.0.1", port: second.port, certificate: verifier.asked[0])
     let again = await connect(port: second.port, verifier: verifier)
@@ -149,7 +180,7 @@ private func connect(port: Int, verifier: RecordingCertificateVerifier) async ->
     // A new certificate on a host with a saved one is refused.
     let other = folder.appendingPathComponent("other")
     try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
-    guard let third = LocalTLSServer(greeting: "HELLO\r\n", folder: other) else { return }
+    guard let third = await LocalTLSServer.start(greeting: "HELLO\r\n", folder: other) else { return }
     verifier.store = KnownCertificates(text: "")
     verifier.store.trust(host: "127.0.0.1", port: third.port, certificate: verifier.asked[0])
     let changed = await connect(port: third.port, verifier: verifier)
@@ -162,7 +193,7 @@ private func connect(port: Int, verifier: RecordingCertificateVerifier) async ->
     // Not trusted by the user.
     let declined = folder.appendingPathComponent("declined")
     try FileManager.default.createDirectory(at: declined, withIntermediateDirectories: true)
-    guard let fourth = LocalTLSServer(greeting: "HELLO\r\n", folder: declined) else { return }
+    guard let fourth = await LocalTLSServer.start(greeting: "HELLO\r\n", folder: declined) else { return }
     let refuser = RecordingCertificateVerifier()
     refuser.answer = false
     let refused = await connect(port: fourth.port, verifier: refuser)
