@@ -3,6 +3,7 @@ import Foundation
 import NIOCore
 import NIOPosix
 import NIOSSH
+import os
 
 /// What the SSH transport asks the app about a server's host key (on the client's queue).
 protocol HostKeyVerifying: AnyObject {
@@ -51,10 +52,19 @@ struct SSHLogin {
     }
 }
 
-/// An SSH session to a BBS with swift-nio-ssh: PTY, shell, window change, public key / password /
-/// none authentication and a host key check through `verifier`. Bytes pass unchanged both ways.
+/// An SSH session to a BBS with swift-nio-ssh (the vendored swift-nio-ssh-bbs copy): PTY, shell,
+/// window change, none / public key / password / keyboard-interactive authentication and a host
+/// key check through `verifier`. Bytes pass unchanged both ways.
 final class SSHTransport: BBSTransport {
+    static let log = Logger(subsystem: "com.traynham.ansiview", category: "ssh")
+
     var events: ((TransportEvent) -> Void)?
+    /// What the key exchange agreed on (on the client's queue), for the status bar's legacy note.
+    var onNegotiated: ((NIOSSHNegotiatedAlgorithms) -> Void)?
+    private(set) var negotiated: NIOSSHNegotiatedAlgorithms?
+    /// Shows keyboard-interactive prompts the Keychain password cannot answer (on the client's
+    /// queue); the answers, or nil for Cancel. Without it such a login fails.
+    var askPrompts: ((SSHPromptSheet.Question, @escaping ([String]?) -> Void) -> Void)?
     let host: String
     let port: Int
     let settings: TransportSettings
@@ -112,15 +122,17 @@ final class SSHTransport: BBSTransport {
     }
 
     private func start() {
-        let authDelegate = AuthDelegate(login: login)
+        let authDelegate = AuthDelegate(login: login, transport: self)
         let hostDelegate = HostKeyDelegate(transport: self)
+        var configuration = SSHClientConfiguration(userAuthDelegate: authDelegate, serverAuthDelegate: hostDelegate)
+        configuration.algorithmsNegotiated = { [weak self] algorithms in self?.negotiated(algorithms) }
         let bootstrap = ClientBootstrap(group: MultiThreadedEventLoopGroup.singleton)
             .connectTimeout(.milliseconds(Int64(connectTimeout * 1000)))
             .channelOption(ChannelOptions.socket(SocketOptionLevel(IPPROTO_TCP), TCP_NODELAY), value: 1)
             .channelInitializer { [weak self] channel in
                 channel.eventLoop.makeCompletedFuture {
-                    let ssh = NIOSSHHandler(role: .client(.init(userAuthDelegate: authDelegate, serverAuthDelegate: hostDelegate)),
-                                            allocator: channel.allocator, inboundChildChannelInitializer: nil)
+                    let ssh = NIOSSHHandler(role: .client(configuration), allocator: channel.allocator,
+                                            inboundChildChannelInitializer: nil)
                     try channel.pipeline.syncOperations.addHandler(ssh)
                     try channel.pipeline.syncOperations.addHandler(ConnectionHandler(transport: self))
                 }
@@ -176,12 +188,67 @@ final class SSHTransport: BBSTransport {
         done = true
         pendingHostKey?.fail(HostKeyRefused())
         pendingHostKey = nil
+        pendingPrompt?.fail(LoginCancelled())
+        pendingPrompt = nil
         channel?.close(promise: nil)
         channel = nil
         session = nil
     }
 
     // MARK: Called from the NIO handlers (any thread)
+
+    fileprivate func negotiated(_ algorithms: NIOSSHNegotiatedAlgorithms) {
+        let weak = algorithms.weakAlgorithms
+        Self.log.notice("\(self.host, privacy: .public):\(self.port) \(algorithms.serverVersion, privacy: .public) kex=\(algorithms.keyExchange, privacy: .public) hostkey=\(algorithms.hostKey, privacy: .public) cipher=\(algorithms.cipher, privacy: .public) mac=\(algorithms.mac ?? "implicit", privacy: .public) legacy=\(weak.joined(separator: ","), privacy: .public)")
+        queue.async {
+            guard !self.done else { return }
+            self.negotiated = algorithms
+            self.onNegotiated?(algorithms)
+        }
+    }
+
+    /// A keyboard-interactive request: the Keychain password for a plain password prompt (once),
+    /// the user's answers through `askPrompts` for anything else (ruling 11).
+    fileprivate func keyboardInteractive(_ request: NIOSSHKeyboardInteractiveRequest, promise: EventLoopPromise<[String]>) {
+        let prompts = request.prompts.map { SSHCompatibility.Prompt(text: $0.prompt, echo: $0.echo) }
+        queue.async {
+            guard !self.done else {
+                promise.fail(LoginCancelled())
+                return
+            }
+            switch SSHCompatibility.plan(prompts: prompts, savedPassword: self.login.password,
+                                         passwordAlreadySent: self.sentPasswordToPrompt) {
+            case .answer(let answers):
+                if !answers.isEmpty { self.sentPasswordToPrompt = true }
+                Self.log.notice("keyboard-interactive: answered \(answers.count) prompt(s) from the Keychain")
+                promise.succeed(answers)
+            case .ask:
+                guard let askPrompts = self.askPrompts else {
+                    promise.fail(LoginCancelled())
+                    return
+                }
+                self.pendingPrompt = promise
+                self.events?(.waitingForUser(true))
+                let question = SSHPromptSheet.Question(host: self.host, name: request.name,
+                                                       instruction: request.instruction, prompts: prompts)
+                askPrompts(question) { answers in
+                    guard let pending = self.pendingPrompt, !self.done else { return }
+                    self.pendingPrompt = nil
+                    self.events?(.waitingForUser(false))
+                    if let answers, answers.count == prompts.count {
+                        pending.succeed(answers)
+                    } else {
+                        pending.fail(LoginCancelled())
+                    }
+                }
+            }
+        }
+    }
+
+    /// Whether the Keychain password already went to a keyboard-interactive prompt.
+    private var sentPasswordToPrompt = false
+    /// A prompt sheet waiting for the user; failed on close.
+    private var pendingPrompt: EventLoopPromise<[String]>?
 
     fileprivate func checkHostKey(_ key: NIOSSHPublicKey, promise: EventLoopPromise<Void>) {
         let text = String(openSSHPublicKey: key)
@@ -190,6 +257,7 @@ final class SSHTransport: BBSTransport {
             promise.fail(HostKeyRefused())
             return
         }
+        Self.log.notice("\(self.host, privacy: .public):\(self.port) host key \(parts[0], privacy: .public) \(SSHFingerprint.sha256(blob), privacy: .public) (signature verified)")
         queue.async {
             guard let verifier = self.verifier, !self.done else {
                 self.hostKeyError = .hostKeyNotTrusted(self.host)
@@ -299,14 +367,19 @@ final class SSHTransport: BBSTransport {
     /// NIO and SSH failures in plain words.
     static func map(_ error: Error, host: String, port: Int, connected: Bool) -> BBSConnectionError {
         if let exhausted = error as? AuthExhausted { return .authenticationFailed(exhausted.detail) }
+        if error is LoginCancelled { return .authenticationFailed("The login was cancelled.") }
         if error is HostKeyRefused { return .hostKeyNotTrusted(host) }
         if error is SessionRefused { return .other("The SSH server logged you in but refused to start a terminal session.") }
         if let ssh = error as? NIOSSHError {
             switch ssh.type {
             case .keyExchangeNegotiationFailure:
-                return .algorithmMismatch(host, "no key exchange method, host key type or cipher in common")
-            case .invalidHostKeyForKeyExchange, .unknownPublicKey:
+                return .algorithmMismatch(host, SSHCompatibility.mismatchDetail(ssh.diagnosticMessage))
+            case .invalidHostKeyForKeyExchange, .unknownPublicKey, .unknownSignature:
                 return .algorithmMismatch(host, "its host key type")
+            case .invalidExchangeHashSignature:
+                return .other("The SSH server's host key signature did not verify, so AnsiView did not connect.")
+            case .passwordChangeRequested:
+                return .authenticationFailed(SSHCompatibility.passwordChangeMessage(prompt: ssh.diagnosticMessage ?? ""))
             case .unsupportedVersion:
                 return .algorithmMismatch(host, "it does not speak SSH version 2")
             case .tcpShutdown:
@@ -348,21 +421,44 @@ struct AuthExhausted: Error {
 }
 
 struct HostKeyRefused: Error {}
+struct LoginCancelled: Error {}
 struct SessionRefused: Error {}
 
-/// Offers the key, then the password (or an empty one), then `none`, each when the server lists it.
-private final class AuthDelegate: NIOSSHClientUserAuthenticationDelegate, @unchecked Sendable {
+/// Offers `none` first (some BBSes let anyone in and ask in their own login screen, and the answer
+/// lists the methods), then the key, the password (or an empty one), then keyboard-interactive,
+/// each when the server lists it.
+private final class AuthDelegate: NIOSSHClientUserAuthenticationDelegate, NIOSSHClientKeyboardInteractiveDelegate,
+    @unchecked Sendable
+{
     private let login: SSHLogin
+    private weak var transport: SSHTransport?
     private var triedKey = false
     private var triedPassword = false
     private var triedNone = false
+    /// Keyboard-interactive rounds started: the server may ask again after a wrong answer or a
+    /// partial success (a first login password change), up to three times.
+    private var keyboardInteractiveRounds = 0
 
-    init(login: SSHLogin) {
+    init(login: SSHLogin, transport: SSHTransport) {
         self.login = login
+        self.transport = transport
+    }
+
+    func respond(to request: NIOSSHKeyboardInteractiveRequest, responsePromise: EventLoopPromise<[String]>) {
+        guard let transport else {
+            responsePromise.fail(LoginCancelled())
+            return
+        }
+        transport.keyboardInteractive(request, promise: responsePromise)
     }
 
     func nextAuthenticationType(availableMethods: NIOSSHAvailableUserAuthenticationMethods,
                                 nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>) {
+        if !triedNone {
+            triedNone = true
+            nextChallengePromise.succeed(.init(username: login.username, serviceName: "", offer: .none))
+            return
+        }
         if !triedKey, let key = login.key, availableMethods.contains(.publicKey) {
             triedKey = true
             let nioKey: NIOSSHPrivateKey
@@ -381,22 +477,32 @@ private final class AuthDelegate: NIOSSHClientUserAuthenticationDelegate, @unche
                                                offer: .password(.init(password: login.password ?? ""))))
             return
         }
-        if !triedNone, !triedKey, !triedPassword {
-            triedNone = true
-            nextChallengePromise.succeed(.init(username: login.username, serviceName: "", offer: .none))
+        if keyboardInteractiveRounds < 3, availableMethods.contains(.keyboardInteractive) {
+            keyboardInteractiveRounds += 1
+            nextChallengePromise.succeed(.init(username: login.username, serviceName: "", offer: .keyboardInteractive))
             return
         }
         var tried: [String] = []
         if triedKey { tried.append("the key file") }
         if triedPassword { tried.append(login.password == nil ? "an empty password (none is saved)" : "the saved password") }
+        if keyboardInteractiveRounds > 0 { tried.append("keyboard-interactive prompts") }
         var detail = tried.isEmpty ? "AnsiView had no login method the server accepts."
             : "Tried \(tried.joined(separator: " and ")) as \(login.username)."
-        if !availableMethods.contains(.password), !availableMethods.contains(.publicKey) {
-            detail += " The server may want keyboard interactive login, which AnsiView's SSH does not support; use the BBS's telnet port."
+        if tried.isEmpty {
+            detail += " The server allows: \(Self.names(availableMethods))."
         } else {
             detail += " Check the username and password in the dialing directory."
         }
         nextChallengePromise.fail(AuthExhausted(detail: detail))
+    }
+
+    private static func names(_ methods: NIOSSHAvailableUserAuthenticationMethods) -> String {
+        var names: [String] = []
+        if methods.contains(.publicKey) { names.append("public key") }
+        if methods.contains(.password) { names.append("password") }
+        if methods.contains(.keyboardInteractive) { names.append("keyboard-interactive") }
+        if methods.contains(.hostBased) { names.append("host based") }
+        return names.isEmpty ? "no method AnsiView knows" : names.joined(separator: ", ")
     }
 }
 

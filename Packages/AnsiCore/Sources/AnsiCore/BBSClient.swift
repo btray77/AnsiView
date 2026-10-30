@@ -97,7 +97,7 @@ public enum BBSConnectionError: Error, Equatable {
         case .hostKeyNotTrusted(let host):
             return "The host key of \(host) was not trusted, so AnsiView did not connect."
         case .algorithmMismatch(let host, let detail):
-            return "\(host) only offers SSH methods that AnsiView cannot use yet (\(detail)). Many BBS SSH servers use older methods (diffie-hellman key exchange, ssh-rsa host keys); try the BBS's telnet port instead."
+            return "\(host) only offers SSH methods that AnsiView cannot use (\(detail)). Try the BBS's telnet port instead."
         case .tls(let host, let detail):
             return "The secure (TLS) connection to \(host) failed: \(detail) Check the address, or turn off Secure (wss) if the BBS does not offer it."
         case .upgradeRefused(let host, let status):
