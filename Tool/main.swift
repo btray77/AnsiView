@@ -19,12 +19,12 @@ precondition(CP437.unicode.count == 256, "CP437 table has \(CP437.unicode.count)
 if args[1] == "--stats" {
     for path in args.dropFirst(2) {
         let url = URL(fileURLWithPath: path)
-        let source = AnsiSource(data: try Data(contentsOf: url), fileExtension: url.pathExtension)
+        let source = ArtFile(data: try Data(contentsOf: url), fileExtension: url.pathExtension)
         var terminal = AnsiTerminal(source)
         terminal.runToEnd()
         let analysis = AnsiAnalysis(source)
         print(String(format: "%-14@ bytes=%6d writes=%6d overwrites=%5d clears=%2d blink=%@ animated=%@",
-                     url.lastPathComponent, source.bytes.count, terminal.writes, terminal.overwrites,
+                     url.lastPathComponent, source.stream.count, terminal.writes, terminal.overwrites,
                      terminal.clearsAfterDrawing, analysis.finalScreen.hasBlink ? "Y" : "n",
                      analysis.isAnimated ? "Y" : "n"))
     }
@@ -34,7 +34,7 @@ if args[1] == "--stats" {
 if args[1] == "--still", args.count >= 6, let scale = Int(args[3]) {
     let format: StillFormat = ["png": .png, "jpeg": .jpeg, "webp": .webp][args[2]] ?? .png
     let input = URL(fileURLWithPath: args[4])
-    let source = AnsiSource(data: try Data(contentsOf: input), fileExtension: input.pathExtension)
+    let source = ArtFile(data: try Data(contentsOf: input), fileExtension: input.pathExtension)
     try AnsiExporter.exportStill(AnsiAnalysis(source).finalScreen, format: format, scale: scale,
                                  to: URL(fileURLWithPath: args[5]))
     print("wrote \(args[5])")
@@ -44,7 +44,7 @@ if args[1] == "--still", args.count >= 6, let scale = Int(args[3]) {
 if args[1] == "--animate", args.count >= 7, let baud = Int(args[3]), let scale = Int(args[4]) {
     let format: AnimationFormat = ["gif": .gif, "webp": .webp, "mp4": .mp4][args[2]] ?? .gif
     let input = URL(fileURLWithPath: args[5])
-    let source = AnsiSource(data: try Data(contentsOf: input), fileExtension: input.pathExtension)
+    let source = ArtFile(data: try Data(contentsOf: input), fileExtension: input.pathExtension)
     let start = Date()
     let frames = AnsiFrameSequence.make(source, baud: baud)
     let seconds = frames.reduce(0) { $0 + $1.duration }
@@ -57,7 +57,7 @@ if args[1] == "--animate", args.count >= 7, let baud = Int(args[3]), let scale =
 
 if args[1] == "--frame", args.count >= 5, let byteCount = Int(args[2]) {
     let input = URL(fileURLWithPath: args[3])
-    let source = AnsiSource(data: try Data(contentsOf: input), fileExtension: input.pathExtension)
+    let source = ArtFile(data: try Data(contentsOf: input), fileExtension: input.pathExtension)
     let analysis = AnsiAnalysis(source)
     var terminal = AnsiTerminal(source)
     terminal.advance(byteCount: byteCount)
@@ -67,7 +67,7 @@ if args[1] == "--frame", args.count >= 5, let byteCount = Int(args[2]) {
     else { fail("render failed", 1) }
     CGImageDestinationAddImage(dest, rendered.image, nil)
     guard CGImageDestinationFinalize(dest) else { fail("could not write \(args[4])", 1) }
-    print("\(input.lastPathComponent) at byte \(terminal.position) of \(source.bytes.count)")
+    print("\(input.lastPathComponent) at byte \(terminal.position) of \(source.stream.count)")
     exit(0)
 }
 

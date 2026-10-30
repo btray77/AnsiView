@@ -18,7 +18,7 @@ enum AnsiFrameSequence {
 
     /// Plays the file at `baud`, sampling `fps` times a second and merging frames that did not change.
     /// Ends with a hold on the final screen; blinking text blinks during the hold.
-    static func make(_ source: AnsiSource, baud: Int, fps: Double = 15) -> [AnsiFrame] {
+    static func make(_ source: ArtFile, baud: Int, fps: Double = 15) -> [AnsiFrame] {
         let analysis = AnsiAnalysis(source)
         let rows = analysis.canvasRows
         var frames: [AnsiFrame] = []

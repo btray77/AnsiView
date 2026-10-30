@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreText
 import Foundation
 
 /// How to draw a screen.
@@ -71,7 +72,8 @@ public enum AnsiRenderer {
             for (rowIndex, row) in screen.rows.enumerated() {
                 for (colIndex, cell) in row.enumerated() where colIndex < screen.columns {
                     let hidden = cell.blink && !options.blinkVisible
-                    let mask = masks.mask(for: hidden ? 0x20 : cell.code)
+                    let mask = hidden ? masks.mask(for: 0x20)
+                        : cell.scalar.map { masks.mask(for: $0) } ?? masks.mask(for: cell.code)
                     let fgPacked = packed(cell.fg)
                     let bgPacked = packed(cell.bg)
                     let originX = colIndex * cw
@@ -112,12 +114,18 @@ public enum AnsiRenderer {
 /// Scaled glyph masks for one font, letter spacing and scale, built once and shared.
 final class GlyphMasks {
     let cellWidth: Int
+    private let cellHeight: Int
+    private let scale: Int
     private let masks: [[Bool]]
+    private let scalarLock = NSLock()
+    private var scalarMasks: [Unicode.Scalar: [Bool]] = [:]
 
     private init(font: BitmapFont, ninePixel: Bool, scale: Int) {
         let w = font.width + (ninePixel ? 1 : 0)
         let h = font.height
         cellWidth = w
+        cellHeight = h
+        self.scale = scale
         masks = (0..<256).map { code in
             let glyph = font.pixels(for: UInt8(code))
             let ninth = ninePixel ? font.ninthColumn(for: UInt8(code)) : []
@@ -133,6 +141,37 @@ final class GlyphMasks {
     }
 
     func mask(for code: UInt8) -> [Bool] { masks[Int(code)] }
+
+    /// A character the bitmap font does not have (from UTF-8 art), drawn from the system
+    /// monospaced font with antialiasing off so it matches the pixel look.
+    func mask(for scalar: Unicode.Scalar) -> [Bool] {
+        scalarLock.lock()
+        defer { scalarLock.unlock() }
+        if let cached = scalarMasks[scalar] { return cached }
+        let width = cellWidth * scale, height = cellHeight * scale
+        var buffer = [UInt8](repeating: 0, count: width * height)
+        let font = CTFontCreateWithName("Menlo-Regular" as CFString, CGFloat(height) / 1.2, nil)
+        let attributes: [NSAttributedString.Key: Any] = [
+            NSAttributedString.Key(kCTFontAttributeName as String): font,
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 1, alpha: 1),
+        ]
+        let line = CTLineCreateWithAttributedString(
+            NSAttributedString(string: String(Character(scalar)), attributes: attributes))
+        let lineWidth = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        let ascent = CTFontGetAscent(font), descent = CTFontGetDescent(font)
+        buffer.withUnsafeMutableBytes { raw in
+            guard let ctx = CGContext(
+                data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width,
+                space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return }
+            ctx.setShouldAntialias(false)
+            ctx.textPosition = CGPoint(x: (CGFloat(width) - lineWidth) / 2,
+                                       y: (CGFloat(height) - (ascent + descent)) / 2 + descent)
+            CTLineDraw(line, ctx)
+        }
+        let mask = buffer.map { $0 > 127 }
+        scalarMasks[scalar] = mask
+        return mask
+    }
 
     private static let lock = NSLock()
     private static var cache: [String: GlyphMasks] = [:]

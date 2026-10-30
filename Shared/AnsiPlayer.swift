@@ -36,7 +36,7 @@ final class AnsiPlayerViewController: NSViewController {
     static let frameInterval: TimeInterval = 1.0 / 30.0
 
     let analysis: AnsiAnalysis
-    let source: AnsiSource
+    let source: ArtFile
     /// The frame currently on screen.
     private(set) var screen: AnsiScreen
     private let renderOptions: RenderOptions
@@ -52,7 +52,7 @@ final class AnsiPlayerViewController: NSViewController {
     private var shownBaud = PlaybackSpeed.current
     private var defaultsObserver: NSObjectProtocol?
 
-    init(source: AnsiSource) {
+    init(source: ArtFile) {
         self.source = source
         self.analysis = AnsiAnalysis(source)
         var options = RenderOptions(for: analysis.finalScreen)

@@ -10,4 +10,15 @@ public enum CP437 {
         + "└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀"
         + "αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u{00A0}"
     ).unicodeScalars)
+
+    private static let reverse: [Unicode.Scalar: UInt8] = {
+        var map: [Unicode.Scalar: UInt8] = [:]
+        for (code, scalar) in unicode.enumerated() { map[scalar] = UInt8(code) }
+        return map
+    }()
+
+    /// The CP437 code that displays `scalar`, if there is one.
+    public static func code(for scalar: Unicode.Scalar) -> UInt8? {
+        reverse[scalar]
+    }
 }

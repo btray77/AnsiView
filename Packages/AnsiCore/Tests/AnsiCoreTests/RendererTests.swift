@@ -84,3 +84,14 @@ private func render(_ s: AnsiScreen, nine: Bool = false, scale: Int = 1, blinkVi
     let img = render(AnsiScreen(columns: 80, rows: rows)).image
     #expect(img.bytesPerRow * img.height < 200_000_000)
 }
+
+@Test func scalarCellsAreDrawn() {
+    let euro = AnsiCell(code: 0x3F, fg: white, bg: blue, scalar: "€")
+    let question = AnsiCell(code: 0x3F, fg: white, bg: blue)
+    let a = render(screen([euro])).image
+    let b = render(screen([question])).image
+    let lit = (0..<16).flatMap { y in (0..<8).map { x in pixel(a, x, y) == white } }
+    let litQuestion = (0..<16).flatMap { y in (0..<8).map { x in pixel(b, x, y) == white } }
+    #expect(lit.contains(true))
+    #expect(lit != litQuestion)
+}

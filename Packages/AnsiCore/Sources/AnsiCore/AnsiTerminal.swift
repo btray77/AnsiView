@@ -6,12 +6,16 @@ public struct AnsiCell: Equatable {
     public var fg: RGB = Palette.vga[7]
     public var bg: RGB = Palette.vga[0]
     public var blink = false
+    /// Set only for UTF-8 characters with no CP437 equivalent; `code` is then "?".
+    public var scalar: Unicode.Scalar?
 
-    public init(code: UInt8 = 0x20, fg: RGB = Palette.vga[7], bg: RGB = Palette.vga[0], blink: Bool = false) {
+    public init(code: UInt8 = 0x20, fg: RGB = Palette.vga[7], bg: RGB = Palette.vga[0], blink: Bool = false,
+                scalar: Unicode.Scalar? = nil) {
         self.code = code
         self.fg = fg
         self.bg = bg
         self.blink = blink
+        self.scalar = scalar
     }
 }
 
@@ -32,31 +36,6 @@ public struct AnsiScreen {
     }
 }
 
-/// File contents with any SAUCE record removed, plus the display settings it implies.
-public struct AnsiSource {
-    public static let defaultColumns = 80
-
-    public let bytes: [UInt8]
-    public let columns: Int
-    public let iceColors: Bool
-    public let title: String?
-    public let sauce: Sauce?
-
-    public init(data: Data, fileExtension: String? = nil) {
-        let (sauce, contentLength) = Sauce.read([UInt8](data))
-        var bytes = Array([UInt8](data).prefix(contentLength))
-        // DOS end of file marker; anything after it is padding.
-        if let eof = bytes.firstIndex(of: 0x1A) { bytes.removeSubrange(eof...) }
-
-        self.bytes = bytes
-        self.sauce = sauce
-        self.columns = sauce?.columns ?? Self.defaultColumns
-        // iCE files use the blink bit for bright backgrounds instead of blinking.
-        self.iceColors = fileExtension?.lowercased() == "ice" || sauce?.iceColors == true
-        self.title = sauce.flatMap { $0.title.isEmpty ? nil : $0.title }
-    }
-}
-
 /// Facts about a whole file, found by playing it through once.
 public struct AnsiAnalysis {
     public let finalScreen: AnsiScreen
@@ -65,8 +44,14 @@ public struct AnsiAnalysis {
     /// True when the file redraws over itself, so its last frame does not show everything.
     public let isAnimated: Bool
 
-    public init(_ source: AnsiSource) {
-        var terminal = AnsiTerminal(source)
+    public init(_ file: ArtFile) {
+        if case .screen(let screen) = file.content {
+            finalScreen = screen
+            isAnimated = false
+            canvasRows = max(1, screen.rows.count)
+            return
+        }
+        var terminal = AnsiTerminal(file)
         terminal.runToEnd()
         finalScreen = terminal.screen()
         isAnimated = terminal.clearsAfterDrawing > 0
@@ -79,7 +64,7 @@ public struct AnsiAnalysis {
 public enum AnsiParser {
     /// The final state of the screen after the whole file has been played.
     public static func parse(_ data: Data, fileExtension: String? = nil) -> AnsiScreen {
-        AnsiAnalysis(AnsiSource(data: data, fileExtension: fileExtension)).finalScreen
+        AnsiAnalysis(ArtFile(data: data, fileExtension: fileExtension)).finalScreen
     }
 }
 
@@ -91,14 +76,14 @@ public struct AnsiTerminal {
     /// A color as set by escape codes: a classic ANSI index (0-7, brightened by bold) or an exact color.
     private enum ColorSpec { case index(Int), rgb(RGB) }
 
-    public let source: AnsiSource
+    public let source: ArtFile
     public private(set) var position = 0
     public private(set) var highestRow = -1
     public private(set) var writes = 0
     public private(set) var overwrites = 0
     public private(set) var clearsAfterDrawing = 0
 
-    public var isFinished: Bool { position >= source.bytes.count }
+    public var isFinished: Bool { position >= bytes.count }
 
     private var columns: Int { source.columns }
     private var rows: [[AnsiCell]] = []
@@ -115,17 +100,20 @@ public struct AnsiTerminal {
     private var brightFG = false
     private var brightBG = false
 
-    public init(_ source: AnsiSource) {
+    private let bytes: [UInt8]
+
+    public init(_ source: ArtFile) {
         self.source = source
+        self.bytes = source.stream
     }
 
     public mutating func runToEnd() {
-        advance(byteCount: source.bytes.count)
+        advance(byteCount: bytes.count)
     }
 
     /// Consumes at least `byteCount` bytes, finishing any escape sequence it starts.
     public mutating func advance(byteCount: Int) {
-        let bytes = source.bytes
+        let bytes = self.bytes
         let n = bytes.count
         let target = min(n, position + byteCount)
         var i = position
@@ -173,6 +161,15 @@ public struct AnsiTerminal {
             case 0x07:
                 break
             default:
+                if source.format == .utf8Ansi, b >= 0x80, let (scalar, length) = Self.decodeUTF8(bytes, at: i) {
+                    if let code = CP437.code(for: scalar) {
+                        put(code)
+                    } else {
+                        put(0x3F, scalar: scalar)
+                    }
+                    i += length
+                    continue
+                }
                 put(b)
             }
             i += 1
@@ -192,7 +189,7 @@ public struct AnsiTerminal {
         }
         var screen = AnsiScreen(columns: columns, rows: result, title: source.title)
         screen.sauce = source.sauce
-        screen.font = BitmapFont.named(source.sauce?.fontName)
+        screen.font = source.font
         return screen
     }
 
@@ -222,7 +219,7 @@ public struct AnsiTerminal {
         return true
     }
 
-    private mutating func put(_ code: UInt8) {
+    private mutating func put(_ code: UInt8, scalar: Unicode.Scalar? = nil) {
         if pendingWrap {
             x = 0
             y += 1
@@ -230,7 +227,7 @@ public struct AnsiTerminal {
         }
         if ensureRow(y) {
             let colors = currentColors
-            let cell = AnsiCell(code: code, fg: colors.fg, bg: colors.bg, blink: blink && !source.iceColors)
+            let cell = AnsiCell(code: code, fg: colors.fg, bg: colors.bg, blink: blink && !source.iceColors, scalar: scalar)
             let previous = rows[y][x]
             if previous.code != 0x20, previous.code != 0, previous != cell { overwrites += 1 }
             rows[y][x] = cell
@@ -324,6 +321,27 @@ public struct AnsiTerminal {
             }
             i += 1
         }
+    }
+
+    /// One UTF-8 encoded scalar starting at `index`, and its length in bytes.
+    private static func decodeUTF8(_ bytes: [UInt8], at index: Int) -> (Unicode.Scalar, Int)? {
+        let lead = bytes[index]
+        let length: Int
+        switch lead {
+        case 0xC2...0xDF: length = 2
+        case 0xE0...0xEF: length = 3
+        case 0xF0...0xF4: length = 4
+        default: return nil
+        }
+        guard index + length <= bytes.count else { return nil }
+        var value = UInt32(lead) & (0xFF >> (length + 1))
+        for offset in 1..<length {
+            let continuation = bytes[index + offset]
+            guard continuation & 0xC0 == 0x80 else { return nil }
+            value = value << 6 | UInt32(continuation & 0x3F)
+        }
+        guard let scalar = Unicode.Scalar(value) else { return nil }
+        return (scalar, length)
     }
 
     /// Reads the parameters after 38 or 48. Returns the color and how many parameters it used.

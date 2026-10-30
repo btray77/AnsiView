@@ -12,7 +12,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
 
     func preparePreviewOfFile(at url: URL) async throws {
         let data = try Data(contentsOf: url)
-        let player = AnsiPlayerViewController(source: AnsiSource(data: data, fileExtension: url.pathExtension))
+        let player = AnsiPlayerViewController(source: ArtFile(data: data, fileExtension: url.pathExtension))
         addChild(player)
         player.view.frame = view.bounds
         player.view.autoresizingMask = [.width, .height]

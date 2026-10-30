@@ -11,14 +11,14 @@ extension UTType {
 struct AnsiDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.ansiArt] }
 
-    let source: AnsiSource
+    let source: ArtFile
 
     init(configuration: ReadConfiguration) throws {
         guard let data = configuration.file.regularFileContents else {
             throw CocoaError(.fileReadCorruptFile)
         }
         let fileExtension = configuration.file.filename.map { ($0 as NSString).pathExtension }
-        source = AnsiSource(data: data, fileExtension: fileExtension)
+        source = ArtFile(data: data, fileExtension: fileExtension)
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
@@ -72,7 +72,7 @@ struct AnsiViewApp: App {
 }
 
 struct AnsiPlayerView: NSViewControllerRepresentable {
-    let source: AnsiSource
+    let source: ArtFile
 
     func makeNSViewController(context: Context) -> AnsiPlayerViewController {
         AnsiPlayerViewController(source: source)

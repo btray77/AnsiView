@@ -49,10 +49,10 @@ func sauceRecord(width: UInt16, flags: UInt8 = 0, fileSize: Int = 0) -> [UInt8] 
 }
 
 @Test func clearScreenCountsAsAnimationOnlyAfterDrawing() {
-    var first = AnsiTerminal(AnsiSource(data: Data(bytes("\u{1B}[2JHello"))))
+    var first = AnsiTerminal(ArtFile(data: Data(bytes("\u{1B}[2JHello"))))
     first.runToEnd()
     #expect(first.clearsAfterDrawing == 0)
-    var second = AnsiTerminal(AnsiSource(data: Data(bytes("Hello\u{1B}[2JWorld"))))
+    var second = AnsiTerminal(ArtFile(data: Data(bytes("Hello\u{1B}[2JWorld"))))
     second.runToEnd()
     #expect(second.clearsAfterDrawing == 1)
 }
