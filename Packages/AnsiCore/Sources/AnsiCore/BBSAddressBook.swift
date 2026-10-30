@@ -100,6 +100,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     public var rloginClientUser: String
     /// RLogin: the server user name; empty sends the username.
     public var rloginServerUser: String
+    /// RLogin: the client user field carries the Keychain password (Synchronet style RLogin).
+    public var rloginClientIsPassword: Bool
 
     public static let standardTerminalTypes = ["ANSI", "ANSI-BBS", "VT100"]
 
@@ -145,6 +147,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         webSocketTelnet = false
         rloginClientUser = ""
         rloginServerUser = ""
+        rloginClientIsPassword = false
     }
 
     public var address: String {
@@ -168,7 +171,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         case notes, tags, lastCalled, totalCalls, captureOnConnect, captureFolderBookmark, captureFolderName
         case modemSound, macros, autoLogin, loginScript, busyText, terminalType, iceColors
         case sshKeyBookmark, sshKeyName, sshTrustNewHostKey, webSocketPath, webSocketSecure, webSocketSubprotocols
-        case webSocketTelnet, rloginClientUser, rloginServerUser
+        case webSocketTelnet, rloginClientUser, rloginServerUser, rloginClientIsPassword
     }
 
     /// Missing or out of range fields fall back to the defaults, so older (plan 7) or hand edited books load.
@@ -210,6 +213,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         if let value = try? c.decode(Bool.self, forKey: .webSocketTelnet) { webSocketTelnet = value }
         if let value = try? c.decode(String.self, forKey: .rloginClientUser) { rloginClientUser = value }
         if let value = try? c.decode(String.self, forKey: .rloginServerUser) { rloginServerUser = value }
+        if let value = try? c.decode(Bool.self, forKey: .rloginClientIsPassword) { rloginClientIsPassword = value }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -249,6 +253,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         try c.encode(webSocketTelnet, forKey: .webSocketTelnet)
         try c.encode(rloginClientUser, forKey: .rloginClientUser)
         try c.encode(rloginServerUser, forKey: .rloginServerUser)
+        try c.encode(rloginClientIsPassword, forKey: .rloginClientIsPassword)
     }
 
     private static func clampSize(_ value: Int) -> Int {

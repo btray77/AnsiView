@@ -20,9 +20,11 @@ public enum RLogin {
         return "\(type.isEmpty ? "ansi" : type)/\(speed)"
     }
 
-    /// The user names sent: the RLogin fields, each falling back to the username.
+    /// The user names sent: the RLogin fields, each falling back to the username; the client user
+    /// is the saved password when the entry says so (empty when none is saved).
     public static func users(_ settings: TransportSettings) -> (client: String, server: String) {
-        let client = settings.rloginClientUser.isEmpty ? settings.username : settings.rloginClientUser
+        let client = settings.rloginClientIsPassword ? (settings.password ?? "")
+            : settings.rloginClientUser.isEmpty ? settings.username : settings.rloginClientUser
         let server = settings.rloginServerUser.isEmpty ? settings.username : settings.rloginServerUser
         return (client, server)
     }
@@ -126,6 +128,8 @@ public final class RLoginTransport: BBSTransport {
                 close()
                 events?(.closed(.rloginRefused(text)))
             }
+        case .waitingForUser:
+            events?(event)
         case .closed(let error):
             done = true
             if !accepted, let text = answer.ended() {

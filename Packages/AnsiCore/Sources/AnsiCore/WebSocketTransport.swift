@@ -46,7 +46,10 @@ public final class WebSocketTransport: NSObject, BBSTransport, URLSessionWebSock
             return
         }
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = connectTimeout
+        // The client's own timer limits the handshake; an open WebSocket may stay silent for hours
+        // (a BBS waiting at a prompt), so URLSession's idle timeout is set out of the way.
+        configuration.timeoutIntervalForRequest = 7 * 24 * 3600
+        configuration.timeoutIntervalForResource = 7 * 24 * 3600
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         let protocols = settings.webSocketSubprotocols
         let task = protocols.isEmpty ? session.webSocketTask(with: url) : session.webSocketTask(with: url, protocols: protocols)

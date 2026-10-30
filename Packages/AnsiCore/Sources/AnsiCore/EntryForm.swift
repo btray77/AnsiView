@@ -88,6 +88,7 @@ public enum EntryForm {
         if let f = form.field("wsTelnet") { e.webSocketTelnet = f.isOn }
         if let v = text("rloginClient") { e.rloginClientUser = v.trimmingCharacters(in: .whitespaces) }
         if let v = text("rloginServer") { e.rloginServerUser = v.trimmingCharacters(in: .whitespaces) }
+        if let f = form.field("rloginClientIsPassword") { e.rloginClientIsPassword = f.isOn }
         if let v = text("tags") { e.tags = v.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
         if let v = text("notes") { e.notes = v }
         if let f = choice("terminalType") { e.terminalType = f.choiceValue }
@@ -175,7 +176,8 @@ public enum EntryForm {
             fields.append(.toggle("wsTelnet", section: ws, label: "Telnet inside", hint: "Turn on when the WebSocket carries a telnet stream (fTelnet or websockify style bridges), so telnet negotiation runs inside it.", isOn: e.webSocketTelnet))
         case .rlogin:
             let rl = "RLogin"
-            fields.append(.text("rloginClient", section: rl, label: "Client user", hint: "The client user name sent when connecting. Empty sends your username. Some BBSes expect a password here; check the BBS's RLogin notes.", value: e.rloginClientUser, maxLength: 80))
+            fields.append(.toggle("rloginClientIsPassword", section: rl, label: "Send password", hint: "Sends your saved password (from the Keychain) as the client user, as Synchronet style RLogin servers expect. The field below is then not used.", isOn: e.rloginClientIsPassword))
+            fields.append(.text("rloginClient", section: rl, label: "Client user", hint: "The client user name sent when connecting. Empty sends your username. Do not type secrets here: it is saved in the directory.", value: e.rloginClientUser, maxLength: 80))
             fields.append(.text("rloginServer", section: rl, label: "Server user", hint: "The server user name: the account to log in to on the BBS. Empty sends your username.", value: e.rloginServerUser, maxLength: 80))
         }
         return fields

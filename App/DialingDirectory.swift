@@ -492,17 +492,23 @@ final class DialingDirectoryViewController: NSViewController {
             entry.sshKeyName = url.lastPathComponent
             self.rebuild(entry: entry, password: EntryForm.apply(current, to: draft).password, original: original,
                          selecting: "chooseKey", from: current)
-            // Say at once when the key cannot be used (RSA, not a key, damaged).
-            if let data = try? Data(contentsOf: url) {
+            // Say soon when the key cannot be used (RSA, not a key, damaged); checked off the main thread.
+            guard let data = try? Data(contentsOf: url) else { return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                var problem: SSHKeyFileError?
                 do {
                     _ = try SSHKeyFile.parse(data, passphrase: typedPassphrase.isEmpty ? nil : typedPassphrase)
                 } catch let error as SSHKeyFileError where error != .needsPassphrase && error != .wrongPassphrase {
+                    problem = error
+                } catch {}
+                guard let problem else { return }
+                DispatchQueue.main.async {
                     if case .edit(var shown, let d, let o) = self.mode {
-                        shown.info = error.message
+                        shown.info = problem.message
                         self.mode = .edit(form: shown, draft: d, original: o)
                         self.refresh()
                     }
-                } catch {}
+                }
             }
         }
         if let window = view.window { panel.beginSheetModal(for: window, completionHandler: finish) } else { finish(panel.runModal()) }

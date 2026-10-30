@@ -61,6 +61,9 @@ public enum SyncTermImport {
                 entry.rows = size.rows
             }
             let password = type.lowercased() == "sshna" ? nil : values["password"].flatMap { $0.isEmpty ? nil : $0 }
+            // SyncTERM sends the password as the RLogin client user (inferred from its documented
+            // Synchronet convention); the password itself goes to the Keychain.
+            if mode == .rlogin, password != nil { entry.rloginClientIsPassword = true }
             result.entries.append(Imported(entry: entry, password: password))
         }
         return result

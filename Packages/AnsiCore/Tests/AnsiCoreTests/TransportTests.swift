@@ -10,8 +10,13 @@ final class FakeTransport: BBSTransport, @unchecked Sendable {
     let sizes = Box<[String]>([])
     let opened = Box(false)
     let closed = Box(false)
+    /// Delivered from inside `open()` (on the client's queue), before the test can react.
+    var eventOnOpen: TransportEvent?
 
-    func open() { opened.value = true }
+    func open() {
+        opened.value = true
+        if let eventOnOpen { events?(eventOnOpen) }
+    }
     func write(_ bytes: [UInt8]) { written.update { $0 += bytes } }
     func resize(columns: Int, rows: Int) { sizes.update { $0.append("\(columns)x\(rows)") } }
     func close() { closed.value = true }
@@ -170,4 +175,22 @@ private func decode(_ json: String) throws -> BBSEntry {
     // Server: WILL BINARY (we accept, remote on) and DO BINARY (we offered, local on).
     queue.sync { fake.events?(.bytes([255, 251, 0, 255, 253, 0])) }
     #expect(await eventually { client.isByteClean })
+}
+
+@Test func connectTimeoutPausesWhileTheUserDecides() async {
+    let fake = FakeTransport()
+    let queue = DispatchQueue(label: "test.pause")
+    let client = BBSClient(host: "h", port: 1, settings: TransportSettings(mode: .ssh), columns: 80, rows: 25,
+                           connectTimeout: 0.3, queue: queue, transport: fake)
+    let states = Box<[BBSClientState]>([])
+    client.onState = { s in states.update { $0.append(s) } }
+    // A host key alert is up at once: the connect timeout must not fire while it waits for the user.
+    fake.eventOnOpen = .waitingForUser(true)
+    client.connect()
+    #expect(await eventually { fake.opened.value })
+    try? await Task.sleep(nanoseconds: 700_000_000)
+    #expect(states.value == [.connecting])
+    // Answered: the timeout runs again from now.
+    queue.sync { fake.events?(.waitingForUser(false)) }
+    #expect(await eventually { states.value.last == .closed(.timedOut("h")) })
 }

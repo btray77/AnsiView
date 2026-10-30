@@ -267,7 +267,11 @@ final class TerminalViewController: NSViewController {
         captureProblem = nil
         busyMatcher = nil
         terminalView.needsDisplay = true
-        let client = BBSClient(host: entry.host, port: entry.port, settings: TransportSettings(entry: entry),
+        var settings = TransportSettings(entry: entry)
+        if entry.mode == .rlogin, entry.rloginClientIsPassword {
+            settings.password = entry.credentialKey.flatMap { passwords?.password(for: $0) }
+        }
+        let client = BBSClient(host: entry.host, port: entry.port, settings: settings,
                                columns: emulator.columns, rows: emulator.rows, terminalTypes: entry.terminalTypes,
                                transport: makeTransport())
         client.onData = { [weak self] bytes in self?.receive(bytes) }
@@ -286,10 +290,16 @@ final class TerminalViewController: NSViewController {
     private func makeTransport() -> BBSTransport? {
         transportProblem = nil
         guard entry.mode == .ssh else { return nil }
-        let loaded = SSHLogin.load(entry: entry, passwords: passwords)
-        transportProblem = loaded.problem
-        return SSHTransport(host: entry.host, port: entry.port, settings: TransportSettings(entry: entry), login: loaded.login,
-                            columns: emulator.columns, rows: emulator.rows, queue: .main, verifier: hostKeys)
+        let entry = self.entry, passwords = self.passwords
+        let ssh = SSHTransport(host: entry.host, port: entry.port, settings: TransportSettings(entry: entry),
+                               login: SSHLogin(username: SSHLogin.username(for: entry)),
+                               loadLogin: { SSHLogin.load(entry: entry, passwords: passwords) },
+                               columns: emulator.columns, rows: emulator.rows, queue: .main, verifier: hostKeys)
+        ssh.onLoginProblem = { [weak self] problem in
+            self?.transportProblem = problem
+            self?.updateStatus()
+        }
+        return ssh
     }
 
     // MARK: Login, busy text and capture on connect

@@ -29,7 +29,7 @@ final class HostKeyPrompt: HostKeyVerifying {
     }
 
     func verify(host: String, port: Int, key: Data, trustNew: Bool, done: @escaping (BBSConnectionError?) -> Void) {
-        var hosts = file.load()
+        let hosts = file.load()
         let shownHost = KnownHosts.hostPattern(host: host, port: port)
         let fingerprint = SSHFingerprint.sha256(key)
         switch hosts.check(host: host, port: port, key: key) {
@@ -37,8 +37,10 @@ final class HostKeyPrompt: HostKeyVerifying {
             done(nil)
         case .unknown:
             let save = {
-                hosts.trust(host: host, port: port, key: key)
-                try? self.file.save(hosts)
+                // Reloaded: another terminal may have saved a key while this alert was up.
+                var current = self.file.load()
+                current.trust(host: host, port: port, key: key)
+                try? self.file.save(current)
             }
             if trustNew {
                 save()

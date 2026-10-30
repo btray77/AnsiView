@@ -209,9 +209,10 @@ public final class BBSClient {
     public func resize(columns: Int, rows: Int) {
         queue.async {
             let report = self.telnet.resize(columns: columns, rows: rows)
+            // The transport hears every size (SSH keeps it for its PTY request while connecting).
+            if self.state == .connecting || self.state == .connected { self.transport?.resize(columns: columns, rows: rows) }
             guard self.state == .connected else { return }
             if self.settings.usesTelnet, !report.isEmpty { self.write(report) }
-            self.transport?.resize(columns: columns, rows: rows)
         }
     }
 
@@ -247,13 +248,18 @@ public final class BBSClient {
         }
         setState(.connecting)
         transport.events = { [weak self] event in self?.handle(event) }
+        startTimeout()
+        transport.open()
+    }
+
+    private func startTimeout() {
+        timeoutWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.state == .connecting else { return }
             self.finish(.timedOut(self.host))
         }
         timeoutWork = work
         queue.asyncAfter(deadline: .now() + connectTimeout, execute: work)
-        transport.open()
     }
 
     private func handle(_ event: TransportEvent) {
@@ -266,6 +272,9 @@ public final class BBSClient {
         case .bytes(let bytes):
             guard state == .connected else { return }
             deliver(bytes)
+        case .waitingForUser(let waiting):
+            guard state == .connecting else { return }
+            if waiting { timeoutWork?.cancel() } else { startTimeout() }
         case .closed(let error):
             finish(error, closeTransport: false)
         }

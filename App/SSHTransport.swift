@@ -58,7 +58,11 @@ final class SSHTransport: BBSTransport {
     let host: String
     let port: Int
     let settings: TransportSettings
-    let login: SSHLogin
+    private(set) var login: SSHLogin
+    /// Reads the key file (and its passphrase) off the main thread when the connection starts.
+    private let loadLogin: (() -> (login: SSHLogin, problem: String?))?
+    /// Why the key file was not used (on the client's queue).
+    var onLoginProblem: ((String) -> Void)?
     let connectTimeout: TimeInterval
     let queue: DispatchQueue
     weak var verifier: HostKeyVerifying?
@@ -71,13 +75,17 @@ final class SSHTransport: BBSTransport {
     private var done = false
     /// Set by the host key check, so the closed event names it instead of a generic error.
     private var hostKeyError: BBSConnectionError?
+    /// The host key check waiting for the user; failed on close so NIO never sees it dropped.
+    private var pendingHostKey: EventLoopPromise<Void>?
 
-    init(host: String, port: Int, settings: TransportSettings, login: SSHLogin, columns: Int, rows: Int,
+    init(host: String, port: Int, settings: TransportSettings, login: SSHLogin,
+         loadLogin: (() -> (login: SSHLogin, problem: String?))? = nil, columns: Int, rows: Int,
          connectTimeout: TimeInterval = 15, queue: DispatchQueue, verifier: HostKeyVerifying?) {
         self.host = host
         self.port = port
         self.settings = settings
         self.login = login
+        self.loadLogin = loadLogin
         self.columns = columns
         self.rows = rows
         self.connectTimeout = connectTimeout
@@ -87,6 +95,23 @@ final class SSHTransport: BBSTransport {
 
     func open() {
         guard channel == nil, !done else { return }
+        guard let loadLogin else {
+            start()
+            return
+        }
+        // Decrypting a key file costs bcrypt rounds (milliseconds each): never on the main thread.
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loaded = loadLogin()
+            self.queue.async {
+                guard !self.done else { return }
+                self.login = loaded.login
+                if let problem = loaded.problem { self.onLoginProblem?(problem) }
+                self.start()
+            }
+        }
+    }
+
+    private func start() {
         let authDelegate = AuthDelegate(login: login)
         let hostDelegate = HostKeyDelegate(transport: self)
         let bootstrap = ClientBootstrap(group: MultiThreadedEventLoopGroup.singleton)
@@ -134,6 +159,8 @@ final class SSHTransport: BBSTransport {
     func close() {
         guard !done else { return }
         done = true
+        pendingHostKey?.fail(HostKeyRefused())
+        pendingHostKey = nil
         channel?.close(promise: nil)
         channel = nil
         session = nil
@@ -154,20 +181,34 @@ final class SSHTransport: BBSTransport {
                 promise.fail(HostKeyRefused())
                 return
             }
+            // An alert may wait for the user: the connect timeout pauses meanwhile.
+            self.pendingHostKey = promise
+            self.events?(.waitingForUser(true))
             verifier.verify(host: self.host, port: self.port, key: blob, trustNew: self.settings.sshTrustNewHostKey) { error in
+                // An answer after the connection closed changes nothing (close() failed the promise).
+                guard let pending = self.pendingHostKey, !self.done else { return }
+                self.pendingHostKey = nil
+                self.events?(.waitingForUser(false))
                 if let error {
                     self.hostKeyError = error
-                    promise.fail(HostKeyRefused())
+                    pending.fail(HostKeyRefused())
                 } else {
-                    promise.succeed(())
+                    pending.succeed(())
                 }
             }
         }
     }
 
     fileprivate func authenticated(_ channel: Channel) {
+        // The size lives on the client's queue; read it there, then open the session on the loop.
+        queue.async {
+            let (columns, rows) = (self.columns, self.rows)
+            channel.eventLoop.execute { self.openSession(channel, columns: columns, rows: rows) }
+        }
+    }
+
+    private func openSession(_ channel: Channel, columns: Int, rows: Int) {
         let terminal = settings.terminalType.trimmingCharacters(in: .whitespaces)
-        let (columns, rows) = queue.sync { (self.columns, self.rows) }
         let pty = SSHChannelRequestEvent.PseudoTerminalRequest(
             wantReply: false, term: terminal.isEmpty ? "ansi" : terminal.lowercased(), terminalCharacterWidth: columns,
             terminalRowHeight: rows, terminalPixelWidth: 0, terminalPixelHeight: 0, terminalModes: .init([:]))
@@ -199,13 +240,25 @@ final class SSHTransport: BBSTransport {
             guard !self.done, !self.opened else { return }
             self.opened = true
             self.events?(.opened)
+            if !self.early.isEmpty {
+                let bytes = self.early
+                self.early = []
+                self.events?(.bytes(bytes))
+            }
         }
     }
+
+    /// Bytes that came before the shell's reply, passed on once the session counts as open.
+    private var early: [UInt8] = []
 
     fileprivate func received(_ bytes: [UInt8]) {
         queue.async {
             guard !self.done else { return }
-            self.events?(.bytes(bytes))
+            if self.opened {
+                self.events?(.bytes(bytes))
+            } else if self.early.count < 1 << 20 {
+                self.early += bytes
+            }
         }
     }
 

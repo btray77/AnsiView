@@ -10,6 +10,8 @@ public enum SSHKeyFileError: Error, Equatable {
     case unsupportedKeyType(String)
     case unsupportedCipher(String)
     case damaged
+    /// More bcrypt rounds than `SSHKeyFile.maxRounds` (each costs milliseconds of CPU).
+    case tooManyRounds(Int)
 
     public var message: String {
         switch self {
@@ -25,6 +27,8 @@ public enum SSHKeyFileError: Error, Equatable {
             return "The key file is encrypted with \(cipher), which AnsiView cannot open. Re-save it with: ssh-keygen -p -f <file>"
         case .damaged:
             return "The SSH key file is damaged or cut short."
+        case .tooManyRounds(let rounds):
+            return "The key file asks for \(rounds) passphrase rounds, more than AnsiView accepts (\(SSHKeyFile.maxRounds)); opening it would take minutes. Re-save it with: ssh-keygen -p -a 16 -f <file>"
         }
     }
 }
@@ -98,6 +102,8 @@ enum SSHWire {
 /// (`EC PRIVATE KEY`, PKCS#8 `PRIVATE KEY`).
 public enum SSHKeyFile {
     private static let openSSHMagic = Array("openssh-key-v1".utf8) + [0]
+    /// OpenSSH writes 16 by default; `ssh-keygen -a` users pick 100 or so. About 3 ms a round.
+    public static let maxRounds = 1024
 
     /// True for a passphrase protected file (asks before the user types a passphrase).
     public static func isEncrypted(_ data: Data) -> Bool {
@@ -125,7 +131,7 @@ public enum SSHKeyFile {
             if let k = try? P384.Signing.PrivateKey(pemRepresentation: text) { return .p384(k) }
             if let k = try? P521.Signing.PrivateKey(pemRepresentation: text) { return .p521(k) }
             if let key = sec1(text) { return key }
-            if text.contains("-----BEGIN PRIVATE KEY-----") { throw SSHKeyFileError.unsupportedKeyType("This PKCS#8") }
+            if text.contains("-----BEGIN PRIVATE KEY-----") { throw SSHKeyFileError.unsupportedKeyType("PKCS#8 Ed25519 or RSA") }
             throw SSHKeyFileError.damaged
         }
         throw SSHKeyFileError.notAKey
@@ -185,7 +191,8 @@ public enum SSHKeyFile {
             var o = SSHWire.Reader(kdfOptions)
             let salt = try o.string()
             let rounds = Int(try o.uint32())
-            guard rounds > 0, rounds < 1 << 20 else { throw SSHKeyFileError.damaged }
+            guard rounds > 0 else { throw SSHKeyFileError.damaged }
+            guard rounds <= maxRounds else { throw SSHKeyFileError.tooManyRounds(rounds) }
             let material = BCryptPBKDF.derive(password: Array(passphrase.utf8), salt: salt, rounds: rounds,
                                               length: spec.keyLength + 16)
             secret = try aes(secret, key: Array(material[0..<spec.keyLength]), iv: Array(material[spec.keyLength...]),

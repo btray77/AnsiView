@@ -305,7 +305,8 @@ The Protocol field of an entry picks how AnsiView reaches the BBS; the port foll
   BBSes take any name and ask again on their own login screen). It tries the key file if one is
   chosen, then the password saved in the Keychain, or an empty password when none is saved.
   Key files: Ed25519 and ECDSA (P-256, P-384, P-521) in OpenSSH format, with or without a
-  passphrase (kept in the Keychain), and PEM ECDSA keys. RSA keys are not supported (the SSH
+  passphrase (kept in the Keychain; at most 1024 bcrypt rounds, OpenSSH's default is 16), and PEM
+  ECDSA keys. RSA keys are not supported (the SSH
   library cannot sign with them); make an Ed25519 key with `ssh-keygen -t ed25519`. Keyboard
   interactive login is not supported either. The first connection to a server shows its host key
   fingerprint (`SHA256:...`, as `ssh-keygen -l` prints it) and asks whether to trust it, unless
@@ -323,7 +324,8 @@ The Protocol field of an entry picks how AnsiView reaches the BBS; the port foll
   Telnet inside runs telnet negotiation through the WebSocket, for bridges that carry a raw telnet
   stream (fTelnet or websockify style). Errors name a TLS failure (for example a self signed
   certificate) or an HTTP answer instead of the upgrade, with its status code.
-- **RLogin** (RFC 1282) sends the client user, server user (each your username unless set) and
+- **RLogin** (RFC 1282) sends the client user, server user (each your username unless set; Send
+  password puts your Keychain password in the client user, as Synchronet style servers expect) and
   terminal type with the speed (`ansi/38400`, or the simulated speed), and shows the server's
   refusal text if it refuses. The window size is not sent: the server asks for it with TCP urgent
   data, which macOS's Network framework does not expose. The sandbox cannot use a privileged

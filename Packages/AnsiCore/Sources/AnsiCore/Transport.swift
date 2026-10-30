@@ -6,6 +6,9 @@ public enum TransportEvent: Equatable {
     /// The channel is up (TCP connected, SSH shell started, WebSocket upgraded, RLogin accepted).
     case opened
     case bytes([UInt8])
+    /// True while the transport waits for the user (an SSH host key alert): the connect timeout
+    /// stops, and starts again from the full time when the user has answered.
+    case waitingForUser(Bool)
     /// Ended; nil when `close()` was asked for.
     case closed(BBSConnectionError?)
 }
@@ -38,6 +41,9 @@ public struct TransportSettings: Equatable {
     public var webSocketTelnet = false
     public var rloginClientUser = ""
     public var rloginServerUser = ""
+    public var rloginClientIsPassword = false
+    /// The Keychain password, filled in by the app at connect time (never stored in an entry).
+    public var password: String?
     public var sshTrustNewHostKey = false
 
     public init(mode: ConnectionMode) {
@@ -55,6 +61,7 @@ public struct TransportSettings: Equatable {
         webSocketTelnet = entry.webSocketTelnet
         rloginClientUser = entry.rloginClientUser
         rloginServerUser = entry.rloginServerUser
+        rloginClientIsPassword = entry.rloginClientIsPassword
         sshTrustNewHostKey = entry.sshTrustNewHostKey
     }
 
