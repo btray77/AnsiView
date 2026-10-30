@@ -50,6 +50,48 @@ solid block and shade characters, and box drawing that lines up without gaps.
   between the grid and a list (small thumbnail, name and kind), and the choice is remembered for
   gallery windows. Slideshow > Start Slideshow (Option Command S) steps
   through a folder or pack with the Left and Right arrow keys, with optional Auto Advance.
+- **Find in art** (Command F, then Command G / Shift Command G): a find bar over a viewer window
+  outlines every match in the finished art and scrolls to each in turn (case and accents ignored).
+  In a gallery Command F goes to its search field, which shows only the pieces whose words, name or
+  SAUCE contain every word you type.
+- **Compare.** File > Compare With..., or Compare with two pieces selected in a gallery, the
+  library or the duplicate finder, shows two pieces side by side, scrolling together, with every
+  cell that looks different tinted red, a count ("3 of 2,000 cells differ, on 2 rows") and
+  Command G / Shift Command G to step through the rows that differ.
+- **Auto scroll and minimap for tall art.** View > Auto Scroll (Shift Command A) moves tall art
+  smoothly up the window at 2 to 48 lines a second (+ and - change speed, Space pauses, Escape or a
+  click stops; the speed is remembered). Art at least twice as tall as the window gets a minimap
+  strip at the right: the whole piece, with a box for the part on screen; click or drag to jump
+  (View > Show Minimap turns it off).
+- **Palettes.** View > Palette switches a window's colours at once, playback included: the art's
+  own colours, VGA, CGA (dark yellow) or Greyscale, or a palette you load: JASC `.pal`, GIMP `.gpl`,
+  Adobe `.act`, or the palette inside an XBin, ADF or IDF file. Next Palette is Option Command P.
+  The choice is used for new windows too. Loaded palettes are copied into AnsiView's container.
+- **Pack info.** When a gallery opens a pack or folder with a FILE_ID.DIZ or NFO files, a pane
+  beside it shows them at once (a menu picks between several; View > Show or Hide Pack Info,
+  Option Command I). Selecting a pack in the 16colo.rs browser previews its FILE_ID file.
+- **Galleries stay fast on big folders.** Thumbnails for the pieces on screen are drawn first, and
+  every thumbnail is kept in AnsiView's Caches folder (up to 300 MB), so a folder opens with its
+  pictures at once the next time.
+- **Library** (Window > Library, Shift Command L). Add folders of art (subfolders and the ZIP
+  art packs in them are included; nothing is copied or moved). AnsiView indexes them in the
+  background: each piece's words, SAUCE record and a thumbnail. Unchanged files are not read
+  again on later scans. Then: search everything; rate pieces 0 to 5 stars (keys 0 to 5), mark
+  favourites (F) and add your own tags (T); smart folders (saved searches by tag, rating,
+  favourite, text, SAUCE title, author or group, format, year or date added, with Favourites,
+  Rated 4 Stars or More, Untagged and Recently Added built in); and artist and group pages built
+  from SAUCE, listing their pieces, years and the groups or artists they appear with, plus
+  "Show on 16colo.rs", which lists the packs 16colo.rs has under that name (double click to open
+  one). Tags and ratings follow a piece through renames and moves. The library is kept in
+  AnsiView's container; folders are remembered with security scoped bookmarks. Measured on a
+  generated 10,000 piece collection on an Apple M5: first index with thumbnails 11.8 s, a rescan
+  with nothing changed 0.45 s, a search 4 to 9 ms.
+- **Duplicates** (Window > Duplicates in Library, or Duplicates... in the library) finds exact
+  copies (the same bytes) and the same art saved differently (cell for cell the same picture with
+  another SAUCE record, other line endings or redundant codes) across the library's folders and
+  packs. Nothing is ticked until you tick it or press Tick All but One (which keeps the copy with
+  the shortest path); Move Ticked to Trash asks first and only ever moves files to the Trash.
+  Pieces inside ZIP packs are listed but cannot be ticked.
 - **Finder thumbnails.** Art files show the art itself as their Finder icon (except `.asc`, which
   macOS does not let thumbnail extensions claim).
 - **Sample art.** File > Open Sample opens four original pieces bundled with the app: a static
@@ -124,6 +166,11 @@ Requires macOS 14 or later, on Apple silicon or Intel.
 | Next / previous art in a slideshow | Right / Left arrow, or Option Command Right / Left |
 | Select cells to copy | Drag over the art (a click or Escape clears; Command A selects all) |
 | Copy / Copy As Image / Copy As ANSI | Command C / Option Command C / Shift Option Command C |
+| Find in art / next / previous | Command F / Command G / Shift Command G |
+| Auto scroll (tall art) | Shift Command A; then + / - speed, Space pause, Escape stop |
+| Next palette | Option Command P |
+| Show or hide pack info (gallery) | Option Command I |
+| Library | Shift Command L; in it 0 to 5 rate, F favourite, T tags, Return or Space open |
 
 The playback speeds you choose in the app (per file and default) are also used by the Quick Look preview.
 

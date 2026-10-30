@@ -71,7 +71,8 @@ licensed packs with credit, while AnsiView's own code stays MIT.
 27. iPhone and iPad app with a Files app Quick Look preview, reusing the core.
 
 ### Browsing, viewing and collections (plan 9)
-Added 2026-10-30 at the owner's request.
+Added 2026-10-30 at the owner's request. Status: 35 to 37 merged (16colo.rs previews plan); 38 to 47
+built on branch `ansiview-2.0-plan-9` (see `docs/superpowers/plans/2026-10-30-ansiview-2.0-plan-9-browsing.md`).
 35. Thumbnail grid in the 16colo.rs browser: each pack shows a grid of its files using the `tn` previews the API already lists (`/pack/<p>/tn/<f>.png`, 160 px wide), so art is seen without opening it. Click enlarges (using `x1`); opening is a separate action. Previews are cached on disk and fetched with the existing 1 s request spacing.
 36. Pack list rows show the pack's first preview image.
 37. Grid / list toggle in both the 16colo.rs browser and local galleries.

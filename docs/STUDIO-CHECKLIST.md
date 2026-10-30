@@ -152,5 +152,20 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 |---|---|
 | Preview pane on selection (real art via AnsiView renderer, SAUCE caption, x1 fallback), pack thumbnail grid, pack row pictures, grid/list toggle in browser and galleries, 200 MB disk cache, offline mode | done (harness and live 16colo.rs; live app check needs owner), items 35-37 |
 
+## Browsing, viewing and collections (plan 9, items 38 to 47)
+
+| Requirement | Status |
+|---|---|
+| Search text inside art: viewer find bar, gallery search, library search (item 38) | done on branch `ansiview-2.0-plan-9` (core tests, harness; live app check needs owner) |
+| Side by side compare with differing cells tinted (item 39) | done on branch (core tests, harness PNG) |
+| Smooth auto scroll for tall art (item 40) | done on branch (core tests, harness) |
+| Minimap strip for tall art (item 41) | done on branch (core tests, harness PNG) |
+| Palette files (.pal, .gpl, .act, XBin/ADF/IDF) switched live (item 42) | done on branch (core tests, harness) |
+| Library: tags, favourites, ratings, smart folders (item 43) | done on branch (core tests, harness PNGs) |
+| Artist and group pages from SAUCE plus 16colo.rs (item 44) | done on branch (core tests with API shaped fixtures; live 16colo.rs lookup from the app needs owner) |
+| Duplicate finder, rendered cell hash plus byte hash, Trash only after confirmation (item 45) | done on branch (core tests, harness) |
+| FILE_ID.DIZ and NFO shown when a pack opens (item 46) | done on branch for galleries (harness); 16colo.rs browser FILE_ID preview built, not exercised against the network |
+| Background indexing and thumbnailing of very large folders and packs (item 47) | done on branch (10,000 piece measurement in plan 9) |
+
 ## Running right now
 
