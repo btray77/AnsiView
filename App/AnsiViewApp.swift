@@ -82,6 +82,9 @@ struct AnsiViewApp: App {
                 Button("Batch Export...") { BatchExportController.start() }
                     .keyboardShortcut("e", modifiers: [.command, .option])
                 Divider()
+                Button("Share Image...") { send(#selector(AnsiCanvasView.shareImage(_:))) }
+                Button("Share Animation...") { send(#selector(AnsiCanvasView.shareAnimation(_:))) }
+                Divider()
                 Button("Get Info") { send(#selector(AnsiPlayerViewController.showArtInfo(_:))) }
                     .keyboardShortcut("i")
             }

@@ -248,7 +248,8 @@ enum ExportController {
     /// cancel) and a byte limit that could not be met are shown as alerts.
     static func runWithProgress(
         in window: NSWindow, title: String,
-        work: @escaping (_ report: @escaping (Double) -> Void, _ isCancelled: @escaping () -> Bool) throws -> ExportOutcome
+        work: @escaping (_ report: @escaping (Double) -> Void, _ isCancelled: @escaping () -> Bool) throws -> ExportOutcome,
+        onSuccess: @escaping (ExportOutcome) -> Void = { _ in }
     ) {
         let sheet = ProgressSheet(title: title)
         let flag = sheet.flag
@@ -268,7 +269,9 @@ enum ExportController {
                 if let failure {
                     if case AnsiExportError.cancelled = failure { return }
                     NSAlert(error: failure).beginSheetModal(for: window)
-                } else if let outcome, outcome.overLimit {
+                } else if let outcome, !outcome.overLimit {
+                    onSuccess(outcome)
+                } else if let outcome {
                     let alert = NSAlert()
                     alert.messageText = "The file is larger than the size limit."
                     alert.informativeText = "Even the smallest version is \(ByteCountFormatter.string(fromByteCount: Int64(outcome.bytes), countStyle: .file)). It was saved anyway."
