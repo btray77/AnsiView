@@ -202,9 +202,9 @@ t_telnet() {
         "$X" receive "$kind" --quiet --telnet --name everybyte.bin --padding keep --dir "$out" --listen $port > "$WORK/tn-recv.txt" 2>&1 &
         sleep 0.5
         if [ "$kind" = xmodem-1k ]; then files=everybyte.bin; else files="everybyte.bin r1048576.bin"; fi
-        (cd "$F" && "$X" send "$kind" --quiet --telnet $files --connect 127.0.0.1:$port) | tail -2
+        (cd "$F" && "$X" send "$kind" --quiet --telnet $files --connect 127.0.0.1:$port) | grep -E "^telnet|^result|^elapsed"
         wait
-        tail -2 "$WORK/tn-recv.txt"
+        grep -E "^telnet|^result|^elapsed" "$WORK/tn-recv.txt"
         if [ "$kind" = xmodem-1k ]; then check_padded "$kind over telnet" "$F/everybyte.bin" "$out/everybyte.bin"; else
             check "$kind over telnet" "$F/everybyte.bin" "$out/everybyte.bin"
             check "$kind over telnet" "$F/r1048576.bin" "$out/r1048576.bin"
@@ -213,17 +213,30 @@ t_telnet() {
 }
 
 t_throughput() {
-    local out=$WORK/tp port=23600 kind
-    for kind in xmodem xmodem-crc xmodem-1k ymodem ymodem-g zmodem kermit; do
+    # 10 MiB, ansixfer to ansixfer over loopback TCP. "kind|send options|receive options".
+    local out=$WORK/tp port=23600 entry kind sopts ropts
+    for entry in "xmodem||" "xmodem-crc||" "xmodem-1k||" "ymodem||" "ymodem-g||" "zmodem||" "zmodem|--block 8192|" \
+                 "kermit||" "kermit|--kermit-window 31|--kermit-window 31" "kermit|--kermit-window 31 --packet 9024|--kermit-window 31 --packet 9024"; do
+        IFS='|' read -r kind sopts ropts <<< "$entry"
         fresh "$out"
         port=$((port + 1))
-        "$X" receive "$kind" --quiet --name big10m.bin --dir "$out" --listen $port > "$WORK/tp-recv.txt" 2>&1 &
+        "$X" receive "$kind" --quiet $ropts --name big10m.bin --dir "$out" --listen $port > "$WORK/tp-recv.txt" 2>&1 &
         sleep 0.5
-        echo "+ $kind 10 MiB over 127.0.0.1:$port (ansixfer to ansixfer)"
-        (cd "$F" && "$X" send "$kind" --quiet big10m.bin --connect 127.0.0.1:$port) | grep elapsed
+        echo "+ $kind $sopts 10 MiB over 127.0.0.1:$port (ansixfer to ansixfer)"
+        (cd "$F" && "$X" send "$kind" --quiet $sopts big10m.bin --connect 127.0.0.1:$port) | grep elapsed
         wait
-        if [ "${kind#xmodem}" != "$kind" ]; then check_padded "$kind throughput" "$F/big10m.bin" "$out/big10m.bin"; else check "$kind throughput" "$F/big10m.bin" "$out/big10m.bin"; fi
+        if [ "${kind#xmodem}" != "$kind" ]; then check_padded "$kind $sopts throughput" "$F/big10m.bin" "$out/big10m.bin"; else
+            check "$kind $sopts throughput" "$F/big10m.bin" "$out/big10m.bin"; fi
     done
+    # The same file with lrzsz on the other end, for comparison.
+    fresh "$out"
+    echo "+ zmodem 10 MiB ansixfer send -> lrz (socket pair)"
+    (cd "$F" && "$X" send zmodem --quiet big10m.bin --exec "cd '$out' && lrz -q -y") | grep elapsed
+    check "zmodem ours->lrz throughput" "$F/big10m.bin" "$out/big10m.bin"
+    fresh "$out"
+    echo "+ zmodem 10 MiB lsz -> ansixfer receive (socket pair)"
+    "$X" receive zmodem --quiet --dir "$out" --exec "cd '$F' && lsz -q big10m.bin" | grep elapsed
+    check "zmodem lsz->ours throughput" "$F/big10m.bin" "$out/big10m.bin"
 }
 
 t_auto() {

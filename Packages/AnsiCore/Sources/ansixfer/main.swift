@@ -404,6 +404,7 @@ if let pid = childPid {
     }
 }
 
+if let telnet { print("telnet: BINARY both ways = \(telnet.isByteClean)") }
 if autoMode {
     let shown = String(decoding: terminalText, as: UTF8.self).replacingOccurrences(of: "\r", with: "\\r").replacingOccurrences(of: "\n", with: "\\n")
     print("terminal: \(terminalBytes) bytes shown before the transfer: \"\(shown)\"")
