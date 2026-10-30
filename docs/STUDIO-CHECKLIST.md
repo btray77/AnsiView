@@ -75,7 +75,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Progress, speed, ETA, logging, errors, cancel and cleanup | planned | transfers |
 | Path traversal protection, size limits, downloads folder in sandbox | planned | transfers |
 | Interop proof against independent implementations (lrzsz `sz`/`rz`, C-Kermit) | planned | transfers |
-| Over telnet (with IAC escaping), raw TCP, SSH, WebSocket | planned | transports + transfers |
+| Over telnet (with IAC escaping), raw TCP, SSH, WebSocket | channel ready (transports: `BBSClient.send`/`onData`, `isByteClean`); transfer hookup planned | transports + transfers |
 | Others worth considering: YMODEM-G (no-ACK streaming), ZMODEM-8k, HS/Link and BiModem (bidirectional, closed specs: not planned) | research | transfers |
 
 ## 4. Screen designer
@@ -133,16 +133,18 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Transport | Status |
 |---|---|
 | Telnet, raw TCP | done (plan 7) |
-| SSH (password and key, host key trust on first use) | planned (transports) |
-| WebSocket (ws and wss) | planned (transports) |
-| RLogin | planned (transports, small) |
+| SSH (password and key, host key trust on first use) | done on branch `ansiview-2.0-transports` (local NIO SSH test server: password, empty password, Ed25519 key with passphrase, first use and changed key). Limit: swift-nio-ssh has no DH key exchange, RSA host keys, CTR ciphers or keyboard interactive, so Synchronet, cryptlib and RSA-only ENiGMA boards cannot connect (measured by read only probes); needs owner decision |
+| WebSocket (ws and wss) | done on branch `ansiview-2.0-transports` (local server: binary and text frames, subprotocol, telnet inside, HTTP 404, self signed wss error) |
+| RLogin | done on branch `ansiview-2.0-transports` (local server: handshake bytes, refusal; no window size, see README) |
+| Byte clean channel for transfers | done: all 256 byte values measured end to end over SSH, WebSocket and RLogin |
 
 ## Terminal dialing directory
 
 | Requirement | Status |
 |---|---|
 | Retro phonebook (list, tags, search, sort, notes, call stats), per-BBS settings, Keychain passwords, expect/send auto-login, dial queue with redial and busy detection, macros, JSON and SyncTERM import/export | done (local test server; real-BBS logins need owner), merged item 63 |
-| IEMSI, Sixel, iTerm2 images, SSH keys, TLS certs, RLogin | planned (transports) |
+| SSH keys, RLogin users, WebSocket fields, per protocol hints, SyncTERM SSH/RLogin import | done on branch `ansiview-2.0-transports` |
+| IEMSI, Sixel, iTerm2 images, TLS client certificates | planned |
 
 ## 16colo.rs browsing
 
