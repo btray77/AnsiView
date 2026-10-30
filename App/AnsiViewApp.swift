@@ -238,6 +238,7 @@ struct AnsiViewApp: App {
                 CommandGroup(before: .windowList) {
                     Button("ANSI Music Editor") { MusicEditorWindowController.show() }
                         .keyboardShortcut("m", modifiers: [.command, .shift])
+                    Button("Text to ASCII") { TextToASCIIWindowController.show(editor: nil) }
                     Divider()
                 }
                 CommandMenu("Terminal") {

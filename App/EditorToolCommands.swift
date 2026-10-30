@@ -19,6 +19,9 @@ struct EditorToolCommands: Commands {
             Button("Eyedropper") { send(#selector(EditorCanvasView.chooseEyedropperTool(_:))) }
             Divider()
             Button("Character Picker...") { send(#selector(EditorCanvasView.showCharacterPicker(_:))) }
+            Button("Text Art...") { send(#selector(EditorCanvasView.showTextArt(_:))) }
+            Button("Text to ASCII...") { TextToASCIIWindowController.show(editor: nil) }
+            Button("Font Manager...") { FontManagerWindowController.show() }
             Button("Swap Foreground and Background") { send(#selector(EditorCanvasView.swapColours(_:))) }
             Button("Toggle Insert Mode") { send(#selector(EditorCanvasView.toggleInsertMode(_:))) }
             Divider()
