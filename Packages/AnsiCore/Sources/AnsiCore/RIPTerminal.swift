@@ -495,8 +495,7 @@ public struct RIPTerminal: TerminalEngine {
         case "t":
             _ = n(1)
             if var block = textBlock {
-                var words = rest()
-                while !words.isEmpty, canvas.textWidth(words) > block.x1 - block.x0 + 1 { words.removeLast() }
+                let words = canvas.fittingPrefix(rest(), width: block.x1 - block.x0 + 1)
                 canvas.text(words, x: block.x0, y: block.y)
                 block.y += canvas.textHeight
                 textBlock = block

@@ -60,7 +60,8 @@ struct BBCGraphics {
     }
 
     private func screenPoint(_ p: (Int, Int)) -> (Int, Int) {
-        (p.0 * width / 1280, height - 1 - p.1 * height / 1024)
+        let x = max(-65536, min(65536, p.0)), y = max(-65536, min(65536, p.1))
+        return (x * width / 1280, height - 1 - y * height / 1024)
     }
 
     private mutating func set(_ x: Int, _ y: Int, how: Int) {
@@ -87,7 +88,9 @@ struct BBCGraphics {
     mutating func plot(_ k: Int, x: Int, y: Int) {
         guard hasGraphics else { return }
         let absolute = k & 4 != 0
-        let target = absolute ? (x, y) : (points[1].0 + x, points[1].1 + y)
+        // Relative moves add up; the graphics cursor is kept within a range no sum can overflow.
+        func clamp(_ v: Int) -> Int { max(-65536, min(65536, v)) }
+        let target = absolute ? (x, y) : (clamp(points[1].0 + x), clamp(points[1].1 + y))
         let how = k & 3
         let older = points[0], previous = points[1]
         points = [points[1], target]
@@ -125,7 +128,12 @@ struct BBCGraphics {
         for y in minY...maxY {
             var xs: [Int] = []
             for (a, b) in edges where (a.1 <= y && b.1 >= y) || (b.1 <= y && a.1 >= y) {
-                if a.1 == b.1 { xs += [a.0, b.0] } else { xs.append(a.0 + (y - a.1) * (b.0 - a.0) / (b.1 - a.1)) }
+                if a.1 == b.1 {
+                    xs += [a.0, b.0]
+                } else {
+                    let x = Double(a.0) + Double(y - a.1) * Double(b.0 - a.0) / Double(b.1 - a.1)
+                    xs.append(Int(max(-1_000_000, min(1_000_000, x))))
+                }
             }
             guard let lo = xs.min(), let hi = xs.max() else { continue }
             for x in max(0, lo)...min(width - 1, max(max(0, lo), hi)) { set(x, y, how: how) }

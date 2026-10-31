@@ -247,6 +247,7 @@ public struct RIPCanvas {
         let glyphs = PlatformFonts.appleII
         var cx = x, cy = y
         for byte in string {
+            if direction == 0 ? cx > width : cy < 0 { break }
             let glyph = glyphs.pixels(glyph: Int(byte & 0x7F))
             for gy in 0..<8 {
                 for gx in 0..<8 where glyph[gy * 8 + gx] {
@@ -284,6 +285,8 @@ public struct RIPCanvas {
         let brush = max(1, Int((style.weight * scale).rounded()))
         var along = 0
         for byte in string {
+            // Text past the edge draws nothing: stop there rather than walk the rest of the line.
+            if offCanvas(x: x, y: y, along: along) { along += string.count; break }
             for stroke in RIPStrokeFont.strokes(for: byte) {
                 // Local offsets: `dx` along the text, `dy` down from the top of the cell.
                 let points: [(Int, Int)] = stroke.map { p in
@@ -323,6 +326,21 @@ public struct RIPCanvas {
             steps += 1
             if steps > 4000 { break }
         }
+    }
+
+    /// The longest start of `string` that fits in `width` pixels (one pass over the advances).
+    func fittingPrefix(_ string: [UInt8], width: Int) -> [UInt8] {
+        var used = 0
+        for (i, byte) in string.enumerated() {
+            used += font == 0 ? 8 * max(1, size) : strokeAdvance(byte)
+            if used > width { return Array(string[..<i]) }
+        }
+        return string
+    }
+
+    /// True once text running from (x, y) is wholly past the canvas edge it runs towards.
+    private func offCanvas(x: Int, y: Int, along: Int) -> Bool {
+        direction == 0 ? x + along > width + 8 : y - along < -8
     }
 
     /// The width of text in pixels in the current font.

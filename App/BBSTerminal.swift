@@ -101,7 +101,7 @@ final class TerminalView: NSView {
             context.clip(to: art)
             var kept: [String: CGImage] = [:]
             for picture in placed {
-                let key = "\(picture.line + controller.scrollOffset):\(picture.column):\(picture.image.width)x\(picture.image.height):\(picture.image.rgba.count)"
+                let key = "\(picture.id)"
                 guard let image = imageCache[key] ?? picture.image.cgImage else { continue }
                 kept[key] = image
                 let rect = CGRect(x: art.minX + CGFloat(picture.column) * cellWidth, y: art.minY + CGFloat(picture.line) * rowHeight,
@@ -632,7 +632,13 @@ final class TerminalViewController: NSViewController {
         pumpRIP()
         // A CTerm loadable font the BBS selected (or went back from).
         let font = emulator.font ?? BitmapFont.named(entry.fontName)
-        if font.name != terminalView.font.name || font.height != terminalView.font.height { terminalView.font = font }
+        if font.name != terminalView.font.name || font.height != terminalView.font.height {
+            terminalView.font = font
+            if var ansi = emulator as? TerminalEmulator {
+                ansi.imageCellSize = (font.width, font.height)
+                emulator = ansi
+            }
+        }
         if emulator.bells != shownBells {
             shownBells = emulator.bells
             NSSound.beep()

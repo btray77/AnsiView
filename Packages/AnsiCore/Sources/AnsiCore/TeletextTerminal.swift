@@ -60,6 +60,13 @@ public struct TeletextTerminal: TerminalEngine {
             let line = i < memory.count ? memory[i] : []
             return Array(line.prefix(c)) + Array(repeating: 0x20, count: max(0, c - line.count))
         }
+        if !colourMemory.isEmpty {
+            let blank = bbc.cellColour
+            colourMemory = (0..<r).map { i in
+                let line = i < colourMemory.count ? colourMemory[i] : []
+                return Array(line.prefix(c)) + Array(repeating: blank, count: max(0, c - line.count))
+            }
+        }
         columns = c
         rows = r
         row = min(row, r - 1)

@@ -94,6 +94,8 @@ public struct TerminalEmulator {
     /// ever scrolled into the scrollback).
     private var placedImages: [PlacedTerminalImage] = []
     private var scrolledLines = 0
+    private var nextImageID = 0
+    private var fontLoads = 0
     /// Mouse reporting asked for by the BBS: 9 (X10, presses only), 1000 (presses and releases),
     /// 0 off; SGR coordinates (1006).
     public private(set) var mouseTracking = 0
@@ -396,7 +398,9 @@ public struct TerminalEmulator {
         let heights = [2048: 8, 3584: 14, 4096: 16]
         guard let height = heights[data.count] else { return }
         if loadedFonts.count >= 16, loadedFonts[slot] == nil { return }
-        loadedFonts[slot] = BitmapFont(rawGlyphs: [UInt8](data), height: height, name: "CTerm font \(slot)")
+        fontLoads &+= 1
+        // Each load gets its own name, so a font loaded again into a slot is seen as new.
+        loadedFonts[slot] = BitmapFont(rawGlyphs: [UInt8](data), height: height, name: "CTerm font \(slot) load \(fontLoads)")
     }
 
     /// The bytes that report a mouse button (0 left, 1 middle, 2 right) pressed or released at a
@@ -418,8 +422,18 @@ public struct TerminalEmulator {
         let cw = max(1, imageCellSize.width), ch = max(1, imageCellSize.height)
         let spanColumns = max(1, min(columns, wanted ?? (image.width + cw - 1) / cw))
         let spanRows = max(1, min(1000, tall ?? (image.height + ch - 1) / ch))
-        placedImages.append(PlacedTerminalImage(image: image, line: scrolledLines + row, column: column,
-                                                columns: spanColumns, rows: spanRows))
+        let new = PlacedTerminalImage(id: nextImageID, image: image, line: scrolledLines + row, column: column,
+                                      columns: spanColumns, rows: spanRows)
+        nextImageID &+= 1
+        // A picture wholly covered by the new one can never show again.
+        placedImages.removeAll { old in
+            old.line >= new.line && old.line + old.rows <= new.line + new.rows
+                && old.column >= new.column && old.column + old.columns <= new.column + new.columns
+        }
+        placedImages.append(new)
+        if placedImages.count > TerminalImageLimits.maxImages {
+            placedImages.removeFirst(placedImages.count - TerminalImageLimits.maxImages)
+        }
         var total = placedImages.reduce(0) { $0 + $1.image.width * $1.image.height }
         while total > TerminalImageLimits.maxTotalPixels, placedImages.count > 1 {
             let dropped = placedImages.removeFirst()
@@ -918,7 +932,7 @@ public struct TerminalEmulator {
     private mutating func reset() {
         let kept = scrollback
         let changes = changeCount, bellCount = bells, keptProfile = profile, ice = entryIceColors
-        let lines = scrolledLines, cell = imageCellSize, fonts = loadedFonts
+        let lines = scrolledLines, cell = imageCellSize, fonts = loadedFonts, ids = nextImageID, loads = fontLoads
         self = TerminalEmulator(columns: columns, rows: rows, encoding: encoding)
         profile = keptProfile
         iceColors = ice
@@ -927,6 +941,8 @@ public struct TerminalEmulator {
         scrolledLines = lines
         imageCellSize = cell
         loadedFonts = fonts
+        nextImageID = ids
+        fontLoads = loads
         changeCount = changes
         bells = bellCount
     }

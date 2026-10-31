@@ -205,15 +205,20 @@ public struct ArtFile {
     /// Icons and scenes a RIP file names come from here (the app's icon folder); nil in Quick Look.
     public static var ripFiles: RIPFileProvider?
 
+    /// Drawing allowed per round and rounds for a RIP file (about 225 M pixels in all).
+    static let ripRoundBudget = 25_000_000
+    static let ripRounds = 8
+
     /// Plays a RIP file through the RIPscrip terminal: its text layer, with the picture under it.
     static func ripScreen(_ body: [UInt8]) -> AnsiScreen {
         var terminal = RIPTerminal()
         terminal.files = ripFiles
         // A file has no screen to keep responsive: the whole of it is drawn, within a bound.
-        terminal.drawingBudget = 400_000_000
+        // About 200 M pixels in all (a few seconds at most); a file that wants more is cut short.
+        terminal.drawingBudget = ripRoundBudget
         terminal.feed(body + [0x0D, 0x0A])
         var rounds = 0
-        while terminal.hasPendingWork, rounds < 64 { terminal.feed([]); rounds += 1 }
+        while terminal.hasPendingWork, rounds < ripRounds { terminal.feed([]); rounds += 1 }
         var screen = terminal.screen(scrollOffset: 0)
         let canvas = terminal.canvas
         var rgb = [UInt8](repeating: 0, count: canvas.width * canvas.height * 3)

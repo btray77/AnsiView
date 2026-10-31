@@ -89,12 +89,17 @@ public struct RIPFolderProvider: RIPFileProvider {
     public let folder: URL
     public static let maxFileBytes = 2 * 1024 * 1024
 
-    public init(folder: URL) { self.folder = folder }
+    /// Lower case name to the name on disk, listed once (a BBS may ask about hundreds of names).
+    private let names: [String: String]
+
+    public init(folder: URL) {
+        self.folder = folder
+        let listed = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        names = Dictionary(listed.map { ($0.lowercased(), $0) }, uniquingKeysWith: { first, _ in first })
+    }
 
     private func url(_ name: String) -> URL? {
-        let lower = name.lowercased()
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return nil }
-        return names.first { $0.lowercased() == lower }.map { folder.appendingPathComponent($0) }
+        names[name.lowercased()].map { folder.appendingPathComponent($0) }
     }
 
     public func data(named name: String) -> [UInt8]? {

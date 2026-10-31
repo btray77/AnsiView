@@ -28,6 +28,8 @@ public struct TerminalImage: Equatable {
 /// An image placed on the terminal: its top left cell (as an absolute line, counting the
 /// scrollback) and the cells it covers.
 public struct PlacedTerminalImage: Equatable {
+    /// Unique on its terminal: a new picture in the same place is a new id.
+    public let id: Int
     public let image: TerminalImage
     /// Line number counted from the first line ever kept in the scrollback.
     public var line: Int
@@ -44,6 +46,8 @@ public enum TerminalImageLimits {
     public static let maxSide = 4096
     /// Most pixels in one picture (16 MB of RGBA).
     public static let maxPixels = 4 * 1024 * 1024
+    /// Most pictures kept on one terminal.
+    public static let maxImages = 256
     /// Most pixels of all pictures kept on one terminal (screen and scrollback).
     public static let maxTotalPixels = 12 * 1024 * 1024
 }
@@ -105,9 +109,12 @@ public enum SixelDecoder {
             while i < body.count, body[i] == 0x3B, out.count < 8 { i += 1; out.append(number() ?? 0) }
             return out
         }
+        // Repeats can ask for far more writes than pixels; the total is bounded too.
+        var written = 0
         func draw(_ bits: UInt8, count: Int) {
             let n = min(count, TerminalImageLimits.maxSide - x)
-            guard n > 0 else { return }
+            guard n > 0, written < TerminalImageLimits.maxPixels * 4 else { return }
+            written += n * 6
             let top = band * 6
             guard grow(toWidth: x + n, height: top + 6) else { x += n; return }
             if bits != 0 {
