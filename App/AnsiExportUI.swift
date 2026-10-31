@@ -46,6 +46,8 @@ final class ExportOptionsView {
     let hasMusic: Bool
     /// MP4 only: add the music as a sound track. On by default when the art has music.
     let includeMusic = NSButton(checkboxWithTitle: "Include ANSI music", target: nil, action: nil)
+    /// MP4 only: the synthesized dial, handshake and line noise, timed with the playback.
+    let includeModem = NSButton(checkboxWithTitle: "Include modem sound", target: nil, action: nil)
     /// Says which formats carry sound.
     let musicNote = NSTextField(wrappingLabelWithString: "")
     /// Called after the format changes (after the rows are enabled or disabled).
@@ -58,6 +60,9 @@ final class ExportOptionsView {
         self.hasMusic = hasMusic
         includeMusic.state = hasMusic ? .on : .off
         includeMusic.toolTip = MusicPlaybackHelp.export
+        includeModem.state = PlaybackSpeed.modemSounds ? .on : .off
+        includeModem.toolTip = "The video starts with AnsiView's synthesized dial tone and modem handshake over an empty screen, then line noise while the art arrives, as Playback > Modem Sounds does. All of it is generated, no recordings."
+
         musicNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         musicNote.textColor = .secondaryLabelColor
         musicNote.preferredMaxLayoutWidth = 240
@@ -92,6 +97,7 @@ final class ExportOptionsView {
         settings.palette = GIFPalette.allCases[palette.indexOfSelectedItem]
         settings.limit = limit.isEnabled ? Self.limits[limit.indexOfSelectedItem].1 : .none
         settings.includeMusic = hasMusic && kind == .animation(.mp4) && includeMusic.state == .on
+        settings.includeModemSound = kind == .animation(.mp4) && includeModem.state == .on
         return settings
     }
 
@@ -103,9 +109,17 @@ final class ExportOptionsView {
         palette.isEnabled = kind == .animation(.gif)
         limit.isEnabled = !kind.isText
         includeMusic.isEnabled = hasMusic && kind == .animation(.mp4)
+        includeModem.isEnabled = kind == .animation(.mp4)
         musicNote.stringValue = kind == .animation(.mp4)
             ? "The music becomes the video's sound track, timed with the frames."
             : "GIF and WebP have no sound. Choose MP4 Video to keep the music."
+    }
+
+    /// The sound rows: modem sound for animations, then music when the art has it.
+    var soundRows: [[NSView]] {
+        let kinds = Set(self.kinds)
+        guard kinds.contains(.animation(.mp4)) else { return musicRows }
+        return [[NSTextField(labelWithString: "Sound:"), includeModem]] + musicRows
     }
 
     /// The music rows (a checkbox with its (?) and the note), when the art has music.
@@ -185,7 +199,7 @@ enum ExportController {
     private static func save(_ options: ExportOptionsView, rows: [(String, NSPopUpButton)], source: ArtFile,
                              screen: AnsiScreen?, in window: NSWindow, title: String) {
         let panel = NSSavePanel()
-        panel.accessoryView = ExportOptionsView.accessory(rows, extra: options.musicRows)
+        panel.accessoryView = ExportOptionsView.accessory(rows, extra: options.soundRows)
         panel.nameFieldStringValue = baseName(window) + "." + options.kind.fileExtension
         panel.allowedContentTypes = [contentType(options.kind)]
         panel.isExtensionHidden = false

@@ -88,6 +88,9 @@ built on branch `ansiview-2.0-plan-9` (see `docs/superpowers/plans/2026-10-30-an
 47. Background indexing and thumbnailing of very large packs and folders.
 
 ### Output, system integration and formats (plan 10)
+Status: 48 to 51, 53 to 56 and 58 built on branch `ansiview-2.0-plan-10` (see
+`docs/superpowers/plans/2026-10-30-ansiview-2.0-plan-10-output-integration.md`); 52 was done as
+Text to ASCII; 57 (RIPscrip) belongs to the terminal emulation work.
 48. macOS screensaver that plays a folder of art, including animation.
 49. Desktop wallpaper export at the screen's exact resolution (centred or tiled).
 50. Copy as a Discord / Slack ANSI colour code block.

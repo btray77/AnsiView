@@ -26,6 +26,9 @@ settings:
     MARKETING_VERSION: "2.0.0"
     CURRENT_PROJECT_VERSION: "82"
     SWIFT_VERSION: "5.0"
+    # Localization (plan 10 item 56): String Catalogs, filled from the compiler's extraction.
+    SWIFT_EMIT_LOC_STRINGS: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
     DEVELOPMENT_TEAM: ""
@@ -87,6 +90,9 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.graphics-design
+        # AppleScript: render and convert (App/AnsiView.sdef, App/ScriptCommands.swift).
+        NSAppleScriptEnabled: true
+        OSAScriptingDefinition: AnsiView.sdef
         UTImportedTypeDeclarations:
           - UTTypeIdentifier: com.traynham.ansiview.ans
             UTTypeDescription: ANSI Art
@@ -123,6 +129,14 @@ targets:
       - target: AnsiPreview
       - target: AnsiThumbnail
       - target: AnsiSpotlight
+      # Finder Quick Actions (plan 10 item 54): Convert to PNG and Convert to GIF.
+      - target: AnsiConvertPNG
+      - target: AnsiConvertGIF
+      # The screen saver (plan 10 item 48), kept in Resources for File > Install Screen Saver.
+      - target: AnsiSaver
+        embed: true
+        copy:
+          destination: resources
       # Legacy Spotlight importer: macOS 26 does not run the Core Spotlight import extension
       # during indexing (see plan 3 ruling 9), so this is what fills the index.
       - target: AnsiImporter
@@ -219,6 +233,128 @@ targets:
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ImportExtension
           NSExtensionAttributes:
             CSSupportedContentTypes: [com.traynham.ansiview.ans, com.traynham.ansiview.asc]
+  AnsiConvertPNG:
+    type: app-extension
+    platform: macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.ConvertPNG
+    sources:
+      - path: QuickAction
+        excludes: [PNG, GIF]
+      # The Quick Action's localizable name (InfoPlist.xcstrings).
+      - QuickAction/PNG
+      - Shared
+      - App/AnsiExport.swift
+      - App/ArtActions.swift
+    dependencies:
+      - package: AnsiCore
+      - package: libwebp
+    entitlements:
+      path: QuickAction/AnsiConvertPNG.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        # The files Finder hands the action.
+        com.apple.security.files.user-selected.read-only: true
+        # The sandbox does not let the action write beside the art, so results go to Downloads
+        # (plan 10 ruling 9). No network entitlement.
+        com.apple.security.files.downloads.read-write: true
+    info:
+      path: QuickAction/Info-PNG.plist
+      properties:
+        CFBundleDisplayName: Convert to PNG
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AnsiViewQuickActionFormat: png
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).QuickActionHandler
+          NSExtensionAttributes:
+            NSExtensionActivationRule: >-
+              SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $attachment,
+              ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.ans"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.asc"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.apple.macbinary-archive"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.amiga.adf-archive"
+              ).@count >= 1).@count >= 1
+            NSExtensionServiceAllowsFinderPreviewItem: true
+            NSExtensionServiceAllowsTouchBarItem: false
+            NSExtensionServiceFinderPreviewIconName: NSActionTemplate
+            NSExtensionServiceRoleType: NSExtensionServiceRoleTypeEditor
+  AnsiConvertGIF:
+    type: app-extension
+    platform: macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.ConvertGIF
+    sources:
+      - path: QuickAction
+        excludes: [PNG, GIF]
+      # The Quick Action's localizable name (InfoPlist.xcstrings).
+      - QuickAction/GIF
+      - Shared
+      - App/AnsiExport.swift
+      - App/ArtActions.swift
+    dependencies:
+      - package: AnsiCore
+      - package: libwebp
+    entitlements:
+      path: QuickAction/AnsiConvertGIF.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        # The files Finder hands the action.
+        com.apple.security.files.user-selected.read-only: true
+        # The sandbox does not let the action write beside the art, so results go to Downloads
+        # (plan 10 ruling 9). No network entitlement.
+        com.apple.security.files.downloads.read-write: true
+    info:
+      path: QuickAction/Info-GIF.plist
+      properties:
+        CFBundleDisplayName: Convert to GIF
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AnsiViewQuickActionFormat: gif
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).QuickActionHandler
+          NSExtensionAttributes:
+            NSExtensionActivationRule: >-
+              SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $attachment,
+              ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.ans"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.traynham.ansiview.asc"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.apple.macbinary-archive"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.amiga.adf-archive"
+              ).@count >= 1).@count >= 1
+            NSExtensionServiceAllowsFinderPreviewItem: true
+            NSExtensionServiceAllowsTouchBarItem: false
+            NSExtensionServiceFinderPreviewIconName: NSActionTemplate
+            NSExtensionServiceRoleType: NSExtensionServiceRoleTypeEditor
+  AnsiSaver:
+    type: bundle
+    platform: macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.Saver
+        PRODUCT_NAME: AnsiView
+        PRODUCT_MODULE_NAME: AnsiSaver
+        WRAPPER_EXTENSION: saver
+        SKIP_INSTALL: YES
+    sources:
+      - Saver
+      # The same original samples the app ships, played when no folder is chosen.
+      - path: Samples
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: AnsiCore
+    info:
+      path: Saver/Info.plist
+      properties:
+        CFBundleDisplayName: AnsiView
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSPrincipalClass: AnsiSaverView
+        NSHumanReadableCopyright: Copyright 2026 Brad Traynham
   AnsiImporter:
     type: bundle
     platform: macOS
@@ -249,7 +385,7 @@ targets:
   ansirender:
     type: tool
     platform: macOS
-    sources: [Tool, Shared, App/AnsiExport.swift, App/BatchExport.swift, App/ArtCollection.swift, App/ThumbnailStore.swift]
+    sources: [Tool, Shared, App/AnsiExport.swift, App/BatchExport.swift, App/ArtCollection.swift, App/ThumbnailStore.swift, App/Wallpaper.swift]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.traynham.ansirender

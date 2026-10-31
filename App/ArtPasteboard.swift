@@ -41,6 +41,17 @@ enum ArtPasteboard {
         }
     }
 
+    /// After a Discord copy: a sheet on `window` when the block is longer than one Discord message.
+    static func warnIfTooLongForDiscord(_ clip: CellClipboard, kind: CellClipboard.Kind, window: NSWindow?) {
+        guard kind == .discord, let window else { return }
+        let count = ChatCodeBlock.characterCount(ChatCodeBlock.discord(clip.screen))
+        guard count > ChatCodeBlock.discordLimit else { return }
+        let alert = NSAlert()
+        alert.messageText = "Copied, but too long for one Discord message"
+        alert.informativeText = "The code block is \(count.formatted()) characters; Discord takes \(ChatCodeBlock.discordLimit.formatted()) (4,000 with Nitro). Select a smaller part of the art and copy again. Colour codes count as characters."
+        alert.beginSheetModal(for: window)
+    }
+
     /// The Copy As submenu for a context menu: Text, ANSI and Image, sent to `target` (the editor
     /// canvas or the viewer canvas, which both answer these actions).
     static func copyAsMenu(target: AnyObject) -> NSMenu {
@@ -49,6 +60,8 @@ enum ArtPasteboard {
             ("Text", NSSelectorFromString("copyAsText:")),
             ("ANSI (escape codes, for terminals)", NSSelectorFromString("copyAsANSI:")),
             ("Image", NSSelectorFromString("copyAsImage:")),
+            ("Discord (ANSI colour code block)", NSSelectorFromString("copyAsDiscord:")),
+            ("Slack (plain code block)", NSSelectorFromString("copyAsSlack:")),
         ]
         for (title, action) in items {
             menu.addItem(withTitle: title, action: action, keyEquivalent: "").target = target

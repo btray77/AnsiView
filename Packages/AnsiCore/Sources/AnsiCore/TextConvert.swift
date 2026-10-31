@@ -105,7 +105,7 @@ public enum TextConvert {
     ]
 
     /// Rows without trailing empty rows.
-    static func trimmedRows(_ screen: AnsiScreen) -> [[AnsiCell]] {
+    public static func trimmedRows(_ screen: AnsiScreen) -> [[AnsiCell]] {
         var rows = screen.rows
         let blank = AnsiCell()
         while let last = rows.last, last.prefix(screen.columns).allSatisfy({ isBlank($0, blank) }) { rows.removeLast() }

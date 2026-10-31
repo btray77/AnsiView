@@ -13,6 +13,7 @@ import UniformTypeIdentifiers
 // ansirender --export <format> [options] <input> <output>
 //   formats: png jpeg webp gif awebp mp4 html ansi ansi256 text utf8
 //   options: --scale N --baud N --fps N --palette auto|vga|system --max-bytes N --max-size WxH
+//            --with-music --with-modem   (MP4: ANSI music; the synthesized modem dial, handshake and line noise)
 // ansirender --batch <format> [options] [--overwrite] <output-folder> <input>...
 //   inputs are art files, folders or .zip art packs; exits 1 if any piece failed
 // ansirender --roundtrip <input>...   (checks that ANSI conversion reads back as the same cells)
@@ -27,6 +28,8 @@ import UniformTypeIdentifiers
 // ansirender --list-fonts <file>...
 // ansirender --figlet-gallery "TEXT" [--font-dir <folder>]   (every bundled font, headed by its name)
 // ansirender --export-original-fonts <folder>   (writes AnsiView's original fonts as .tdf and .flf)
+// ansirender --sixel|--kitty [--scale N] <input>   (the finished art as sixel or kitty graphics on stdout)
+// ansirender --wallpaper WxH centred|tiled [--scale N] <input> <output.png>   (a desktop picture of exactly WxH pixels)
 // ansirender --version
 let args = CommandLine.arguments
 func fail(_ message: String, _ code: Int32) -> Never {
@@ -207,6 +210,10 @@ func parseOptions(_ arguments: ArraySlice<String>, kind: ExportKind) -> CommandO
             options.settings.limit = .maxPixels(width: parts[0], height: parts[1])
         case "--overwrite":
             options.overwrite = true
+        case "--with-modem":
+            options.settings.includeModemSound = true
+        case "--with-music":
+            options.settings.includeMusic = true
         default:
             fail("unknown option \(argument)", 2)
         }
@@ -379,6 +386,59 @@ if args[1] == "--music" || args[1] == "--music-wav" || args[1] == "--music-midi"
     do { try data.write(to: URL(fileURLWithPath: output)) } catch { fail("could not write \(output)", 1) }
     summary = "wrote \(output): \(data.count) bytes, " + summary
     print(summary)
+    exit(0)
+}
+
+if args[1] == "--sixel" || args[1] == "--kitty" {
+    var rest = Array(args.dropFirst(2))
+    var scale = 1
+    if let index = rest.firstIndex(of: "--scale") {
+        guard index + 1 < rest.count, let n = Int(rest[index + 1]), (1...8).contains(n) else { fail("--scale takes 1 to 8", 2) }
+        scale = n
+        rest.removeSubrange(index...(index + 1))
+    }
+    guard rest.count == 1 else { fail("usage: ansirender \(args[1]) [--scale N] <input>", 2) }
+    var screen = AnsiAnalysis(loadArt(rest[0])).finalScreen
+    screen.rows = TextConvert.trimmedRows(screen)
+    if screen.rows.isEmpty { screen.rows = [Array(repeating: AnsiCell(), count: screen.columns)] }
+    let text: String
+    if args[1] == "--sixel" {
+        guard let made = TerminalGraphics.sixelImage(screen, scale: scale) else { fail("render failed", 1) }
+        text = TerminalGraphics.sixel(made.image, palette: made.palette)
+    } else {
+        guard let image = AnsiRenderer.render(screen, options: RenderOptions(for: screen, scale: scale))?.image,
+              let png = CellClipboard.encode(image, type: CellClipboard.pngType, properties: [:])
+        else { fail("render failed", 1) }
+        text = TerminalGraphics.kitty(png: png)
+    }
+    FileHandle.standardOutput.write(Data((text + "\n").utf8))
+    exit(0)
+}
+
+if args[1] == "--wallpaper" {
+    var rest = Array(args.dropFirst(2))
+    var scale = 1
+    if let index = rest.firstIndex(of: "--scale") {
+        guard index + 1 < rest.count, let n = Int(rest[index + 1]), (1...8).contains(n) else { fail("--scale takes 1 to 8", 2) }
+        scale = n
+        rest.removeSubrange(index...(index + 1))
+    }
+    let usage = "usage: ansirender --wallpaper WxH centred|tiled [--scale N] <input> <output.png>"
+    guard rest.count == 4, let size = Wallpaper.parseSize(rest[0]) else { fail(usage, 2) }
+    let mode: WallpaperMode
+    switch rest[1] {
+    case "centred", "centered", "center", "centre": mode = .centred
+    case "tiled", "tile": mode = .tiled
+    default: fail(usage, 2)
+    }
+    let screen = AnsiAnalysis(loadArt(rest[2])).finalScreen
+    do {
+        let image = try WallpaperRenderer.image(screen, width: size.0, height: size.1, mode: mode, scale: scale)
+        try WallpaperRenderer.writePNG(image, to: URL(fileURLWithPath: rest[3]))
+        print("wrote \(rest[3]): \(image.width)x\(image.height) px, \(mode.rawValue)")
+    } catch {
+        fail("\(rest[2]): \(error.localizedDescription)", 1)
+    }
     exit(0)
 }
 

@@ -31,16 +31,20 @@ extension AnsiCanvasView: NSMenuItemValidation {
             NSSound.beep()
             return
         }
+        ArtPasteboard.warnIfTooLongForDiscord(clip, kind: kind, window: window)
     }
 
     @objc func copy(_ sender: Any?) { copySelection(.all) }
     @objc func copyAsText(_ sender: Any?) { copySelection(.text) }
     @objc func copyAsANSI(_ sender: Any?) { copySelection(.ansi) }
     @objc func copyAsImage(_ sender: Any?) { copySelection(.image) }
+    @objc func copyAsDiscord(_ sender: Any?) { copySelection(.discord) }
+    @objc func copyAsSlack(_ sender: Any?) { copySelection(.slack) }
 
     public func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(copy(_:)), #selector(copyAsText(_:)), #selector(copyAsANSI(_:)), #selector(copyAsImage(_:)):
+        case #selector(copy(_:)), #selector(copyAsText(_:)), #selector(copyAsANSI(_:)), #selector(copyAsImage(_:)),
+             #selector(copyAsDiscord(_:)), #selector(copyAsSlack(_:)):
             return player?.selection != nil
         case #selector(selectAll(_:)):
             return player?.allowsSelection == true

@@ -1,0 +1,42 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@ baud" : {
+
+    },
+    "%@ seconds" : {
+
+    },
+    "Art:" : {
+
+    },
+    "Choose Folder..." : {
+
+    },
+    "Hold each piece:" : {
+
+    },
+    "Instant" : {
+
+    },
+    "OK" : {
+
+    },
+    "Play This Folder" : {
+
+    },
+    "Speed:" : {
+
+    },
+    "The samples inside the screen saver" : {
+
+    },
+    "Use Samples" : {
+
+    },
+    "macOS runs screen savers in a sandbox, so a folder outside it may not be readable; the samples inside the screen saver play instead." : {
+
+    }
+  },
+  "version" : "1.0"
+}

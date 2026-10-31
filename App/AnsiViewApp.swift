@@ -81,6 +81,8 @@ struct AnsiViewApp: App {
     @AppStorage(SlideshowSettings.dwellKey, store: PlaybackSpeed.defaults)
     private var dwell = SlideshowSettings.defaultDwell
     @AppStorage(ViewerTools.minimapKey) private var showMinimap = true
+    @AppStorage(ArtOfTheDaySettings.showKey) private var showArtOfTheDay = false
+    @StateObject private var artOfTheDay = ArtOfTheDayModel()
     @ObservedObject private var palettes = PaletteLibrary.shared
     /// The focused art window's speed; speed commands change that file's remembered speed.
     @FocusedObject private var focusedSpeed: PlayerSpeed?
@@ -156,6 +158,8 @@ struct AnsiViewApp: App {
                         })
                 }
                 Button("Connect to BBS...") { DialingDirectoryWindowController.show() }
+                Button("Install Screen Saver...") { ScreenSaverInstall.run() }
+                    .help("Hands AnsiView's screen saver to macOS, which asks before adding it to System Settings > Screen Saver.")
                 Menu("Open Sample") {
                     ForEach(SampleArt.all(), id: \.url) { sample in
                         Button(sample.title) { SampleArt.open(sample) }
@@ -182,6 +186,10 @@ struct AnsiViewApp: App {
                         .keyboardShortcut("c", modifiers: [.command, .option, .shift])
                     Button("Image") { send(#selector(EditorCanvasView.copyAsImage(_:))) }
                         .keyboardShortcut("c", modifiers: [.command, .option])
+                    Button("Discord (ANSI colour code block)") { send(#selector(EditorCanvasView.copyAsDiscord(_:))) }
+                        .help("A ```ansi code block in the 8 colours Discord shows (bold for bright). Discord's phone apps show it without colour.")
+                    Button("Slack (plain code block)") { send(#selector(EditorCanvasView.copyAsSlack(_:))) }
+                        .help("Slack code blocks have no colour, so this is the art's characters in a ``` block.")
                 }
             }
             CommandGroup(after: .importExport) {
@@ -191,6 +199,8 @@ struct AnsiViewApp: App {
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                 Button("Export Text...") { send(#selector(AnsiCanvasView.exportText(_:))) }
                     .keyboardShortcut("e", modifiers: [.command, .option, .shift])
+                Button("Export Wallpaper...") { send(#selector(AnsiCanvasView.exportWallpaper(_:))) }
+                    .help("A PNG the exact pixel size of a display, the art centred or tiled; it can be set as the desktop picture.")
                 Button("Batch Export...") { BatchExportController.start() }
                     .keyboardShortcut("e", modifiers: [.command, .option])
                 Divider()
@@ -230,6 +240,8 @@ struct AnsiViewApp: App {
                 Button("Show or Hide Pack Info") { send(#selector(GalleryContainerViewController.togglePackInfo(_:))) }
                     .keyboardShortcut("i", modifiers: [.command, .option])
                     .help("In a gallery: the pack's FILE_ID.DIZ and NFO files beside the pieces.")
+                Toggle("Show Art of the Day in Menu Bar", isOn: $showArtOfTheDay)
+                    .help("A menu bar item showing one piece from your library each day (16colo.rs can be added in its window; off by default).")
                 Toggle("Show Minimap", isOn: $showMinimap)
                     .help("A strip at the right of tall art showing the whole piece; click or drag in it to jump.")
                 Menu("Palette") {
@@ -382,6 +394,10 @@ struct AnsiViewApp: App {
                 }
             }
         }
+        MenuBarExtra("Art of the Day", systemImage: "photo.artframe", isInserted: $showArtOfTheDay) {
+            ArtOfTheDayView(model: artOfTheDay)
+        }
+        .menuBarExtraStyle(.window)
     }
 }
 

@@ -27,6 +27,14 @@ enum AnsiFrameSequence {
     /// At baud 0 the music plays once from the start.
     static func make(_ source: ArtFile, baud: Int, fps: Double = 15, music: Bool)
         -> (frames: [AnsiFrame], music: [ScheduledMusic]) {
+        let made = timed(source, baud: baud, fps: fps, music: music)
+        return (made.frames, made.music)
+    }
+
+    /// As `make`, with the seconds the bytes took to arrive (0 at instant speed), which is how
+    /// long the modem's line noise plays.
+    static func timed(_ source: ArtFile, baud: Int, fps: Double = 15, music: Bool)
+        -> (frames: [AnsiFrame], music: [ScheduledMusic], drawSeconds: Double) {
         let analysis = AnsiAnalysis(source)
         let rows = analysis.canvasRows
         var frames: [AnsiFrame] = []
@@ -87,7 +95,23 @@ enum AnsiFrameSequence {
         } else {
             frames.append(AnsiFrame(screen: final, duration: hold))
         }
-        return (frames, played)
+        return (frames, played, elapsed)
+    }
+
+    /// Frames and sound for an MP4 with the modem sound (plan 10 ruling 5): the handshake over the
+    /// empty screen, line noise while the art arrives, silence for the hold. ANSI music, when
+    /// asked for, starts after the handshake as it does in the viewer.
+    static func withModemSound(_ source: ArtFile, baud: Int, fps: Double = 15, music: Bool)
+        -> (frames: [AnsiFrame], audio: [Float]) {
+        let made = timed(source, baud: baud, fps: fps, music: music)
+        let lead = AnsiScreen(columns: source.columns,
+                              rows: Array(repeating: Array(repeating: AnsiCell(), count: source.columns),
+                                          count: max(1, AnsiAnalysis(source).canvasRows)))
+        let frames = [AnsiFrame(screen: lead, duration: ModemSound.handshakeSeconds)] + made.frames
+        let total = frames.reduce(0) { $0 + $1.duration }
+        let modem = ModemSoundTrack.samples(drawSeconds: baud > 0 ? made.drawSeconds : 0, totalSeconds: total)
+        let tunes = ModemSoundTrack.delayed(audio(made.music, frames: made.frames), by: ModemSound.handshakeSeconds)
+        return (frames, ModemSoundTrack.mix(modem, tunes))
     }
 
     /// The music of an export as mono 44.1 kHz samples from the video's start, as long as the
@@ -189,6 +213,8 @@ struct ExportSettings {
     var limit: SizeLimit = .none
     /// MP4 only: the file's ANSI music as a sound track (GIF and WebP have no sound).
     var includeMusic = false
+    /// MP4 only: the synthesized dial, handshake and line noise, timed with the playback.
+    var includeModemSound = false
 }
 
 /// What an export produced.
@@ -232,6 +258,13 @@ enum AnsiExporter {
                 try writeStill(still, format: format, scale: attempt.scale, to: destination)
                 progress(1)
             case .animation(let format):
+                if settings.includeModemSound, format == .mp4 {
+                    let made = AnsiFrameSequence.withModemSound(source, baud: settings.baud, fps: attempt.fps,
+                                                                music: settings.includeMusic)
+                    try writeAnimation(made.frames, format: format, scale: attempt.scale, palette: settings.palette,
+                                       audio: made.audio, to: destination, progress: progress, isCancelled: isCancelled)
+                    return
+                }
                 let made = AnsiFrameSequence.make(source, baud: settings.baud, fps: attempt.fps,
                                                   music: settings.includeMusic && format == .mp4)
                 try writeAnimation(made.frames, format: format, scale: attempt.scale, palette: settings.palette,
@@ -607,6 +640,9 @@ enum AnsiExporter {
             Thread.sleep(forTimeInterval: 0.005)
         }
         var milliseconds: Int64 = 0
+        // Timestamps come from the running total, not from rounded durations added up, so a long
+        // video does not drift from its sound track.
+        var elapsedSeconds = 0.0
         var lastBuffer: CVPixelBuffer?
         do {
             for (index, frame) in frames.enumerated() {
@@ -635,7 +671,8 @@ enum AnsiExporter {
                     throw AnsiExportError.encodeFailed(writer.error?.localizedDescription ?? "MP4 frame \(index)")
                 }
                 lastBuffer = buffer
-                milliseconds += max(1, Int64((frame.duration * 1000).rounded()))
+                elapsedSeconds += frame.duration
+                milliseconds = max(milliseconds + 1, Int64((elapsedSeconds * 1000).rounded()))
                 progress(Double(index + 1) / Double(frames.count))
             }
             // With a sound track the writer ends the video at its last sample, cutting the final

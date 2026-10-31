@@ -207,7 +207,7 @@ final class AnsiPlayerViewController: NSViewController {
         didSet {
             guard musicMuted != oldValue else { return }
             musicSettingsChanged()
-            if isViewLoaded, hasMusicPlayback { showHUD(musicMuted ? "Music muted in this window" : "Music on") }
+            if isViewLoaded, hasMusicPlayback { showHUD(musicMuted ? String(localized: "Music muted in this window") : String(localized: "Music on")) }
         }
     }
     /// The clock music is timed by (a harness may replace it).
@@ -577,7 +577,7 @@ final class AnsiPlayerViewController: NSViewController {
             onZoomChange?(zoom)
             guard isViewLoaded else { return }
             fitToWindow()
-            showHUD("Zoom: \(zoom.label)")
+            showHUD(String(localized: "Zoom: \(zoom.label)"))
         }
     }
 
@@ -617,12 +617,12 @@ final class AnsiPlayerViewController: NSViewController {
         Logger(subsystem: "com.traynham.ansiview", category: "playback")
             .info("Playback started at \(self.speed.baud, privacy: .public) baud")
         guard soundsOn else {
-            showHUD("\(PlaybackSpeed.label(speed.baud))  \u{00B7}  click to skip")
+            showHUD(String(localized: "\(PlaybackSpeed.label(speed.baud))  \u{00B7}  click to skip"))
             startTimer()
             return
         }
         // Dial and handshake first; the art arrives after CONNECT.
-        showHUD("Dialing...  \u{00B7}  click to skip")
+        showHUD(String(localized: "Dialing...  \u{00B7}  click to skip"))
         setSound(.connecting)
         let timer = Timer(timeInterval: ModemSound.handshakeSeconds, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.connected() }
@@ -756,7 +756,7 @@ final class AnsiPlayerViewController: NSViewController {
             stopPlayback()
             pausedAtEnd = terminal.isFinished && !screenIsFinal
             perform(musicScheduler.pause(at: clock()))
-            showHUD("Paused")
+            showHUD(String(localized: "Paused"))
         } else if isPaused {
             showHUD(PlaybackSpeed.label(speed.baud))
             perform(musicScheduler.resume(at: clock()))
@@ -827,7 +827,7 @@ final class AnsiPlayerViewController: NSViewController {
             stopPlayback()
             isHolding = true
             showTerminal()
-            showHUD("Click to continue")
+            showHUD(String(localized: "Click to continue"))
         } else if terminal.isFinished {
             skipToEnd(stoppingMusic: false)
         } else {

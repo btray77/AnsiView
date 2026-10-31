@@ -1,0 +1,30 @@
+{
+  "sourceLanguage": "en",
+  "version": "1.0",
+  "strings": {
+    "CFBundleDisplayName": {
+      "comment": "The Quick Action's name in Finder's Quick Actions menu.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Convert to PNG"
+          }
+        }
+      }
+    },
+    "CFBundleName": {
+      "comment": "Bundle name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AnsiConvertPNG"
+          }
+        }
+      }
+    }
+  }
+}

@@ -212,6 +212,11 @@ final class SixteenColorsClient {
         try SixteenColors.decodeYears(try await json(SixteenColors.yearsURL()))
     }
 
+    /// One page of a year's packs (one request; art of the day uses the first page only).
+    func packPage(year: Int, page: Int) async throws -> SixteenColors.PackPage {
+        try SixteenColors.decodePackPage(try await json(SixteenColors.packsURL(year: year, page: page)))
+    }
+
     /// Every pack of a year (all pages).
     func packs(year: Int) async throws -> [SixteenColors.Pack] {
         var packs: [SixteenColors.Pack] = []
