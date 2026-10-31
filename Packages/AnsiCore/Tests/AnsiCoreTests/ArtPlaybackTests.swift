@@ -52,6 +52,34 @@ import Testing
         #expect(playback.displayedScreen.rows.count == TerminalViewport.rows)
     }
 
+    /// Display link ticks carry fractions of a byte: 30 ticks of 1/30 s at 300 baud are 30 bytes.
+    @Test func fractionalBytesCarry() {
+        var playback = ArtPlayback(animated)
+        playback.play(baud: 300, at: 0)
+        for tick in 1...30 { _ = playback.tick(at: Double(tick) / 30, baud: 300) }
+        #expect(playback.position == 30)
+    }
+
+    /// The 25 row window follows the cursor down tall art.
+    @Test func windowFollowsCursor() {
+        var playback = ArtPlayback(tall)
+        playback.play(baud: 2400, at: 0)
+        // "line N\r\n" is 8 or 9 bytes: 520 bytes reach about line 55.
+        _ = playback.tick(at: 520.0 / 240, baud: 2400)
+        let text = ArtText.plainText(playback.displayedScreen)
+        #expect(text.contains("line 50"))
+        #expect(!text.contains("line 20\n"))
+    }
+
+    /// Switching to Instant mid playback finishes it.
+    @Test func instantMidPlaybackFinishes() {
+        var playback = ArtPlayback(animated)
+        playback.play(baud: 2400, at: 0)
+        _ = playback.tick(at: 0.5, baud: 2400)
+        _ = playback.tick(at: 0.6, baud: 0)
+        #expect(playback.state == .finished)
+    }
+
     @Test func pauseStopsAdvance() {
         var playback = ArtPlayback(animated)
         playback.play(baud: 1200, at: 0)

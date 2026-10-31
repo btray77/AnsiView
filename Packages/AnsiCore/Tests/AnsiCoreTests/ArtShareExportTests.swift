@@ -51,6 +51,30 @@ import Testing
         #expect(frames.last?.screen.rows == ArtPlayback(file).finalScreen.rows)
     }
 
+    /// A long stream is sampled less often so a share GIF stays bounded (review finding 3):
+    /// About 6,100 bytes at 300 baud is over 200 s, more than 2,000 samples at 10 a second.
+    @Test func longStreamIsCapped() throws {
+        let line = String(repeating: "A", count: 79) + "\r\n"
+        let body = (0..<75).map { i in (i % 20 == 19 ? "\u{1B}[2J" : "") + line }.joined()
+        let file = art(bytes(body))
+        let drawSeconds = Double(file.stream.count) * 10 / 300
+        #expect(drawSeconds > 200)
+        let frames = ArtShareExport.frames(file, baud: 300)
+        #expect(frames.count <= ArtShareExport.maxFrames + 1)
+        let total = frames.reduce(0) { $0 + $1.duration }
+        let step = drawSeconds / Double(ArtShareExport.maxFrames)
+        #expect(abs(total - (drawSeconds + ArtShareExport.holdSeconds)) <= step + 1e-6)
+        // The GIF holds the same frames (gifFrameCountMatchesFrames); encoding 600 frames in a debug
+        // build takes about a minute, so it is measured in release by a harness instead.
+    }
+
+    /// The streamed GIF has the same frames and timing as `frames` describes.
+    @Test func gifFrameCountMatchesFrames() throws {
+        let frames = ArtShareExport.frames(animated, baud: 2400)
+        let data = try #require(ArtShareExport.gif(animated, baud: 2400))
+        #expect(CGImageSourceGetCount(try source(data)) == frames.count)
+    }
+
     @Test func fileNameReplacesExtension() {
         #expect(ArtShareExport.fileName(for: "WELCOME.ANS", extension: "png") == "WELCOME.png")
         #expect(ArtShareExport.fileName(for: "", extension: "gif") == "AnsiView.gif")

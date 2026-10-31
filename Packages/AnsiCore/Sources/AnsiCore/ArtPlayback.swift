@@ -81,7 +81,8 @@ public struct ArtPlayback {
         }
         byteCredit += max(0, now - lastTime) * Double(baud) / 10
         lastTime = now
-        let count = Int(byteCredit)
+        // A whole byte that floating point sums leave a hair short of 1 still counts.
+        let count = Int(byteCredit + 1e-9)
         guard count > 0 else { return false }
         byteCredit -= Double(count)
         terminal.advance(byteCount: count)
