@@ -136,6 +136,7 @@ struct TDFFontEditorTests {
         block.rows[0].cells.append(TDFCell(code: 0x26))
         let (stored, notes) = TDFStorage.storable(block, type: .block)
         #expect(stored.rows[0].cells.map(\.code) == [0x41, 0x26, 0x20, 0x26, 0x20])
+        #expect(stored.width == 5)  // review M6: the width byte follows the added space
         #expect(stored.rows[1].cells.map(\.code) == [0x42, 0x26])
         #expect(notes.count == 2)
         let font = TDFFont(name: "Fix", type: .block, spacing: 1, glyphs: [65: stored])
@@ -318,6 +319,8 @@ struct TDFFontEditorTests {
         let saved = try model.fileData()
         #expect(saved.notes.count == 1)
         #expect(saved.notes[0].contains("Z"))
+        // Review M8: nothing changes until the file is written (a failed write keeps the model).
+        #expect(model.fonts[0].glyphs[UInt8(ascii: "Z")] == odd.glyphs[UInt8(ascii: "Z")])
         model.markSaved()
         #expect(!model.isModified)
         #expect(try TDFFile.parse(saved.data).fonts == model.fonts)
@@ -370,7 +373,16 @@ struct TDFFontEditorTests {
             let before = model.fonts
             let saved = try model.fileData()
             notes += saved.notes.count
-            if try TDFFile.parse(saved.data).fonts == model.fonts, saved.notes.isEmpty == (before == model.fonts) { filesSame += 1 }
+            model.markSaved()
+            let reread = try TDFFile.parse(saved.data).fonts
+            if reread == model.fonts, saved.notes.isEmpty == (before == model.fonts) {
+                filesSame += 1
+            } else {
+                let differing = zip(before, reread).filter { $0 != $1 }.map { a, b in
+                    "\(a.name)|\(b.name) glyphs \(a.glyphs.count)/\(b.glyphs.count) changed \(a.glyphs.keys.filter { a.glyphs[$0] != b.glyphs[$0] }.count)"
+                }
+                print("TDFEDIT DIFF \(url.lastPathComponent) fonts \(before.count)/\(reread.count) \(differing.prefix(3))")
+            }
         }
         print("TDFEDIT CORPUS files=\(files) fonts=\(fonts) glyphs=\(glyphs) canvasFailures=\(canvasFailures) saveNotes=\(notes) reopenEqual=\(filesSame)")
         #expect(canvasFailures == 0)

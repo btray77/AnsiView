@@ -157,6 +157,8 @@ public enum TDFStorage {
             } else if !glyph.rows[y].descender, cells.last?.code == 0x26, cells.count < TDFFile.maxRowCells {
                 notes.append("row \(y + 1): a space was added after the & at the end of the row (so it is not read as a descender mark)")
                 cells.append(TDFCell(code: 0x20))
+                // The width byte covers the added space (review M6); other widths stay as stored.
+                if cells.count > Int(glyph.width) { glyph.width = UInt8(min(255, cells.count)) }
             }
             glyph.rows[y].cells = cells
         }
@@ -243,6 +245,7 @@ public final class TDFFontEditorModel {
     private var sessionStart: (glyph: TDFGlyph?, state: State)?
     private var sessionRegistered = false
     private var sessionHeight = 0
+    private var sessionSize = (width: 6, height: 4)
 
     private struct State {
         var fonts: [TDFFont]
@@ -392,7 +395,8 @@ public final class TDFFontEditorModel {
         editingCode = code
         sessionStart = (glyph(code), state)
         sessionRegistered = false
-        let canvas = TDFGlyphCanvas.canvas(glyph(code), type: font.type, size: TDFGlyphCanvas.newGlyphSize(for: font))
+        sessionSize = TDFGlyphCanvas.newGlyphSize(for: font)
+        let canvas = TDFGlyphCanvas.canvas(glyph(code), type: font.type, size: sessionSize)
         sessionHeight = canvas.height
         return canvas
     }
@@ -411,8 +415,7 @@ public final class TDFFontEditorModel {
         if canvas.columns > maxColumns || canvas.height > maxRows {
             canvas.resize(columns: min(canvas.columns, maxColumns), height: min(canvas.height, maxRows))
         }
-        let size = TDFGlyphCanvas.newGlyphSize(for: font)
-        let updated = TDFGlyphCanvas.edited(canvas, type: font.type, original: start.glyph, size: size) ?? start.glyph
+        let updated = TDFGlyphCanvas.edited(canvas, type: font.type, original: start.glyph, size: sessionSize) ?? start.glyph
         guard updated != glyph(code) else { return }
         fonts[selectedFont].glyphs[code] = updated
         revision = updated == start.glyph ? start.state.revision : newRevision()
@@ -431,8 +434,11 @@ public final class TDFFontEditorModel {
 
     // MARK: Files
 
-    /// The collection as a TDF file. The model is made storable first (ruling 4), so the file
-    /// reads back as exactly the fonts the model then holds; `notes` say what changed.
+    /// The fonts the last `fileData()` will read back as; adopted by `markSaved()`.
+    private var pendingSaved: [TDFFont]?
+
+    /// The collection as a TDF file, made storable first (ruling 4); `notes` say what changed.
+    /// The model is not changed until `markSaved()` (the write may fail, review M8).
     public func fileData() throws -> (data: Data, notes: [String]) {
         var notes: [String] = []
         var stored: [TDFFont] = []
@@ -442,17 +448,18 @@ public final class TDFFontEditorModel {
             notes += fontNotes
         }
         let data = try TDFFile.write(stored)
-        let readBack = try TDFFile.parse(data).fonts
-        if readBack != fonts {
-            fonts = readBack
-            if let code = editingCode { sessionStart?.glyph = glyph(code) }
-            onChange?()
-        }
+        pendingSaved = try TDFFile.parse(data).fonts
         return (data, notes)
     }
 
-    /// The fonts as they are now have been saved.
+    /// The file from the last `fileData()` was written: the model takes the fonts as the file
+    /// holds them, so re-opening gives the same fonts, and the changes count as saved.
     public func markSaved() {
+        if let saved = pendingSaved, saved != fonts {
+            fonts = saved
+            if let code = editingCode { sessionStart?.glyph = glyph(code) }
+        }
+        pendingSaved = nil
         savedRevision = revision
         onChange?()
     }

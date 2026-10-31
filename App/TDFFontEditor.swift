@@ -26,6 +26,7 @@ final class TDFFontEditorWindowController: NSWindowController, NSWindowDelegate 
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.contentMinSize = NSSize(width: 1100, height: 760)
+        window.tabbingMode = .disallowed
         window.contentViewController = viewController
         window.setContentSize(NSSize(width: 1340, height: 900))
         super.init(window: window)
@@ -67,7 +68,9 @@ final class TDFFontEditorWindowController: NSWindowController, NSWindowDelegate 
     @discardableResult
     static func open(url: URL, select index: Int) -> TDFFontEditorWindowController? {
         if let existing = Self.open.first(where: { $0.fileURL?.standardizedFileURL == url.standardizedFileURL }) {
-            existing.model.selectFont(index)
+            existing.viewController.commitGlyph()
+            existing.model.selectFont(min(max(0, index), existing.model.fonts.count - 1))
+            existing.viewController.reopenGlyph()
             existing.showWindow(nil)
             return existing
         }
@@ -138,6 +141,7 @@ final class TDFFontEditorWindowController: NSWindowController, NSWindowDelegate 
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        viewController.commitGlyph()  // a floating paste is a change too (review M9)
         guard model.isModified else { return true }
         switch askToSave("Save changes to \"\(fileURL?.lastPathComponent ?? untitledName)\"?") {
         case .save: return save()
@@ -173,6 +177,7 @@ final class TDFFontEditorWindowController: NSWindowController, NSWindowDelegate 
 
     /// Quitting asks about every font editor with unsaved changes.
     static func canTerminate() -> Bool {
+        for controller in open { controller.viewController.commitGlyph() }
         for controller in open where controller.model.isModified {
             switch controller.askToSave("Save changes to \"\(controller.fileURL?.lastPathComponent ?? controller.untitledName)\" before quitting?") {
             case .save: if !controller.save() { return false }
@@ -234,7 +239,8 @@ final class TDFFontEditorWindowController: NSWindowController, NSWindowDelegate 
                 Self.tell("Saved, with \(notes.count) change\(notes.count == 1 ? "" : "s") a TheDraw font file needs",
                           notes.prefix(8).joined(separator: "\n") + (notes.count > 8 ? "\n...and \(notes.count - 8) more." : ""))
             }
-            viewController.reopenGlyph()
+            // The canvas (and its undo) stays unless saving had to change the fonts (review I3).
+            if !notes.isEmpty { viewController.reopenGlyph() }
             return true
         } catch {
             Self.tell("The font could not be saved", error.localizedDescription)
@@ -646,13 +652,25 @@ final class TDFFontEditorViewController: NSViewController, NSTableViewDataSource
     // MARK: Glyph editing (rulings 2, 3, 7)
 
     /// Shows `code` on the editor canvas (the ANSI editor with all its tools).
+    /// The keyboard stays where it is (the grid, a field) unless it was on the old canvas, and
+    /// the tool, colours, brush and character set carry over (review I2, I3).
     func openGlyph(_ code: UInt8) {
         commitGlyph()
         grid.selected = code
+        let old = glyphEditor
+        let focusCanvas = old == nil || view.window?.firstResponder === old?.canvasView || view.window?.firstResponder == nil
         let canvas = model.beginEditing(code)
         let editor = CanvasEditor(canvas: canvas)
         if model.font.type == .color { editor.setIceColors(true) }
-        if model.font.type == .outline { editor.brushCharacter = UInt8(ascii: "A") }
+        if let previous = old?.editor {
+            editor.setForeground(previous.foreground)
+            editor.setBackground(previous.background)
+            editor.blockSet = previous.blockSet
+            editor.insertMode = previous.insertMode
+            if previousType == model.font.type { editor.brushCharacter = previous.brushCharacter }
+        }
+        if previousType != model.font.type, model.font.type == .outline { editor.brushCharacter = UInt8(ascii: "A") }
+        previousType = model.font.type
         let controller = EditorViewController(editor: editor, name: "Glyph")
         glyphEditor?.closePanels()
         glyphEditor?.view.removeFromSuperview()
@@ -667,6 +685,7 @@ final class TDFFontEditorViewController: NSViewController, NSTableViewDataSource
             editorView.topAnchor.constraint(equalTo: editorHost.topAnchor),
             editorView.bottomAnchor.constraint(equalTo: editorHost.bottomAnchor),
         ])
+        if let tool = old?.canvasView.tool { controller.canvasView.tool = tool }
         controller.canvasView.zoom = canvas.columns <= 16 && canvas.height <= 8 ? 4 : 3
         controller.canvasView.showGrid = true
         controller.editorChanged()
@@ -677,8 +696,11 @@ final class TDFFontEditorViewController: NSViewController, NSTableViewDataSource
         glyphEditor = controller
         reloadFonts()
         refreshPreview()
-        view.window?.makeFirstResponder(controller.canvasView)
+        if focusCanvas { view.window?.makeFirstResponder(controller.canvasView) }
     }
+
+    /// The font type of the last open glyph (the brush carries over only within a type).
+    private var previousType: TDFFontType?
 
     /// Hands the canvas's last change to the model (a floating block is placed first).
     func commitGlyph() {
@@ -897,7 +919,14 @@ final class TDFGlyphGridView: NSView {
     enum Command { case copy, paste, clear }
     static let columns = 10
     static let tile = NSSize(width: 42, height: 40)
-    var font = TDFFont(name: "", type: .color, spacing: 0, glyphs: [:]) { didSet { if font != oldValue { needsDisplay = true; rebuildTips() } } }
+    var font = TDFFont(name: "", type: .color, spacing: 0, glyphs: [:]) {
+        didSet {
+            guard font != oldValue else { return }
+            if font.type != oldValue.type { thumbnails.removeAll() }  // review M10
+            needsDisplay = true
+            rebuildTips()
+        }
+    }
     var outlineStyle = 0 { didSet { if outlineStyle != oldValue { thumbnails.removeAll(); needsDisplay = true } } }
     var selected: UInt8 = 65 { didSet { if selected != oldValue { needsDisplay = true } } }
     var onSelect: ((UInt8) -> Void)?
