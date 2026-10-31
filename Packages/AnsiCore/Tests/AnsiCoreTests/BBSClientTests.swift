@@ -204,14 +204,16 @@ private func send(_ conn: NWConnection, _ bytes: [UInt8]) {
 }
 
 @Test func connectTimeoutIsReported() async throws {
-    // A listener that never accepts would still complete the handshake, so time out a client
-    // whose timeout is shorter than the connection takes to report anything: a black hole address.
-    let (client, states, _) = makeClient(port: 23, host: "10.255.255.1", timeout: 0.5)
+    // A transport that never reports "opened" exercises the client's own timer. A real black hole
+    // address is not reliable: some networks refuse 10.255.255.1 at once instead of dropping it.
+    let fake = FakeTransport()
+    let client = BBSClient(host: "h", port: 23, settings: TransportSettings(mode: .telnet), columns: 80, rows: 25,
+                           connectTimeout: 0.5, queue: DispatchQueue(label: "test.timeout"), transport: fake)
+    let states = Box<[BBSClientState]>([])
+    client.onState = { state in states.update { $0.append(state) } }
     client.connect()
-    #expect(await eventually(5) {
-        guard case .closed(let error)? = states.value.last else { return false }
-        return error == .timedOut("10.255.255.1") || error == .unreachable("10.255.255.1")
-    })
+    #expect(await eventually { fake.opened.value })
+    #expect(await eventually(5) { states.value.last == .closed(.timedOut("h")) })
 }
 
 @Test func invalidPortIsReported() async {
