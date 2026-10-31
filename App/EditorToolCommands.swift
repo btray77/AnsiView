@@ -22,6 +22,8 @@ struct EditorToolCommands: Commands {
             Button("Text Art...") { send(#selector(EditorCanvasView.showTextArt(_:))) }
             Button("Text to ASCII...") { TextToASCIIWindowController.show(editor: nil) }
             Button("Font Manager...") { FontManagerWindowController.show() }
+            Button("TDF Font Editor...") { TDFFontEditorWindowController.showNewOrOpen() }
+                .help("Create or open a TheDraw font (.tdf) and draw its letters with the editor's tools.")
             Button("Swap Foreground and Background") { send(#selector(EditorCanvasView.swapColours(_:))) }
             Button("Toggle Insert Mode") { send(#selector(EditorCanvasView.toggleInsertMode(_:))) }
             Divider()

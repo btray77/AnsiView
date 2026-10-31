@@ -62,7 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        EditorWindowController.canTerminate() ? .terminateNow : .terminateCancel
+        EditorWindowController.canTerminate() && TDFFontEditorWindowController.canTerminate() ? .terminateNow : .terminateCancel
     }
 }
 

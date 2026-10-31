@@ -188,6 +188,9 @@
     "Copy As" : {
 
     },
+    "Create or open a TheDraw font (.tdf) and draw its letters with the editor's tools." : {
+
+    },
     "Crop to Selection" : {
 
     },
@@ -672,6 +675,9 @@
 
     },
     "Swap Foreground and Background" : {
+
+    },
+    "TDF Font Editor..." : {
 
     },
     "Teletext and Viewdata: shows or hides text the page conceals, such as quiz answers." : {

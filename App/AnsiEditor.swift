@@ -763,8 +763,12 @@ final class EditorCanvasView: NSView {
     // MARK: Art and Tools menus (forwarded to the editor or the controller)
 
     /// File > Save and Save As (the standard items send these through the responder chain).
-    @objc func saveDocument(_ sender: Any?) { controller?.windowController?.save() }
-    @objc func saveDocumentAs(_ sender: Any?) { controller?.windowController?.saveAs() }
+    @objc func saveDocument(_ sender: Any?) { saveOrForward(#selector(saveDocument(_:)), sender) { $0.save() } }
+    @objc func saveDocumentAs(_ sender: Any?) { saveOrForward(#selector(saveDocumentAs(_:)), sender) { $0.saveAs() } }
+    /// A canvas hosted outside an editor window (the TDF font editor's glyph) passes Save up the chain.
+    private func saveOrForward(_ action: Selector, _ sender: Any?, _ run: (EditorWindowController) -> Void) {
+        if let windowController = controller?.windowController { run(windowController) } else { window?.windowController?.tryToPerform(action, with: sender) }
+    }
     @objc func saveProject(_ sender: Any?) { controller?.windowController?.saveProject() }
     @objc func fillWithCharacter(_ sender: Any?) { editor.fillWithCharacter() }
     @objc func fillWithColour(_ sender: Any?) { editor.fillWithColour() }

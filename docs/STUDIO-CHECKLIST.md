@@ -48,7 +48,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Block operations | done (harness; live check needs owner), item 60 |
 | Undo / redo | done | plan 6 |
 | Layers (flattened on save, kept in a sidecar project file) | done (harness; live check needs owner), item 60 |
-| TDF font import, preview, insert, manage collection | done (harness; live check needs owner): parser and writer (8,634 collection fonts round trip), 19 outline styles, Text Art insert as a floating paste, Font Manager | fonts |
+| TDF font import, preview, insert, manage collection | done (harness; live check needs owner): parser and writer (8,634 collection fonts round trip), 19 outline styles, Text Art insert as a floating paste, Font Manager; TDF font editor (create outline, block or colour fonts, open and manage collections, glyphs drawn with the editor's canvas and tools, 19 style outline preview, live preview, save round trip; harness, live use needs owner) | fonts, tdf-editor |
 | Other font formats (FIGlet .flf) | done (harness; live check needs owner): figlet 2.2.5 layouts matching its reference output, vertical layouts, 18 bundled distribution fonts (New BSD); Text to ASCII gallery (owner request) | fonts |
 
 ## 2. ANSI music
