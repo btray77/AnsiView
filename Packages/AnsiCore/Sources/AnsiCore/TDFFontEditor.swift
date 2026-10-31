@@ -405,6 +405,12 @@ public final class TDFFontEditorModel {
         while canvas.height > sessionHeight, canvas.rows.last?.allSatisfy({ $0 == TDFGlyphCanvas.blank }) == true {
             canvas.resize(columns: canvas.columns, height: canvas.height - 1)
         }
+        // The Canvas Size command can go past TheDraw's limits: the glyph is cut to them.
+        let maxColumns = max(TDFLimits.maxWidth, start.glyph?.columns ?? 0)
+        let maxRows = max(TDFLimits.maxHeight, sessionHeight)
+        if canvas.columns > maxColumns || canvas.height > maxRows {
+            canvas.resize(columns: min(canvas.columns, maxColumns), height: min(canvas.height, maxRows))
+        }
         let size = TDFGlyphCanvas.newGlyphSize(for: font)
         let updated = TDFGlyphCanvas.edited(canvas, type: font.type, original: start.glyph, size: size) ?? start.glyph
         guard updated != glyph(code) else { return }
@@ -486,4 +492,31 @@ public final class TDFFontEditorModel {
         defer { nextRevision += 1 }
         return nextRevision
     }
+}
+
+/// Hint texts of the font editor window (kept here so tests check their wording).
+public enum TDFEditorHelp {
+    public static let newFont = """
+    Outline fonts store the shape of each letter with placeholder codes; the outline style \
+    chosen when the text is drawn turns them into single, double or block lines. Block fonts \
+    store characters and take the user's colours. Colour fonts store characters with their \
+    own colours. The kind cannot be changed later.
+    """
+
+    public static let glyph = """
+    The glyph is drawn on the editor's own canvas: every tool, the character sets (F1 to F10), \
+    colours, selections and layers work as in the ANSI editor. The canvas is the glyph's size; \
+    change it with Width and Height (at most 30 by 12, TheDraw's limit). Block and outline \
+    fonts keep only the characters; colour fonts keep the colours too, with a bright \
+    background standing for the blink bit. Undo on the canvas undoes strokes; Undo anywhere \
+    else in the window undoes whole glyph and font changes.
+    """
+
+    public static let outlineCodes = """
+    Outline fonts are drawn with letters that stand for parts of the outline: A and B are \
+    horizontal edges, C and D vertical edges, E to L the outer and inner corners, M and N \
+    joints, O a hard space inside the letter and @ the transparent filler before it. Each \
+    button shows the code and the character it becomes in the chosen style. The strip under \
+    the canvas shows the glyph in all 19 styles.
+    """
 }

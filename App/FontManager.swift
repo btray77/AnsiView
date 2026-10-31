@@ -46,6 +46,7 @@ final class FontManagerViewController: NSViewController, NSTableViewDataSource, 
     let emptyNote = NSTextField(wrappingLabelWithString: FontHelp.emptyState)
     let removeButton = NSButton(title: "Remove...", target: nil, action: nil)
     let revealButton = NSButton(title: "Reveal in Finder", target: nil, action: nil)
+    let editButton = NSButton(title: "Edit Font...", target: nil, action: nil)
     private(set) var rows: [FontEntry] = []
     private var observer: NSObjectProtocol?
 
@@ -117,6 +118,9 @@ final class FontManagerViewController: NSViewController, NSTableViewDataSource, 
         emptyNote.textColor = .secondaryLabelColor
         let openButton = NSButton(title: "Open in Text to ASCII", target: self, action: #selector(openTextToASCII(_:)))
         openButton.toolTip = "Type text and copy or insert it with this font"
+        editButton.target = self
+        editButton.action = #selector(editFont(_:))
+        editButton.toolTip = "Open this TheDraw font in the TDF Font Editor (fonts that come with AnsiView open as a copy)"
 
         outlinePopup.controlSize = .small
         outlinePopup.font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
@@ -126,7 +130,7 @@ final class FontManagerViewController: NSViewController, NSTableViewDataSource, 
         sampleRow.spacing = 6
         let styleRow = NSStackView(views: [NSTextField(labelWithString: "Outline style:"), outlinePopup, outlineHelp])
         styleRow.spacing = 6
-        let right = NSStackView(views: [sampleRow, styleRow, previewView, infoLabel, openButton, emptyNote])
+        let right = NSStackView(views: [sampleRow, styleRow, previewView, infoLabel, NSStackView(views: [openButton, editButton]), emptyNote])
         right.orientation = .vertical
         right.alignment = .leading
         right.spacing = 8
@@ -216,6 +220,7 @@ final class FontManagerViewController: NSViewController, NSTableViewDataSource, 
             infoLabel.stringValue = ""
             removeButton.isEnabled = false
             revealButton.isEnabled = false
+            editButton.isEnabled = false
             return
         }
         var options = TextArtOptions()
@@ -233,6 +238,7 @@ final class FontManagerViewController: NSViewController, NSTableViewDataSource, 
         infoLabel.stringValue = info
         removeButton.isEnabled = entry.source == .user
         revealButton.isEnabled = entry.url != nil
+        if case .tdf = entry.font { editButton.isEnabled = true } else { editButton.isEnabled = false }
     }
 
     @objc func sampleChanged(_ sender: Any?) {
@@ -258,6 +264,11 @@ final class FontManagerViewController: NSViewController, NSTableViewDataSource, 
     @objc func reveal(_ sender: Any?) {
         guard let url = selectedEntry?.url else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    @objc func editFont(_ sender: Any?) {
+        guard let entry = selectedEntry else { return }
+        TDFFontEditorWindowController.edit(entry)
     }
 
     @objc func openTextToASCII(_ sender: Any?) {

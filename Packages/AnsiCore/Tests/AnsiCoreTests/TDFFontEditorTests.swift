@@ -59,6 +59,13 @@ struct TDFFontEditorTests {
         #expect(TDFOutlineCodes.drawn(UInt8(ascii: "@"), style: 3) == 0x20)
     }
 
+    @Test func helpTextsFollowTheWritingRules() {
+        for text in [TDFEditorHelp.newFont, TDFEditorHelp.glyph, TDFEditorHelp.outlineCodes] + TDFOutlineCodes.all.map(\.role) {
+            #expect(!text.contains("\u{2014}"))
+            #expect(!text.isEmpty)
+        }
+    }
+
     // MARK: Glyph canvas (rulings 2 and 3)
 
     @Test func everyTypeRoundTripsThroughTheCanvas() {
@@ -255,6 +262,17 @@ struct TDFFontEditorTests {
         empty.set(AnsiCell(code: 0xDB), x: 0, y: 0)
         model.updateEditing(empty)
         #expect(model.glyph(UInt8(ascii: "~"))?.rows.count == TDFGlyphCanvas.newGlyphSize(for: model.font).height)
+    }
+
+    @Test func aCanvasResizedPastTheLimitsIsCut() {
+        let model = TDFFontEditorModel(fonts: [Self.blockFont])
+        var canvas = model.beginEditing(UInt8(ascii: "A"))
+        canvas.resize(columns: 50, height: 20)
+        for y in 0..<20 { canvas.set(AnsiCell(code: 0xDB), x: 49, y: y) }
+        canvas.set(AnsiCell(code: 0xB0), x: 0, y: 0)
+        model.updateEditing(canvas)
+        #expect(model.glyph(UInt8(ascii: "A"))?.columns == 30)
+        #expect(model.glyph(UInt8(ascii: "A"))?.rows.count == 12)
     }
 
     @Test func undoDuringASessionRestoresTheGlyph() {
