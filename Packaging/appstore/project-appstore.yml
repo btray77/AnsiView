@@ -6,7 +6,7 @@
 #
 # It includes project.yml and replaces only what differs: no Sparkle package or sign phase, no
 # SPARKLE_UPDATES condition (App/Updates.swift compiles to "no updater"), and entitlements without
-# Sparkle's mach-lookup exceptions. The SU keys left in Info.plist are inert without Sparkle.
+# Sparkle's mach-lookup exceptions (the app scoped bookmark entitlement is kept). The SU keys left in Info.plist are inert without Sparkle.
 # Store signing (Apple Distribution certificate, provisioning profile) is set up separately.
 include:
   - path: ../../project.yml
@@ -36,6 +36,10 @@ targets:
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.application-groups: [47HEHK53W5.com.traynham.ansiview]
         com.apple.security.network.client: true
+        # The same app scoped security bookmarks as the Developer ID build (project.yml): the
+        # library folders, transfer and capture folders, export profile folders, the RIP icon
+        # folder and SSH key files are reopened in later launches with them.
+        com.apple.security.files.bookmarks.app-scope: true
     dependencies:REPLACE:
       - target: AnsiPreview
       - target: AnsiThumbnail
