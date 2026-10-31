@@ -15,6 +15,11 @@ public enum SaveRoundTrip {
 
     public static func check(_ canvas: EditCanvas, format: SaveFormat) -> Result {
         var result = Result()
+        if format == .wildcat, canvas.columns > 80 {
+            // Reported on save: Wildcat files carry no width, so such art opens 80 columns wide.
+            result.refused = "not checked: Wildcat files carry no width (art \(canvas.columns) columns wide)"
+            return result
+        }
         let data: Data
         do { data = try ArtWriter.data(canvas, format: format) } catch {
             result.refused = error.localizedDescription

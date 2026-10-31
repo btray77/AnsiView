@@ -123,6 +123,8 @@ public enum ArtWriter {
             body = format == .pcboard ? pcboardBody(canvas) : avatarBody(canvas, plus: format == .avatarPlus)
             sauce.dataType = 1
             sauce.fileType = format == .pcboard ? 4 : 5
+            // SAUCE 00.5 has no font name for PCBoard and Avatar files.
+            sauce.fontName = ""
             sauce.tInfo = [UInt16(canvas.columns), UInt16(canvas.screen(trimmed: true).rows.count), 0, 0]
         }
         return Data(body + sauce.encoded(fileSize: body.count))

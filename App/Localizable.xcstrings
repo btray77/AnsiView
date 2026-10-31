@@ -4,6 +4,9 @@
     "%@  ·  click to skip" : {
 
     },
+    "%@ files carry no SAUCE record: the title, author and group are not saved." : {
+
+    },
     "%lld baud" : {
 
     },
@@ -600,6 +603,9 @@
 
     },
     "Save Selection as Component..." : {
+
+    },
+    "Saves with a SAUCE record (title, author, group, width, iCE colours)." : {
 
     },
     "Scale" : {

@@ -17,10 +17,16 @@ final class AppearanceController: NSObject {
     static let changed = Notification.Name("AppAppearanceChanged")
 
     var defaults: UserDefaults = .standard
-    /// Labels recoloured for Retro, with the colour they had.
-    private let recoloured = NSMapTable<NSTextField, NSColor>.weakToStrongObjects()
-    private let styledWindows = NSHashTable<NSWindow>.weakObjects()
+    /// Labels recoloured for Retro: the colour they had, and the colour Retro gave them.
+    private let originalColours = NSMapTable<NSTextField, NSColor>.weakToStrongObjects()
+    private let retroColours = NSMapTable<NSTextField, NSColor>.weakToStrongObjects()
+    /// Windows given the Retro background, with the background they had.
+    private let originalBackgrounds = NSMapTable<NSWindow, NSColor>.weakToStrongObjects()
     private var observing = false
+
+    /// The system label colours Retro replaces; any other colour (warnings, the editor's status
+    /// line) is the app's own choice and is left alone (review I1).
+    static let systemLabelColours: [NSColor] = [.labelColor, .secondaryLabelColor, .tertiaryLabelColor, .controlTextColor]
 
     var current: AppAppearance { AppAppearance.current(in: defaults) }
 
@@ -29,7 +35,8 @@ final class AppearanceController: NSObject {
         apply()
     }
 
-    /// Sets the app appearance and restyles every open window.
+    /// Sets the app appearance and restyles every open window. Windows with their own colours
+    /// (the editor) hear `changed` first, so their colours are set before the labels are looked at.
     func apply() {
         let appearance = current
         switch appearance {
@@ -39,57 +46,76 @@ final class AppearanceController: NSObject {
         }
         if !observing {
             observing = true
-            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didBecomeMainNotification] {
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didBecomeMainNotification, NSWindow.didUpdateNotification] {
                 NotificationCenter.default.addObserver(self, selector: #selector(windowChanged(_:)), name: name, object: nil)
             }
         }
-        for window in NSApp.windows { style(window) }
         NotificationCenter.default.post(name: Self.changed, object: self)
+        for window in NSApp.windows { style(window) }
     }
 
     @objc private func windowChanged(_ note: Notification) {
-        if let window = note.object as? NSWindow { style(window) }
+        guard let window = note.object as? NSWindow else { return }
+        // didUpdate fires often: only windows not styled yet are looked at then.
+        if note.name == NSWindow.didUpdateNotification, current != .retro || originalBackgrounds.object(forKey: window) != nil { return }
+        style(window)
     }
 
-    /// Retro colours for a window, or the system ones back.
+    /// Retro colours for a window, or its own ones back.
     func style(_ window: NSWindow) {
-        guard !(window is NSPanel) || window.contentView?.subviews.isEmpty == false else { return }
         if current == .retro {
-            window.backgroundColor = NSColor(RetroTheme.background)
-            styledWindows.add(window)
-            if let content = window.contentView { recolour(content) }
-        } else if styledWindows.contains(window) {
-            window.backgroundColor = .windowBackgroundColor
-            styledWindows.remove(window)
-            restore()
+            // Only windows in the standard background: black stages (terminal, slideshow,
+            // presentation, dialing directory) keep their colour (review I3).
+            if originalBackgrounds.object(forKey: window) == nil, window.backgroundColor == .windowBackgroundColor {
+                originalBackgrounds.setObject(window.backgroundColor, forKey: window)
+                window.backgroundColor = NSColor(RetroTheme.background)
+            }
+            if originalBackgrounds.object(forKey: window) != nil, let content = window.contentView { recolour(content) }
+        } else {
+            if let original = originalBackgrounds.object(forKey: window) {
+                window.backgroundColor = original
+                originalBackgrounds.removeObject(forKey: window)
+            }
+            if let content = window.contentView { restore(content) }
         }
     }
 
-    /// Plain labels (not editable, no background of their own) get the Retro text colours.
+    /// Plain labels (not editable, no background of their own) in system colours get the Retro ones.
     private func recolour(_ view: NSView) {
-        // Only labels in system colours: a label given its own colour (the editor's yellow status
-        // line, warning text) keeps it.
-        if let label = view as? NSTextField, !label.isEditable, !label.drawsBackground, !label.isBezeled,
-           recoloured.object(forKey: label) != nil || (label.textColor ?? .labelColor).type == .catalog {
-            if recoloured.object(forKey: label) == nil { recoloured.setObject(label.textColor ?? .labelColor, forKey: label) }
-            let original = recoloured.object(forKey: label) ?? .labelColor
-            label.textColor = original == .secondaryLabelColor || original == .tertiaryLabelColor
-                ? NSColor(RetroTheme.secondaryText) : NSColor(RetroTheme.text)
+        if let label = view as? NSTextField, !label.isEditable, !label.drawsBackground, !label.isBezeled {
+            let colour = label.textColor ?? .labelColor
+            if let given = retroColours.object(forKey: label) {
+                // The app changed the colour since Retro set it: the label is the app's again (review I2).
+                if colour != given { forget(label) }
+            } else if Self.systemLabelColours.contains(colour) {
+                let retro = colour == .secondaryLabelColor || colour == .tertiaryLabelColor
+                    ? NSColor(RetroTheme.secondaryText) : NSColor(RetroTheme.text)
+                originalColours.setObject(colour, forKey: label)
+                retroColours.setObject(retro, forKey: label)
+                label.textColor = retro
+            }
         }
         // Tables, text views and the art keep their own backgrounds.
         if view is NSTableView || view is NSTextView || view is NSScrollView && (view as? NSScrollView)?.documentView is NSTableView { return }
         for sub in view.subviews { recolour(sub) }
     }
 
-    private func restore() {
-        let enumerator = recoloured.keyEnumerator()
-        var labels: [NSTextField] = []
-        while let label = enumerator.nextObject() as? NSTextField { labels.append(label) }
-        for label in labels where !(label.window.map(styledWindows.contains) ?? false) {
-            label.textColor = recoloured.object(forKey: label)
-            recoloured.removeObject(forKey: label)
-        }
+    private func forget(_ label: NSTextField) {
+        originalColours.removeObject(forKey: label)
+        retroColours.removeObject(forKey: label)
     }
+
+    /// Labels still in the colour Retro gave them get their own colour back.
+    private func restore(_ view: NSView) {
+        if let label = view as? NSTextField, let given = retroColours.object(forKey: label) {
+            if label.textColor == given { label.textColor = originalColours.object(forKey: label) }
+            forget(label)
+        }
+        for sub in view.subviews { restore(sub) }
+    }
+
+    /// Whether Retro has recoloured `label` (for the harness).
+    func isRecoloured(_ label: NSTextField) -> Bool { retroColours.object(forKey: label) != nil }
 
     /// The bundled IBM VGA font at its pixel size (16 points), registered for this process once.
     static let vgaFont: NSFont? = {

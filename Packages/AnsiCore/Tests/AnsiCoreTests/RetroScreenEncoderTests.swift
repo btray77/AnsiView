@@ -148,7 +148,8 @@ import Testing
         #expect(object["visible"] as? Bool == true)
         let content = try #require(object["content"] as? [String: Any])
         #expect(content["type"] as? String == "rawV")
-        #expect((content["data"] as? String).map { Array($0.utf8) } == bytes)
+        // Telstar draws its own header and clears the page: the frame data starts without a clear screen (review I5).
+        #expect((content["data"] as? String).map { Array($0.utf8) } == Array(bytes.dropFirst()))
     }
 
     @Test func platformFactsAndNames() {

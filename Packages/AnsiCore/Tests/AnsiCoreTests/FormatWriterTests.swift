@@ -241,6 +241,22 @@ import Testing
         #expect(Set(SaveFormat.allCases.map(\.label)).count == SaveFormat.allCases.count)
     }
 
+    /// Review minors: SAUCE font names only where the SAUCE spec has them; the font note names
+    /// the font that is really written; wide Wildcat art is not counted as a round trip failure.
+    @Test func reviewMinors() throws {
+        var canvas = EditCanvas(columns: 40, height: 2)
+        canvas.fontName = "IBM EGA"
+        for format in [SaveFormat.pcboard, .avatar, .avatarPlus] {
+            #expect(Sauce.read([UInt8](try ArtWriter.data(canvas, format: format))).0?.fontName == "", "\(format)")
+        }
+        // An 8x14 embedded font: IBM VGA (the named 8x16 font) is written, and the note names it.
+        var ega = EditCanvas(columns: 40, height: 2)
+        ega.embeddedFont = BitmapFont(rawGlyphs: [], height: 14)
+        #expect(SaucePreservation.saveReport(ega, format: .adf).joined().contains("IBM VGA"))
+        let wide = SaveRoundTrip.check(EditCanvas(columns: 120, height: 2), format: .wildcat)
+        #expect(wide.refused != nil)
+    }
+
     @Test func saveReportsSayWhatEachFormatCannotKeep() {
         var canvas = Self.randomCanvas(columns: 40, height: 3, ice: false, seed: 20, codes: Self.textCodes)
         canvas.title = "T"

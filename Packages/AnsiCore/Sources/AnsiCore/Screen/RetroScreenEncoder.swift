@@ -234,7 +234,8 @@ public enum RetroScreenEncoder {
         func matches(_ wanted: Wanted, _ cell: AnsiCell) -> Bool {
             if wanted.blank {
                 let pixels = RetroScreenEncoder.mask(fontPixels(cell))
-                return pixels.allSatisfy { $0 == 0 } && cell.bg == wanted.bg || (pixels.allSatisfy { $0 == ~0 } && cell.fg == wanted.bg)
+                let lit = RetroScreenEncoder.count(pixels), total = glyphs.width * glyphs.height
+                return lit == 0 && cell.bg == wanted.bg || (lit == total && cell.fg == wanted.bg)
             }
             return cell.glyph == wanted.glyph && cell.fg == wanted.fg && cell.bg == wanted.bg
         }
@@ -520,7 +521,10 @@ public enum TelstarFrame {
         let object: [String: Any] = [
             "pid": ["page-no": page, "frame-id": frame],
             "visible": true,
-            "content": ["data": String(decoding: bytes.map { $0 & 0x7F }, as: UTF8.self), "type": "rawV"],
+            // Telstar draws the frame on a cleared page under its own header (inferred from the
+            // wiki's header-text field): the leading clear screen is left out.
+            "content": ["data": String(decoding: (bytes.first == 0x0C ? Array(bytes.dropFirst()) : bytes).map { $0 & 0x7F }, as: UTF8.self),
+                        "type": "rawV"],
         ]
         return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
     }

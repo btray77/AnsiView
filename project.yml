@@ -99,7 +99,7 @@ targets:
             UTTypeDescription: ANSI Art
             UTTypeConformsTo: [public.data, public.content]
             UTTypeTagSpecification:
-              public.filename-extension: [ans, ice, diz, nfo, xb, idf, pcb, avt, rip]
+              public.filename-extension: [ans, ice, diz, nfo, xb, idf, pcb, avt, rip, bbs]
           # .asc has its own type: Quick Look refuses thumbnail extensions that claim .asc
           # ("prohibited filename extension"), so only the thumbnail extension leaves it out.
           - UTTypeIdentifier: com.traynham.ansiview.asc
@@ -462,7 +462,7 @@ targets:
             UTTypeDescription: ANSI Art
             UTTypeConformsTo: [public.data, public.content]
             UTTypeTagSpecification:
-              public.filename-extension: [ans, ice, diz, nfo, xb, idf, pcb, avt]
+              public.filename-extension: [ans, ice, diz, nfo, xb, idf, pcb, avt, bbs]
           - UTTypeIdentifier: com.traynham.ansiview.asc
             UTTypeDescription: ASCII Art
             UTTypeConformsTo: [public.data, public.content]

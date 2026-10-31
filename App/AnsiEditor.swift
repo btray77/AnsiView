@@ -929,6 +929,8 @@ final class EditorViewController: NSViewController {
     private let iceBox = NSButton(checkboxWithTitle: "iCE colours", target: nil, action: nil)
     private let transparentBox = NSButton(checkboxWithTitle: "Transparent paste", target: nil, action: nil)
     private let status = NSTextField(labelWithString: "")
+    /// The status line colour (for the harness).
+    var statusColourForHarness: NSColor? { status.textColor }
     private let hintLabel = NSTextField(labelWithString: "")
     private let preview = NSTextField(labelWithString: " Aa ")
     private let insertLabel = NSTextField(labelWithString: "OVR")
@@ -1587,7 +1589,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         panel.allowedContentTypes = [Self.contentType(format)]
         panel.allowsOtherFileTypes = false
         panel.isExtensionHidden = false
-        panel.message = "Saves with a SAUCE record (title, author, group, width, iCE colours)."
+        panel.message = Self.saveMessage(format)
         let popup = NSPopUpButton()
         popup.addItems(withTitles: SaveFormat.allCases.map(\.label))
         popup.selectItem(at: SaveFormat.allCases.firstIndex(of: format) ?? 0)
@@ -1652,6 +1654,13 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    /// What the save panel says about the chosen format (ADF, iCE Draw and Wildcat files carry no SAUCE).
+    static func saveMessage(_ format: SaveFormat) -> String {
+        [.adf, .idf, .wildcat].contains(format)
+            ? String(localized: "\(format.name) files carry no SAUCE record: the title, author and group are not saved.")
+            : String(localized: "Saves with a SAUCE record (title, author, group, width, iCE colours).")
+    }
+
     static func contentType(_ format: SaveFormat) -> UTType {
         UTType(filenameExtension: format.fileExtension) ?? .data
     }
@@ -1670,6 +1679,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             panel.allowedContentTypes = [EditorWindowController.contentType(format)]
             let base = (panel.nameFieldStringValue as NSString).deletingPathExtension
             panel.nameFieldStringValue = "\(base).\(format.fileExtension)"
+            panel.message = EditorWindowController.saveMessage(format)
         }
     }
 }
