@@ -120,7 +120,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Pan, grid, cursor position indicator | done (item 60) |
 | Full screen editing, retro DOS preview mode | done in harness (full screen not observed), item 60 |
 | Configurable keyboard shortcuts | done (item 60) |
-| Context sensitive help, tooltips, glossary | planned (item 62) |
+| Context sensitive help, tooltips, glossary | done on branch: Help > AnsiView Glossary (78 terms, searchable, also in Help menu search), (?) hints open glossary entries, tooltip inventory 349 controls 0 uncovered (item 62) |
 | Light and dark themes | system appearance today; retro theme planned |
 | Font browser, character picker | done: Font Manager and Text to ASCII gallery (fonts); character picker (item 60) |
 

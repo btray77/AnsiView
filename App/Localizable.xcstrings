@@ -44,6 +44,12 @@
     "ANSI Music Editor" : {
 
     },
+    "ANSI escapes work on every package; the package's own codes keep files editable in its own tools" : {
+
+    },
+    "ATASCII: types the next characters in inverse video, like the Atari's inverse key. Choose again to stop." : {
+
+    },
     "About ANSI Music..." : {
 
     },
@@ -56,6 +62,15 @@
     "Add folders to the Library (Window > Library) to see your own art here." : {
 
     },
+    "Adds another rule: a tag, rating, SAUCE field, year or format to match" : {
+
+    },
+    "All: a piece must match every rule. Any: one matching rule is enough." : {
+
+    },
+    "Also called" : {
+
+    },
     "Also show a piece from 16colo.rs" : {
 
     },
@@ -63,6 +78,12 @@
 
     },
     "Animation Timeline" : {
+
+    },
+    "AnsiView Glossary" : {
+
+    },
+    "AnsiView shows a pack's FILE_ID.DIZ and NFO files when it opens. View > Show or Hide Pack Info hides this pane." : {
 
     },
     "Art" : {
@@ -77,7 +98,19 @@
     "Art's Own Colours" : {
 
     },
+    "Artist and group pages come from the author and group in your files' SAUCE records, merged when only case or spacing differ. 16colo.rs may spell a name differently, in which case it shows nothing." : {
+
+    },
+    "Asks 16colo.rs again for what failed to load" : {
+
+    },
+    "Asks 16colo.rs, the online ANSI art archive, for packs under this name. Double click a pack to open it." : {
+
+    },
     "At Instant speed the art appears at once; this plays its music once from the start." : {
+
+    },
+    "Atari Inverse Video Key" : {
 
     },
     "Auto Advance" : {
@@ -111,6 +144,9 @@
 
     },
     "Capture Session..." : {
+
+    },
+    "Changes the terminal type for this session, so the BBS's screens draw correctly" : {
 
     },
     "Character Picker..." : {
@@ -209,6 +245,9 @@
     "Every file transfer with this BBS: protocol details, retries, results and SHA-256 checksums." : {
 
     },
+    "Every term in AnsiView explained in plain English: iCE colours, SAUCE, ZMODEM and more." : {
+
+    },
     "Export Animation..." : {
 
     },
@@ -254,6 +293,9 @@
     "Find..." : {
 
     },
+    "Finds terms by name, other names and words in their explanations" : {
+
+    },
     "Fit to Window" : {
 
     },
@@ -266,16 +308,34 @@
     "Format" : {
 
     },
+    "Format is a name such as ANSI, XBin or BinaryText." : {
+
+    },
+    "Frames per second of the animation: more is smoother and larger" : {
+
+    },
     "Full Screen Editing" : {
 
     },
+    "GIF only: how the 256 colour GIF palette is chosen" : {
+
+    },
     "Get Info" : {
+
+    },
+    "Glossary entry" : {
+
+    },
+    "Glossary terms" : {
 
     },
     "HTML" : {
 
     },
     "Hands AnsiView's screen saver to macOS, which asks before adding it to System Settings > Screen Saver." : {
+
+    },
+    "Help: %@" : {
 
     },
     "Hold Final Frame" : {
@@ -291,6 +351,12 @@
 
     },
     "Import Image..." : {
+
+    },
+    "Import TheDraw (.tdf) and FIGlet (.flf, .tlf) fonts, folders of them or .zip packs. AnsiView copies them; the originals stay as they are." : {
+
+    },
+    "In AnsiView" : {
 
     },
     "In a gallery: the pack's FILE_ID.DIZ and NFO files beside the pieces." : {
@@ -315,6 +381,15 @@
 
     },
     "JPEG" : {
+
+    },
+    "Keeps the current terminal type" : {
+
+    },
+    "Keeps the file under a size or within a picture size, by shrinking it if needed" : {
+
+    },
+    "Keeps these values for every preview" : {
 
     },
     "Library" : {
@@ -371,6 +446,9 @@
     "Next Palette" : {
 
     },
+    "No terms match. Try a shorter word." : {
+
+    },
     "Off by default. When on, AnsiView asks 16colo.rs for one piece a day: at most four requests, a second apart, cached." : {
 
     },
@@ -389,7 +467,13 @@
     "Open Sample" : {
 
     },
+    "Open in Glossary" : {
+
+    },
     "Open with BBS Codes..." : {
+
+    },
+    "Opens this piece in a viewer window" : {
 
     },
     "PNG" : {
@@ -399,6 +483,9 @@
 
     },
     "Paused" : {
+
+    },
+    "Picture size: each step multiplies the DOS screen's 640 pixel width" : {
 
     },
     "Pixels per font pixel (1 is 640 pixels wide for 80 columns)." : {
@@ -434,13 +521,28 @@
     "Previous Frame" : {
 
     },
+    "Puts back AnsiView's own sample values" : {
+
+    },
+    "RIP Icon Folder..." : {
+
+    },
+    "RIPscrip: the folder your icons (.ICN) and scenes (.RIP) are read from. A BBS never writes to it." : {
+
+    },
     "Receives files from the BBS. ZMODEM and Kermit downloads usually start by themselves." : {
 
     },
     "Reconnect" : {
 
     },
+    "Related" : {
+
+    },
     "Remove Loaded Palettes" : {
+
+    },
+    "Removes this rule" : {
 
     },
     "Render ${file} as ${format}" : {
@@ -491,6 +593,9 @@
     "Scrolls tall art smoothly down the window. While it runs: + and - change speed, Space pauses, Escape stops." : {
 
     },
+    "Search terms, such as iCE or ZMODEM" : {
+
+    },
     "Select" : {
 
     },
@@ -516,6 +621,12 @@
 
     },
     "Show or Hide Pack Info" : {
+
+    },
+    "Shows the exported file in the BBS folder" : {
+
+    },
+    "Shows this entry in the AnsiView Glossary, with related terms" : {
 
     },
     "Shows this piece next to another one with the cells that differ tinted red." : {
@@ -548,6 +659,9 @@
     "Start Slideshow" : {
 
     },
+    "Starts the video with a synthesized dial tone and modem handshake, then line noise while the art arrives (no recordings)." : {
+
+    },
     "Stop Capture" : {
 
     },
@@ -561,6 +675,9 @@
 
     },
     "Teletext and Viewdata: shows or hides text the page conceals, such as quiz answers." : {
+
+    },
+    "Term" : {
 
     },
     "Terminal" : {
@@ -582,6 +699,33 @@
 
     },
     "Text to ASCII..." : {
+
+    },
+    "The Protocol field picks telnet, SSH, RLogin, raw TCP or WebSocket; see the related terms below." : {
+
+    },
+    "The built in smart folders cannot be removed." : {
+
+    },
+    "The display whose exact pixel size the picture is made for" : {
+
+    },
+    "The kind of file to make: a picture, an animation of the art being drawn, or text" : {
+
+    },
+    "The library reads it to build artist and group pages." : {
+
+    },
+    "The made up caller name, dates and numbers the preview puts in place of display codes" : {
+
+    },
+    "The modem speed the animation plays at: lower draws more slowly, as callers saw it" : {
+
+    },
+    "This art plays ANSI music, a tune sent inside the file as BBS terminals played it. Click to mute this window." : {
+
+    },
+    "Tiled only: how large each copy of the art is drawn" : {
 
     },
     "Toggle Grid" : {
@@ -612,6 +756,12 @@
 
     },
     "Upload File(s)..." : {
+
+    },
+    "What is SAUCE?" : {
+
+    },
+    "What this rule looks at: your tags, rating or favourites, or the file's SAUCE, year or format" : {
 
     },
     "Your art folders in one place: search, tags, ratings, favourites, smart folders, artist and group pages." : {
