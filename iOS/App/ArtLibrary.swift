@@ -11,13 +11,31 @@ struct ArtItem: Identifiable, Hashable {
     let source: Source
     /// The bytes of a file opened from outside the app, read while its security scope was open.
     let data: Data?
+    /// New for each opening of an outside file, so opening it again (perhaps changed) shows the
+    /// new bytes instead of keeping the viewer of the old ones. Nil for samples and Documents,
+    /// which keep their identity when the list is refreshed.
+    let openingID: UUID?
+
+    init(url: URL, source: Source, data: Data?) {
+        self.url = url
+        self.source = source
+        self.data = data
+        openingID = source == .opened ? UUID() : nil
+    }
 
     var id: URL { url }
     var name: String { url.lastPathComponent }
     var title: String { url.deletingPathExtension().lastPathComponent }
 
-    static func == (a: ArtItem, b: ArtItem) -> Bool { a.url == b.url && a.source == b.source }
-    func hash(into hasher: inout Hasher) { hasher.combine(url); hasher.combine(source) }
+    static func == (a: ArtItem, b: ArtItem) -> Bool {
+        a.url == b.url && a.source == b.source && a.openingID == b.openingID
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(url)
+        hasher.combine(source)
+        hasher.combine(openingID)
+    }
 }
 
 enum ArtLoadError: LocalizedError {
@@ -123,7 +141,10 @@ final class ArtLibrary: ObservableObject {
 
     /// Reads a file from outside the app and lists it under Opened (most recent first).
     func open(_ url: URL) throws -> ArtItem {
-        if url.standardizedFileURL.path.hasPrefix(Self.documentsFolder.standardizedFileURL.path) {
+        // Compared by path components after resolving /var and /private/var.
+        let folder = Self.documentsFolder.resolvingSymlinksInPath().pathComponents
+        let file = url.resolvingSymlinksInPath().pathComponents
+        if file.count == folder.count + 1, Array(file.prefix(folder.count)) == folder {
             refresh()
             return ArtItem(url: url, source: .documents, data: nil)
         }

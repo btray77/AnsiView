@@ -10,11 +10,19 @@ final class PreviewViewController: UIViewController, QLPreviewingController {
         view.backgroundColor = .black
     }
 
+    /// The app's limit: no art format needs more.
+    static let maximumBytes = 16 * 1024 * 1024
+
     func preparePreviewOfFile(at url: URL) async throws {
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        let file = ArtFile(data: data, fileExtension: url.pathExtension)
+        // Read and played through once off the main thread; refused over the size limit.
+        let playback = try await Task.detached(priority: .userInitiated) { () throws -> ArtPlayback in
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            if size > Self.maximumBytes { throw CocoaError(.fileReadTooLarge) }
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            return ArtPlayback(ArtFile(data: data, fileExtension: url.pathExtension))
+        }.value
         // The app's speed setting lives in the app's own defaults (no app group): the default speed here.
-        let player = ArtPlayerViewController(file: file, name: url.lastPathComponent,
+        let player = ArtPlayerViewController(playback: playback, name: url.lastPathComponent,
                                              baud: MobilePlaybackSpeed.defaultBaud)
         addChild(player)
         player.view.frame = view.bounds

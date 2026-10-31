@@ -49,16 +49,40 @@ final class ArtPlayerViewController: UIViewController, UIScrollViewDelegate {
     private var artSize = CGSize.zero
     private var lastFitBounds = CGSize.zero
 
-    init(file: ArtFile, name: String?, baud: Int = MobilePlaybackSpeed.current) {
-        self.file = file
+    /// Playback paused because the app left the foreground, to resume when it returns.
+    private var pausedForBackground = false
+    private var lifecycleObservers: [NSObjectProtocol] = []
+
+    /// `playback` is made by the caller (off the main thread: it plays the whole file once).
+    init(playback: ArtPlayback, name: String?, baud: Int = MobilePlaybackSpeed.current) {
+        self.file = playback.file
         self.name = name
         self.baud = baud
-        self.playback = ArtPlayback(file)
+        self.playback = playback
         super.init(nibName: nil, bundle: nil)
+        let center = NotificationCenter.default
+        lifecycleObservers = [
+            center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.enterBackground() }
+            },
+            center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.returnToForeground() }
+            },
+        ]
+    }
+
+    convenience init(file: ArtFile, name: String?, baud: Int = MobilePlaybackSpeed.current) {
+        self.init(playback: ArtPlayback(file), name: name, baud: baud)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    deinit {
+        displayLink?.invalidate()
+        blinkTimer?.invalidate()
+        lifecycleObservers.forEach(NotificationCenter.default.removeObserver)
+    }
 
     var state: ArtPlayback.State { playback.state }
     /// True when there are bytes to play (binary screen formats have none).
@@ -124,6 +148,27 @@ final class ArtPlayerViewController: UIViewController, UIScrollViewDelegate {
         stopBlink()
     }
 
+    /// A second chance to stop the timers (a Quick Look host may not send `viewWillDisappear`).
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        pause()
+        stopBlink()
+    }
+
+    /// The display link stops in the background; without a pause the time away would be played
+    /// as one jump to the end.
+    private func enterBackground() {
+        guard playback.state == .playing else { return }
+        pausedForBackground = true
+        pause()
+    }
+
+    private func returnToForeground() {
+        guard pausedForBackground else { return }
+        pausedForBackground = false
+        if viewIfLoaded?.window != nil { resume() }
+    }
+
     // MARK: Playback
 
     /// Plays the file from its first byte at `baud`.
@@ -157,7 +202,8 @@ final class ArtPlayerViewController: UIViewController, UIScrollViewDelegate {
 
     private func startDisplayLink() {
         stopDisplayLink()
-        let link = CADisplayLink(target: self, selector: #selector(frameTick(_:)))
+        // Through a weak proxy: a display link retains its target.
+        let link = CADisplayLink(target: WeakTick(self), selector: #selector(WeakTick.tick(_:)))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
         link.add(to: .main, forMode: .common)
         displayLink = link
@@ -168,7 +214,18 @@ final class ArtPlayerViewController: UIViewController, UIScrollViewDelegate {
         displayLink = nil
     }
 
-    @objc private func frameTick(_ link: CADisplayLink) {
+    /// The display link's target, holding the player weakly.
+    private final class WeakTick: NSObject {
+        weak var player: ArtPlayerViewController?
+        init(_ player: ArtPlayerViewController) { self.player = player }
+        @objc func tick(_ link: CADisplayLink) {
+            MainActor.assumeIsolated {
+                if let player { player.frameTick(link) } else { link.invalidate() }
+            }
+        }
+    }
+
+    fileprivate func frameTick(_ link: CADisplayLink) {
         guard playback.tick(at: CACurrentMediaTime(), baud: baud) else { return }
         redraw()
         if playback.state != .playing {

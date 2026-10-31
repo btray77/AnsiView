@@ -16,12 +16,12 @@ final class ViewerModel: ObservableObject {
         }
     }
 
-    init(item: ArtItem, file: ArtFile) {
+    init(item: ArtItem, playback: ArtPlayback) {
         self.item = item
-        self.file = file
+        self.file = playback.file
         let baud = MobilePlaybackSpeed.current
         self.baud = baud
-        player = ArtPlayerViewController(file: file, name: item.name, baud: baud)
+        player = ArtPlayerViewController(playback: playback, name: item.name, baud: baud)
         player.onStateChange = { [weak self] state in self?.state = state }
     }
 
@@ -55,10 +55,15 @@ struct ViewerScreen: View {
             }
         }
         .task(id: item) {
-            do {
-                model = ViewerModel(item: item, file: try ArtLoader.load(item))
-            } catch {
-                loadError = error.localizedDescription
+            // Reading and playing the file through once (to find its final screen) happens off the
+            // main thread; only the view controller is made on it.
+            let item = item
+            let loaded = await Task.detached(priority: .userInitiated) {
+                Result { ArtPlayback(try ArtLoader.load(item)) }
+            }.value
+            switch loaded {
+            case .success(let playback): model = ViewerModel(item: item, playback: playback)
+            case .failure(let error): loadError = error.localizedDescription
             }
         }
     }
@@ -68,7 +73,10 @@ private struct LoadedViewer: View {
     @ObservedObject var model: ViewerModel
     @State private var showsInfo = false
     @State private var shared: SharedFile?
+    /// A GIF is being made (shows the progress overlay).
     @State private var exporting = false
+    /// Any export is running.
+    @State private var busy = false
     @State private var exportError: String?
 
     var body: some View {
@@ -148,6 +156,8 @@ private struct LoadedViewer: View {
         } label: {
             Label(String(localized: "Share"), systemImage: "square.and.arrow.up")
         }
+        // One export at a time.
+        .disabled(busy)
     }
 
     /// Debug builds: `-info YES` opens the info sheet and `-share png|gif` the share sheet, so the
@@ -168,12 +178,15 @@ private struct LoadedViewer: View {
         let file = model.file
         let baud = model.baud == 0 ? MobilePlaybackSpeed.defaultBaud : model.baud
         let name = ArtShareExport.fileName(for: model.item.name, extension: gif ? "gif" : "png")
+        guard !busy else { return }
+        busy = true
         exporting = gif
         Task {
             let data = await Task.detached(priority: .userInitiated) {
                 gif ? ArtShareExport.gif(file, baud: baud) : ArtShareExport.png(file)
             }.value
             exporting = false
+            busy = false
             guard let data else {
                 exportError = String(localized: "The art could not be rendered.")
                 return
