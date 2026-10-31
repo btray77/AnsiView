@@ -117,6 +117,10 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
     public var emulation: TerminalEmulation
     /// Telnet: the connection is wrapped in TLS ("telnets", usually port 992).
     public var telnetSecure: Bool
+    /// Telnet over TLS: the Keychain identity (persistent reference) shown to a BBS that asks for
+    /// a client certificate, and its name for the form. Not exported.
+    public var tlsClientIdentity: Data?
+    public var tlsClientIdentityName: String
     /// Answers a BBS's IEMSI request (**EMSI_IRQ) with the username and saved password.
     public var iemsi: Bool
 
@@ -172,6 +176,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         zmodemAutoAccept = false
         emulation = .ansiBBS
         telnetSecure = false
+        tlsClientIdentity = nil
+        tlsClientIdentityName = ""
         iemsi = false
     }
 
@@ -208,7 +214,7 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         case webSocketTelnet, rloginClientUser, rloginServerUser, rloginClientIsPassword
         case musicMode
         case transferProtocol, downloadFolderBookmark, downloadFolderName, zmodemAutoAccept
-        case emulation, telnetSecure, iemsi
+        case emulation, telnetSecure, iemsi, tlsClientIdentity, tlsClientIdentityName
     }
 
     /// Missing or out of range fields fall back to the defaults, so older (plan 7) or hand edited books load.
@@ -259,6 +265,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         if let value = try? c.decode(TerminalEmulation.self, forKey: .emulation) { emulation = value }
         if let value = try? c.decode(Bool.self, forKey: .telnetSecure) { telnetSecure = value }
         if let value = try? c.decode(Bool.self, forKey: .iemsi) { iemsi = value }
+        tlsClientIdentity = try? c.decode(Data.self, forKey: .tlsClientIdentity)
+        tlsClientIdentityName = (try? c.decode(String.self, forKey: .tlsClientIdentityName)) ?? ""
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -307,6 +315,8 @@ public struct BBSEntry: Codable, Equatable, Identifiable {
         try c.encode(emulation, forKey: .emulation)
         try c.encode(telnetSecure, forKey: .telnetSecure)
         try c.encode(iemsi, forKey: .iemsi)
+        try c.encodeIfPresent(tlsClientIdentity, forKey: .tlsClientIdentity)
+        if !tlsClientIdentityName.isEmpty { try c.encode(tlsClientIdentityName, forKey: .tlsClientIdentityName) }
     }
 
     private static func clampSize(_ value: Int) -> Int {

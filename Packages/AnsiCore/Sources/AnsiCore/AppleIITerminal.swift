@@ -7,6 +7,8 @@ public struct AppleIITerminal: TerminalEngine {
 
     private var grid: RetroGrid
     private var inverse = false
+    /// MouseText (Ctrl-[ on, Ctrl-X off): inverse 0x40-0x5F show the MouseText pictures.
+    private var mouseText = false
     private var afterCR = false
     /// A GotoXY (Ctrl-^) waiting for its column and row bytes.
     private var gotoBytes: [UInt8]?
@@ -60,6 +62,8 @@ public struct AppleIITerminal: TerminalEngine {
         case 0x0D: grid.column = 0; grid.lineFeed()
         case 0x0E: inverse = false
         case 0x0F: inverse = true
+        case 0x1B: mouseText = true
+        case 0x18: mouseText = false
         case 0x15, 0x1C: grid.column = min(columns - 1, grid.column + 1)
         case 0x19: grid.row = 0; grid.column = 0
         case 0x1A: for c in 0..<columns { grid.cells[grid.row][c] = grid.blank }
@@ -79,7 +83,8 @@ public struct AppleIITerminal: TerminalEngine {
     private mutating func put(_ b: UInt8) {
         var code = b
         if upperCaseOnly, (0x61...0x7A).contains(code) { code -= 0x20 }
-        grid.cells[grid.row][grid.column] = RetroGrid.Cell(glyph: UInt16(code), text: code,
+        let glyph = mouseText && inverse && (0x40...0x5F).contains(code) ? UInt16(128 + Int(code) - 0x40) : UInt16(code)
+        grid.cells[grid.row][grid.column] = RetroGrid.Cell(glyph: glyph, text: code,
                                                            fg: inverse ? Self.background : Self.foreground,
                                                            bg: inverse ? Self.foreground : Self.background)
         if grid.column == columns - 1 {

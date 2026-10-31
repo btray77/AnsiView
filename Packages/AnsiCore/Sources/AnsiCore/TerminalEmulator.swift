@@ -1,3 +1,5 @@
+import Foundation
+
 /// How a BBS's text bytes are read: DOS code page 437 (the BBS norm) or UTF-8.
 public enum TextEncoding: String, Codable, CaseIterable {
     case cp437, utf8
@@ -17,6 +19,9 @@ public enum TerminalProfile: Equatable {
     case vt220
     /// The Amiga console: ISO 8859-1 text, 0x9B as CSI, LF also returns the carriage.
     case amiga
+    /// DEC VT52 with the Atari ST extensions (colours, reverse, save and restore, line erases).
+    /// No CSI sequences; ESC < switches to VT100.
+    case vt52
 
     var isDEC: Bool { self == .vt100 || self == .vt220 }
 }
@@ -53,7 +58,7 @@ public struct TerminalEmulator {
     private var row = 0
     private var column = 0
     private var pendingWrap = false
-    private var autowrap = true
+    public private(set) var autowrap = true
     private var attributes = TextAttributes()
     /// iCE colours: the blink attribute gives a bright background instead of blinking text.
     public var iceColors = false
@@ -77,8 +82,33 @@ public struct TerminalEmulator {
     private var bottom: Int
     private var saved: (row: Int, column: Int, attributes: TextAttributes) = (0, 0, TextAttributes())
     private var replies: [UInt8] = []
+    /// VT52 state: the row of ESC Y, which colour ESC b or c sets, graphics mode (ESC F).
+    private var vt52Row = 0
+    private var vt52Background = false
+    private var vt52Graphics = false
+    /// Control strings that may be pictures (DCS for sixel, OSC for iTerm2), kept while they arrive.
+    private var controlKind: UInt8 = 0
+    private var controlBuffer: [UInt8] = []
+    private var controlOverflow = false
+    /// Pictures from the BBS, anchored to absolute lines (`scrolledLines` counts every line that
+    /// ever scrolled into the scrollback).
+    private var placedImages: [PlacedTerminalImage] = []
+    private var scrolledLines = 0
+    private var nextImageID = 0
+    private var fontLoads = 0
+    /// Mouse reporting asked for by the BBS: 9 (X10, presses only), 1000 (presses and releases),
+    /// 0 off; SGR coordinates (1006).
+    public private(set) var mouseTracking = 0
+    private var sgrMouse = false
+    /// CTerm loadable fonts by slot (`DCS CTerm:Font:n:<base64> ST`) and the one selected for the
+    /// primary font with `CSI 0 ; n SP D`.
+    private var loadedFonts: [Int: BitmapFont] = [:]
+    private var selectedFont: BitmapFont?
+    var selectedFontForEngine: BitmapFont? { selectedFont }
+    /// The character cell in pixels, for sizing pictures (the app sets it from its font).
+    public var imageCellSize = (width: 8, height: 16)
 
-    private enum ParseState { case ground, escape, charset, csi, controlString, controlStringEscape }
+    private enum ParseState { case ground, escape, charset, csi, controlString, controlStringEscape, vt52Row, vt52Column, vt52Colour }
     private var state = ParseState.ground
     private var parameters: [Int?] = []
     private var currentParameter: Int?
@@ -135,6 +165,7 @@ public struct TerminalEmulator {
 
     public mutating func clearScrollback() {
         scrollback.removeAll()
+        placedImages.removeAll { $0.line < scrolledLines }
         changeCount &+= 1
     }
 
@@ -177,17 +208,46 @@ public struct TerminalEmulator {
         case .csi:
             csiByte(byte)
         case .controlString:
-            // APC, OSC, DCS, PM and SOS strings (window titles, SyncTERM probes) are skipped,
-            // up to ST (ESC \) or BEL. Nothing is kept, so a string that never ends costs nothing.
+            // APC, PM and SOS strings (SyncTERM probes) are skipped up to ST (ESC \) or BEL. DCS
+            // and OSC strings are kept, up to a limit, for sixel and iTerm2 pictures.
             switch byte {
             case 0x1B: state = .controlStringEscape
-            case 0x07, 0x18, 0x1A: state = .ground
-            default: break
+            case 0x07:
+                state = .ground
+                finishControlString()
+            case 0x18, 0x1A:
+                state = .ground
+                controlBuffer.removeAll()
+            default:
+                if controlKind != 0, !controlOverflow {
+                    if controlBuffer.count < TerminalImageLimits.maxPayloadBytes {
+                        controlBuffer.append(byte)
+                    } else {
+                        controlOverflow = true
+                        controlBuffer = []
+                    }
+                }
             }
+        case .vt52Row:
+            vt52Row = Int(byte) - 32
+            state = .vt52Column
+        case .vt52Column:
+            state = .ground
+            row = min(rows - 1, max(0, vt52Row))
+            column = min(columns - 1, max(0, Int(byte) - 32))
+            pendingWrap = false
+        case .vt52Colour:
+            state = .ground
+            // Atari ST palette order (white, red, green, yellow, blue, magenta, cyan, light grey,
+            // grey, light red, light green, light yellow, light blue, light magenta, light cyan, black).
+            let vga = [15, 4, 2, 6, 1, 5, 3, 7, 8, 12, 10, 14, 9, 13, 11, 0][Int(byte & 15)]
+            if vt52Background { attributes.bg = .rgb(Palette.vga[vga]) } else { attributes.fg = .rgb(Palette.vga[vga]) }
         case .controlStringEscape:
             if byte == UInt8(ascii: "\\") {
                 state = .ground
+                finishControlString()
             } else {
+                controlBuffer.removeAll()
                 escape(byte)
             }
         }
@@ -260,6 +320,7 @@ public struct TerminalEmulator {
 
     private mutating func escape(_ byte: UInt8) {
         state = .ground
+        if profile == .vt52 { vt52Escape(byte); return }
         switch byte {
         case UInt8(ascii: "["):
             startCSI()
@@ -268,6 +329,9 @@ public struct TerminalEmulator {
             state = .charset
         case UInt8(ascii: "_"), UInt8(ascii: "]"), UInt8(ascii: "P"), UInt8(ascii: "^"), UInt8(ascii: "X"):
             state = .controlString
+            controlKind = byte == UInt8(ascii: "P") || byte == UInt8(ascii: "]") ? byte : 0
+            controlBuffer.removeAll(keepingCapacity: false)
+            controlOverflow = false
         case UInt8(ascii: "7"): saved = (row, column, attributes)
         case UInt8(ascii: "8"):
             row = saved.row; column = saved.column; attributes = saved.attributes
@@ -276,6 +340,143 @@ public struct TerminalEmulator {
         case UInt8(ascii: "E"): pendingWrap = false; column = 0; lineFeed()
         case UInt8(ascii: "M"): pendingWrap = false; reverseIndex()
         case UInt8(ascii: "c"): reset()
+        case 0x1B: state = .escape
+        default: break
+        }
+    }
+
+    // MARK: Pictures
+
+    /// Pictures on the screen (or `scrollOffset` lines back): `line` is the row relative to the top
+    /// of what is shown (negative when the picture starts above it).
+    public func images(scrollOffset: Int) -> [PlacedTerminalImage] {
+        let offset = min(max(0, scrollOffset), scrollback.count)
+        let top = scrolledLines - offset
+        return placedImages.compactMap { placed in
+            var visible = placed
+            visible.line = placed.line - top
+            return visible.line + placed.rows > 0 && visible.line < rows ? visible : nil
+        }
+    }
+
+    private mutating func finishControlString() {
+        let kind = controlKind, body = controlBuffer, overflow = controlOverflow
+        controlKind = 0
+        controlBuffer = []
+        controlOverflow = false
+        guard !overflow, !body.isEmpty else { return }
+        let fontPrefix = Array("CTerm:Font:".utf8)
+        if kind == UInt8(ascii: "P"), body.starts(with: fontPrefix) {
+            loadFont(Array(body.dropFirst(fontPrefix.count)))
+        } else if kind == UInt8(ascii: "P"), let image = SixelDecoder.decode(body) {
+            place(image, columns: nil, rows: nil)
+        } else if kind == UInt8(ascii: "]"), let request = ITerm2Image.parse(body), request.inline,
+                  let image = ITerm2Image.decode(request.data) {
+            let cw = max(1, imageCellSize.width), ch = max(1, imageCellSize.height)
+            func pixels(_ size: ITerm2Image.Size, natural: Int, cell: Int, cells: Int) -> Int? {
+                switch size {
+                case .auto: return nil
+                case .cells(let n): return n * cell
+                case .pixels(let n): return n
+                case .percent(let n): return cells * cell * n / 100
+                }
+            }
+            var w = pixels(request.width, natural: image.width, cell: cw, cells: columns)
+            var h = pixels(request.height, natural: image.height, cell: ch, cells: rows)
+            if w == nil, h == nil { w = image.width; h = image.height }
+            if w == nil, let h { w = h * image.width / max(1, image.height) }
+            if h == nil, let w { h = w * image.height / max(1, image.width) }
+            place(image, columns: (w! + cw - 1) / cw, rows: (h! + ch - 1) / ch)
+        }
+    }
+
+    /// A CTerm loadable font: `slot:base64`, 8 pixels wide, its height from the size (8, 14 or 16).
+    private mutating func loadFont(_ text: [UInt8]) {
+        guard let colon = text.firstIndex(of: UInt8(ascii: ":")),
+              let slot = Int(String(decoding: text[..<colon], as: UTF8.self)), (0...255).contains(slot),
+              let data = Data(base64Encoded: Data(text[(colon + 1)...]), options: .ignoreUnknownCharacters) else { return }
+        let heights = [2048: 8, 3584: 14, 4096: 16]
+        guard let height = heights[data.count] else { return }
+        if loadedFonts.count >= 16, loadedFonts[slot] == nil { return }
+        fontLoads &+= 1
+        // Each load gets its own name, so a font loaded again into a slot is seen as new.
+        loadedFonts[slot] = BitmapFont(rawGlyphs: [UInt8](data), height: height, name: "CTerm font \(slot) load \(fontLoads)")
+    }
+
+    /// The bytes that report a mouse button (0 left, 1 middle, 2 right) pressed or released at a
+    /// cell (zero based), in the mode the BBS asked for; empty when it asked for none.
+    public mutating func mouse(column: Int, row: Int, button: Int, pressed: Bool) -> [UInt8] {
+        guard mouseTracking != 0 else { return [] }
+        if mouseTracking == 9, !pressed { return [] }
+        if sgrMouse {
+            return Array("\u{1B}[<\(button);\(column + 1);\(row + 1)\(pressed ? "M" : "m")".utf8)
+        }
+        // One byte per coordinate: positions past 222 cannot be sent.
+        guard column + 33 <= 255, row + 33 <= 255 else { return [] }
+        let code = pressed ? button : 3
+        return [0x1B, 0x5B, 0x4D, UInt8(32 + code), UInt8(33 + column), UInt8(33 + row)]
+    }
+
+    /// Puts a picture at the cursor and moves the cursor to the start of the line below it.
+    private mutating func place(_ image: TerminalImage, columns wanted: Int?, rows tall: Int?) {
+        let cw = max(1, imageCellSize.width), ch = max(1, imageCellSize.height)
+        let spanColumns = max(1, min(columns, wanted ?? (image.width + cw - 1) / cw))
+        let spanRows = max(1, min(1000, tall ?? (image.height + ch - 1) / ch))
+        let new = PlacedTerminalImage(id: nextImageID, image: image, line: scrolledLines + row, column: column,
+                                      columns: spanColumns, rows: spanRows)
+        nextImageID &+= 1
+        // A picture wholly covered by the new one can never show again.
+        placedImages.removeAll { old in
+            old.line >= new.line && old.line + old.rows <= new.line + new.rows
+                && old.column >= new.column && old.column + old.columns <= new.column + new.columns
+        }
+        placedImages.append(new)
+        if placedImages.count > TerminalImageLimits.maxImages {
+            placedImages.removeFirst(placedImages.count - TerminalImageLimits.maxImages)
+        }
+        var total = placedImages.reduce(0) { $0 + $1.image.width * $1.image.height }
+        while total > TerminalImageLimits.maxTotalPixels, placedImages.count > 1 {
+            let dropped = placedImages.removeFirst()
+            total -= dropped.image.width * dropped.image.height
+        }
+        pendingWrap = false
+        column = 0
+        for _ in 0..<min(spanRows, rows) { lineFeed() }
+    }
+
+    private mutating func vt52Escape(_ byte: UInt8) {
+        pendingWrap = false
+        switch byte {
+        case UInt8(ascii: "A"): row = max(0, row - 1)
+        case UInt8(ascii: "B"): row = min(rows - 1, row + 1)
+        case UInt8(ascii: "C"): column = min(columns - 1, column + 1)
+        case UInt8(ascii: "D"): column = max(0, column - 1)
+        case UInt8(ascii: "H"): row = 0; column = 0
+        case UInt8(ascii: "I"): reverseIndex()
+        case UInt8(ascii: "J"): eraseDisplay(0)
+        case UInt8(ascii: "K"): eraseLine(0)
+        case UInt8(ascii: "Y"): state = .vt52Row
+        case UInt8(ascii: "Z"): replies += [0x1B, 0x2F, 0x4B]
+        case UInt8(ascii: "F"): vt52Graphics = true
+        case UInt8(ascii: "G"): vt52Graphics = false
+        case UInt8(ascii: "<"):
+            profile = .vt100
+            vt52Graphics = false
+        // Atari ST extensions.
+        case UInt8(ascii: "E"): eraseDisplay(2)
+        case UInt8(ascii: "b"): vt52Background = false; state = .vt52Colour
+        case UInt8(ascii: "c"): vt52Background = true; state = .vt52Colour
+        case UInt8(ascii: "d"): eraseDisplay(1)
+        case UInt8(ascii: "e"): cursorVisible = true
+        case UInt8(ascii: "f"): cursorVisible = false
+        case UInt8(ascii: "j"): saved = (row, column, attributes)
+        case UInt8(ascii: "k"): row = saved.row; column = saved.column
+        case UInt8(ascii: "l"): eraseLine(2); column = 0
+        case UInt8(ascii: "o"): eraseLine(1)
+        case UInt8(ascii: "p"): attributes.inverse = true
+        case UInt8(ascii: "q"): attributes.inverse = false
+        case UInt8(ascii: "v"): autowrap = true
+        case UInt8(ascii: "w"): autowrap = false
         case 0x1B: state = .escape
         default: break
         }
@@ -335,6 +536,8 @@ public struct TerminalEmulator {
                 if value == 7 { autowrap = on; if !on { pendingWrap = false } }
                 if value == 1, profile.isDEC { applicationCursorKeys = on }
                 if value == 33 { iceColors = on }
+                if value == 9 || value == 1000 { mouseTracking = on ? value : 0 }
+                if value == 1006 { sgrMouse = on }
                 if value == 6 {
                     originMode = on
                     row = on ? top : 0
@@ -435,6 +638,7 @@ public struct TerminalEmulator {
             case .vt100: replies += Array("\u{1B}[?1;2c".utf8)
             case .vt220: replies += Array("\u{1B}[?62;1;6c".utf8)
             case .ansiBBS, .amiga: replies += Array("\u{1B}[?1;0c".utf8)
+            case .vt52: break
             }
         default:
             break
@@ -482,8 +686,14 @@ public struct TerminalEmulator {
         switch (intermediate, final) {
         case (0x20, UInt8(ascii: "D")):
             // CTerm font selection: only the code page 437 fonts (0 and 26, thin) are bundled.
-            let font = parameter(1, 0)
-            fontSelectResult = parameter(0, 0) <= 3 && (font == 0 || font == 26) ? 0 : 1
+            let font = parameter(1, 0), page = parameter(0, 0)
+            if page == 0, let loaded = loadedFonts[font] {
+                selectedFont = loaded
+                fontSelectResult = 0
+            } else {
+                if page == 0, font == 0 || font == 26 { selectedFont = nil }
+                fontSelectResult = page <= 3 && (font == 0 || font == 26) ? 0 : 1
+            }
         case (UInt8(ascii: "*"), UInt8(ascii: "r")):
             let speeds = [0, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 76800, 115200]
             let first = parameter(0, 0), index = parameter(1, 0)
@@ -540,6 +750,16 @@ public struct TerminalEmulator {
     /// Cursor keys follow DECCKM; everything else is the ANSI-BBS keyboard.
     public func bytes(for key: TerminalKey, backspaceSendsDelete: Bool) -> [UInt8] {
         if doorwayMode, let scan = Self.doorwayScanCode(key) { return [0x00, scan] }
+        if profile == .vt52 {
+            switch key {
+            case .up: return [0x1B, 0x41]
+            case .down: return [0x1B, 0x42]
+            case .right: return [0x1B, 0x43]
+            case .left: return [0x1B, 0x44]
+            case .home: return [0x1B, 0x48]
+            default: break
+            }
+        }
         if applicationCursorKeys {
             switch key {
             case .up: return [0x1B, 0x4F, 0x41]
@@ -600,6 +820,9 @@ public struct TerminalEmulator {
                 code = CP437.code(for: latin) ?? 0x3F
             }
         }
+        if profile == .vt52, vt52Graphics, scalar == nil, let mapped = DECGraphics.map(code) {
+            (code, scalar) = mapped
+        }
         if profile.isDEC, scalar == nil {
             switch charsets[shiftedOut ? 1 : 0] {
             case .ascii: break
@@ -612,7 +835,12 @@ public struct TerminalEmulator {
             grid[row].removeLast()
             grid[row].insert(blankCell, at: column)
         }
-        let colors = attributes.colors(iceColors: iceColors)
+        var colors = attributes.colors(iceColors: iceColors)
+        if profile == .amiga {
+            // The Amiga's colour 3 is a true dark yellow: no VGA brown.
+            if colors.fg == Palette.vga[6] { colors.fg = RGB(r: 0xAA, g: 0xAA, b: 0x00) }
+            if colors.bg == Palette.vga[6] { colors.bg = RGB(r: 0xAA, g: 0xAA, b: 0x00) }
+        }
         grid[row][column] = AnsiCell(code: code, fg: colors.fg, bg: colors.bg, blink: attributes.blink && !iceColors,
                                      scalar: scalar)
         if let glyph { grid[row][column].glyph = glyph }
@@ -645,8 +873,13 @@ public struct TerminalEmulator {
         for _ in 0..<min(n, bottom - top + 1) {
             let line = grid.remove(at: top)
             if top == 0 {
+                scrolledLines += 1
                 scrollback.append(line)
-                if scrollback.count > Self.maxScrollback { scrollback.removeFirst(scrollback.count - Self.maxScrollback) }
+                if scrollback.count > Self.maxScrollback {
+                    scrollback.removeFirst(scrollback.count - Self.maxScrollback)
+                    let oldest = scrolledLines - scrollback.count
+                    if !placedImages.isEmpty { placedImages.removeAll { $0.line + $0.rows <= oldest } }
+                }
             }
             grid.insert(blank, at: bottom)
         }
@@ -671,12 +904,14 @@ public struct TerminalEmulator {
             for c in 0...column { grid[row][c] = blank }
         case 2:
             // BBS terminals (like ANSI.SYS) also home the cursor.
+            if !placedImages.isEmpty { placedImages.removeAll { $0.line + $0.rows > scrolledLines } }
             grid = Array(repeating: blankRow, count: rows)
             row = 0
             column = 0
             pendingWrap = false
         case 3:
             scrollback.removeAll()
+            placedImages.removeAll { $0.line < scrolledLines }
         default:
             break
         }
@@ -697,11 +932,17 @@ public struct TerminalEmulator {
     private mutating func reset() {
         let kept = scrollback
         let changes = changeCount, bellCount = bells, keptProfile = profile, ice = entryIceColors
+        let lines = scrolledLines, cell = imageCellSize, fonts = loadedFonts, ids = nextImageID, loads = fontLoads
         self = TerminalEmulator(columns: columns, rows: rows, encoding: encoding)
         profile = keptProfile
         iceColors = ice
         entryIceColors = ice
         scrollback = kept
+        scrolledLines = lines
+        imageCellSize = cell
+        loadedFonts = fonts
+        nextImageID = ids
+        fontLoads = loads
         changeCount = changes
         bells = bellCount
     }

@@ -70,3 +70,11 @@ import Testing
     #expect(d.feed([0x93, 0x05, 0x0D, 0x1C]) == .petscii64)
     #expect(d.feed([0x93, 0x05, 0x0D, 0x1C]) == nil)
 }
+
+@Test func vt52IsNotTakenForViewdata() {
+    // VT52 commands are ESC and a letter, like Viewdata attributes: a VT52 entry is not offered Viewdata.
+    #expect(!TerminalDetector.shouldSuggest(.viewdata, current: .vt52))
+    #expect(TerminalDetector.shouldSuggest(.viewdata, current: .ansiBBS))
+    #expect(!TerminalDetector.shouldSuggest(.petscii64, current: .petscii128))
+    #expect(!TerminalDetector.shouldSuggest(.ansiBBS, current: .ansiBBS))
+}

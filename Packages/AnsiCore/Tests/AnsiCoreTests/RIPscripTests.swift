@@ -71,7 +71,7 @@ private func rip(_ text: String) -> RIPTerminal {
 }
 
 @Test func buttonDrawsAndClicks() {
-    var t = rip("!|1B0000020000020F000F080700000000000000\r\n!|1U0A0A3C1E0000<>OK<>ok^m\r\n")
+    var t = rip("!|1B00000200ZK020F000F080700000000000000\r\n!|1U0A0A3C1E0000<>OK<>ok^m\r\n")
     #expect(t.click(x: 20, y: 20) == Array("ok\r".utf8))
     #expect(t.canvas.pixel(30, 15) != 0)
 }
@@ -134,7 +134,7 @@ private func rip(_ text: String) -> RIPTerminal {
 @Test func engineFactoryMakesRIP() {
     let e = TerminalEngines.make(.ripscrip, columns: 80, rows: 25, encoding: .cp437, iceColors: false)
     #expect(e is RIPTerminal)
-    // The entry's font draws the text layer; the 640x350 picture is shown 4:3.
-    #expect(e.font == nil)
+    // RIPterm's EGA 8x14 text window over the 640x350 picture, shown 4:3.
+    #expect(e.font?.name == "IBM EGA" && e.font?.height == 14)
     #expect(abs(e.horizontalStretch - 0.729) < 0.001)
 }

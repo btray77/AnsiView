@@ -24,6 +24,7 @@ public enum IEMSI {
         switch emulation {
         case .avatar: return "AVT0"
         case .vt100, .vt220: return "VT100"
+        case .vt52: return "VT52"
         case .ansiBBS, .ripscrip, .amiga: return "ANSI"
         default: return "TTY"
         }

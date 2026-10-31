@@ -149,7 +149,8 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Retro phonebook (list, tags, search, sort, notes, call stats), per-BBS settings, Keychain passwords, expect/send auto-login, dial queue with redial and busy detection, macros, JSON and SyncTERM import/export | done (local test server; real-BBS logins need owner), merged item 63 |
 | SSH keys, RLogin users, WebSocket fields, per protocol hints, SyncTERM SSH/RLogin import | done (merged) |
 | IEMSI | done on branch `ansiview-2.0-terminal-compat`, opt in per entry (unit tested handshake; a live AmiExpress board was seen sending `**EMSI_IRQ8E08`; not run against a real login) |
-| Sixel, iTerm2 images, TLS client certificates | planned (not in the terminal compatibility pass) |
+| TLS client certificates | done on branch `ansiview-2.0-terminal-gaps`: per entry Keychain identity (local OpenSSL s_server with -Verify 1 accepts it and refuses a connection without); Keychain access from the sandboxed app not tried with a real identity (needs owner) |
+| Sixel and iTerm2 inline pictures | done on branch `ansiview-2.0-terminal-gaps` (decoders fuzzed, memory bounded, harness PNG `ansi-pictures`); no live board sending pictures was found |
 
 ## Terminal emulations (branch `ansiview-2.0-terminal-compat`, docs/BBS-COMPAT.md "Terminal")
 
@@ -159,16 +160,17 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | VT100 / VT220 | done (harness) |
 | Avatar AVT/0+ | done (harness) |
 | PETSCII C64 | done (harness, live Synchronet port 64 and a Color 64 / Image BBS board) |
-| PETSCII C128 80 column | partial (live Synchronet port 128; no underline or C128 escapes) |
-| ATASCII | done (harness; live boards wait for Return before art) |
+| PETSCII C128 80 column | done (live Synchronet port 128; underline and the screen editor ESC codes added on `ansiview-2.0-terminal-gaps`, harness PNG `c128-underline`) |
+| ATASCII | done (harness; live boards wait for Return before art); inverse typing key (Terminal > Atari Inverse Video Key) |
 | Viewdata / Prestel | done (harness, live Telstar and NXtel) |
-| BBC Mode 7 | done (harness; live board showed only a bot check) |
-| Apple II | done (harness, live GBBS Pro and Warp Six) |
-| Amiga ANSI | partial (Topaz style font, ISO 8859-1, live AmiExpress; Amiga palettes not done) |
-| RIPscrip 1.54 | partial (vector drawing, fills, text, buttons and mouse fields in harness; icons, scenes, stroke fonts not done; no RIP seen live before login) |
+| BBC Mode 7 | done (harness; live board showed only a bot check); VDU 22 modes 0-6 with text colours and PLOT graphics (move, line, point, filled triangle, GCOL, CLG) on `ansiview-2.0-terminal-gaps`, harness PNG `bbc-mode1`; no VDU 23 character definitions |
+| Apple II | done (harness, live GBBS Pro and Warp Six); MouseText (32 original pictures) on `ansiview-2.0-terminal-gaps`, harness PNG `appleii-mousetext` |
+| Amiga ANSI | done for what was seen (Topaz style font, ISO 8859-1, live AmiExpress); colour 3 is dark yellow, not VGA brown; other Amiga palette differences are terminal program settings (inferred), not done |
+| RIPscrip 1.54 (roadmap 57 RIPscrip viewing) | done on `ansiview-2.0-terminal-gaps`: icons from a chosen folder, session icons (1W), scenes (1R), file queries (1F), copy region (1G), text variable queries, block transfer requests reported, original stroke fonts 1-10 sized from the spec's metric tables, button styles, radio and check box groups, hotkeys, per feed drawing budget; .RIP files in the viewer, Quick Look (harness PNG) and ansirender. No RIP seen live before login |
 | First bytes detection (suggest only) | done (harness) |
 | Original platform fonts (PETSCII, ATASCII, teletext, Apple II, Topaz style) | done, MIT, docs/FONTS.md |
-| VT52, Sixel, iTerm2 images | not done |
+| VT52 (Atari ST extensions) | done on `ansiview-2.0-terminal-gaps` (tests, harness PNG `vt52`); no live VT52 board found |
+| Mouse reporting (CSI ? 9/1000/1006 h), CTerm loadable fonts | done on `ansiview-2.0-terminal-gaps` (unit tests; no live board asked) |
 
 ## 16colo.rs browsing
 

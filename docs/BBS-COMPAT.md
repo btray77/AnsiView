@@ -131,7 +131,7 @@ type when the first bytes look like another family (it never switches by itself)
 | BBC Mode 7 | BeeBS, Premiere BBS on a BBC Master | Teletext attributes in 0x80-0x9F, VDU codes (31 x y, 12, 30, 8-11, 127), the BBC's #/_/` swap, scrolling | Mode 7 (BBC Micro) |
 | Apple II | GBBS Pro, ProLine, Warp Six | ASCII with the high bit set, CR new line, inverse and the 80 column card codes (^L, ^Y, ^], ^K, ^^ x y) | Apple II (80x24 default) |
 | Amiga | AmiExpress (/X), Ami-Express telnet | ANSI with ISO 8859-1 text, Topaz font, 0x9B as CSI, LF returns the carriage, `CSI 0 SP q` window report, `CSI SP p` cursor | Amiga ANSI |
-| Atari ST | Some ST boards | VT52 | not done (see coverage) |
+| Atari ST | Some ST boards | VT52 with the ST's extensions (ESC b/c colours, ESC p/q reverse, ESC j/k, ESC E clear) | VT52 (Atari ST) |
 | TRS-80 | very few boards | plain ASCII, 64x16 | covered by ANSI-BBS or VT100 with a smaller size; no TRS-80 font |
 | IEMSI | AmiExpress (seen live), Maximus, RemoteAccess, Mystic | `**EMSI_IRQ8E08` from the BBS, the terminal answers `**EMSI_ICI` with name, password and terminal | opt in per entry ("IEMSI login") |
 | Telnet over TLS | Mystic, Wildcat and some others on port 992 (stock Synchronet has no TLS telnet) | TLS, usually a self signed certificate | Telnet "Secure (TLS)" toggle, trust on first use |
@@ -160,6 +160,7 @@ the Telnet BBS Guide list for October 2026 (https://www.telnetbbsguide.com/bbsli
 | Viewdata | PRESTEL, VIEWDATA | SyncTERM sends `Prestel` |
 | Mode 7 | BBC, MODE7 | SyncTERM sends `Beeb7` (inferred acceptable; no board seen to check) |
 | Apple II, Amiga | APPLE2, DUMB / AMIGA, ANSI | |
+| VT52 | VT52, ATARI-ST, DUMB | inferred; no VT52 board was found to check |
 
 ### Coverage
 
@@ -168,21 +169,22 @@ the Telnet BBS Guide list for October 2026 (https://www.telnetbbsguide.com/bbsli
 | ANSI-BBS (plan 7 behaviour) | done, unchanged | `TerminalRegressionTests`: seeded streams and the 61 file TWSUPP corpus digest identical to main 499f22c | |
 | CTerm extensions | done | `CTermTests` (iCE mode 33, `CSI = 1/2/3 n`, `CSI 255 n`, `CSI < 0 c`, DECRQM, DoorWay keys, font select result, speed requests apply to the simulated baud); live: Synchronet 3.22 (vert) drew its ANSI logo after its probes | loadable fonts (DCS CTerm:Font), APC SyncTERM cache and JXL/PPM graphics, mouse reporting, status line, fonts other than CP437 (select answers "failed"); the DA reply stays plan 7's `CSI ? 1 ; 0 c` on purpose. New in ANSI-BBS (CTerm extensions, after review): origin mode `?6`, iCE `?33`, `CSI = n`, `CSI 255 n`, DECRQM; DECCKM `?1` stays VT only |
 | VT100 / VT220 | done | `VTTerminalTests`; harness PNG `vt100` | VT52, double width lines, DECALN, keypad application mode, 132 column switching by sequence |
-| Avatar | done | `AvatarTerminalTests` (split byte by byte, random 200 KB); harness PNG `avatar` | live: the RemoteAccess listed board now runs Mystic and sent ANSI only |
+| Avatar | done | `AvatarTerminalTests` (split byte by byte, random 200 KB); harness PNG `avatar`; a fill keeps autowrap off when the BBS turned it off and ^L stores its attribute (`PlatformMinorTests`) | live: the RemoteAccess listed board now runs Mystic and sent ANSI only |
 | PETSCII C64 | done | `PETSCIITerminalTests`; live Synchronet port 64 (Vertrauen logo, lower case set) and Color 64 / Image BBS 64 greeting | colour keys with the C= key (Control 1-8 give the CTRL colours) |
-| PETSCII C128 80 col | partial | live Synchronet port 128 art drawn with the VDC palette; flash 0x0F/0x8F | underline, C128 ESC sequences |
-| ATASCII | done (engine) | `ATASCIITerminalTests`; live: BBS Express Pro greeting with 0x9B EOLs | inverse typing toggle key; live boards wait for Return before art |
+| PETSCII C128 80 col | done | live Synchronet port 128 art drawn with the VDC palette; flash 0x0F/0x8F; underline 0x02/0x82 and ESC @ J K Q P D I V W (`PlatformMinorTests`, harness PNG `c128-underline`) | C128 window ESC codes (T, B) and ESC X 40/80 switch are ignored |
+| ATASCII | done | `ATASCIITerminalTests`; live: BBS Express Pro greeting with 0x9B EOLs; inverse typing (Terminal > Atari Inverse Video Key, `atasciiInverseTyping`) | live boards wait for Return before art |
 | Viewdata / Prestel | done | `TeletextTerminalTests`; live Telstar (raw TCP) and NXtel front pages drawn with double height, colours and mosaics | ENQ identity reply, Prestel 7E1 ports (use the 8N1 ports) |
-| Mode 7 | done | tests and harness PNG; live BeeBS sent only a bot check prompt | BBC graphics modes 0-6, VDU 23 character definitions |
-| Apple II | done | `AppleIIAmigaTests`; live GBBS Pro and Warp Six greetings | MouseText glyphs, 40 column ProTERM emulation |
-| Amiga | partial | live AmiExpress 5.5 (Fastline) greeting in Topaz style font | Amiga palettes (the ANSI colours stay VGA), `CSI > n m` background pen |
-| RIPscrip 1.54 | partial | `RIPscripTests`; harness PNG of an original RIP menu with buttons; live Serion (Synchronet) sent the `ESC[!_` probe (measured); AnsiView's `RIPSCRIP015400` answer is unit tested but was not logged on the wire (inferred sent); the board shows RIP only after login | icons (1I/1W), scene and file queries (1R/1F), block transfers (9), BGI stroke fonts (AnsiView's 8x8 font is scaled), button group/radio flags, 1G copy region |
+| Mode 7 | done | tests and harness PNG; live BeeBS sent only a bot check prompt; VDU 22 modes 0-6: the mode's text grid in plain colours (VDU 17, 19) over PLOT graphics (VDU 25 move, line, point, filled triangle; GCOL; CLG), harness PNG `bbc-mode1` | VDU 23 character definitions, PLOT circles and fills other than triangles, text windows (VDU 28) |
+| Apple II | done | `AppleIIAmigaTests`; live GBBS Pro and Warp Six greetings; MouseText (Ctrl-[ on, Ctrl-X off, 32 original pictures, harness PNG `appleii-mousetext`) | 40 column ProTERM emulation |
+| Amiga | done for what was seen | live AmiExpress 5.5 (Fastline) greeting in Topaz style font; colour 3 drawn dark yellow (the Amiga had no VGA brown) | other palettes: Amiga terminal programs set their own (inferred), `CSI > n m` background pen |
+| RIPscrip 1.54 | done | `RIPscripTests`, `RIPGapsTests`, `RIPFileTests`; harness PNGs `rip-showcase` (terminal) and `ql-rip` (Quick Look); icons (1I, BGI image layout, plane 3 first as the spec's bytes show) from the folder chosen in Terminal > RIP Icon Folder; 1W keeps icons for the session only; scenes (1R, one level); file queries (1F modes 0-4); 1G; text variable queries (1 ESC, mode 0 answered, modes 1-2 on clicks); block transfers (9 ESC) shown in the status line; original stroke fonts 1-10; button styles, radio and check box groups, hotkeys; drawing budget per feed; .RIP files open in the viewer, Quick Look and ansirender. Live Serion sent the `ESC[!_` probe; RIP itself only after login (not seen) | personal text variables ($FULL_NAME$ and such) answer blank; hot icons (.HIC) and the explode effect; 9 ESC starts no transfer by itself (Zmodem auto start covers that protocol) |
 | Detection | done | `TerminalDetectorTests`; harness PNG `detect-petscii-on-ansi` and `detect-switched` | |
 | Telnet over TLS | done (local proof) | `telnetOverTLSWithASelfSignedCertificate` against OpenSSL 3.0.4 `s_server`: first use asks, same certificate silent, changed refused, declined refused | live: the two listed TLS boards refused (cfbbs.net:992) or did not answer (bbs.buema.ch:922) |
 | IEMSI | done (local proof) | `IEMSITests` (CRC-16 and CRC-32 check values, ICI packet, NAK retries, double ACK); live: AmiExpress sends `**EMSI_IRQ8E08` | not run against a real BBS (it would send a password) |
-| Sixel, iTerm2 images | not done | | time; would need an image layer per cell region |
-| VT52 (Atari ST) | not done | | |
-| TLS client certificates | not done | | |
+| Sixel, iTerm2 images | done | `TerminalImageTests` (decoders fuzzed with seeded random input; limits 8 MB payload, 4096 px side, 4 M pixels per picture, 12 M per terminal); harness PNG `ansi-pictures` | no live board sending pictures found; sixel pixel aspect (P1) and iTerm2 file downloads (inline=0) |
+| VT52 (Atari ST) | done | `VT52Tests` (split byte by byte); harness PNG `vt52` | no live VT52 board found |
+| TLS client certificates | done (local proof) | `serverThatRequiresAClientCertificate`: OpenSSL 3 s_server with -Verify 1 accepts AnsiView with the identity and refuses it without; mutation check (identity dropped in BBSClient) fails the test | not tried with a Keychain identity inside the sandboxed app (needs owner) |
+| Mouse reporting, CTerm loadable fonts | done | `MouseAndFontTests`: CSI ? 9 / 1000 / 1006 h, DCS CTerm:Font then CSI 0;n SP D | releases use button 3 as xterm does (cterm.adoc says 4); no live board asked |
 
 ### Live observations (read only)
 
@@ -214,6 +216,14 @@ to PNG. Byte counts are what the screen received.
 
 ### Found along the way
 
-- The bundled EGA 8x14 font rasterizes with a blank first row and last column (the full block 0xDB
-  comes out 7x13), so SAUCE "IBM EGA" art shows thin gaps. Measured with `BitmapFont.named("IBM EGA").pixels(for: 0xDB)`.
-  Not changed here (it would change existing renders); the RIPscrip text layer uses the entry's font instead.
+- The bundled EGA 8x14 font rasterized with a blank first row and last column (the full block 0xDB
+  came out 7x13, 91 lit pixels), so SAUCE "IBM EGA" art showed thin gaps. Cause: the TTF's pixel grid
+  is 16 points (1600 units per em, 800 per advance), not its 14 pixel height. Fixed on
+  `ansiview-2.0-terminal-gaps` (`EGAFontTests`: 112 lit pixels). No TWSUPP file uses IBM EGA: all 68
+  corpus PNGs are md5 identical to df2546a. The RIPscrip text layer now uses it (80x25 cells cover 640x350).
+- Flaky transport tests under load: Swift Testing's cooperative pool starved the test task (a 10 ms
+  `Task.sleep` measured resuming 9.5 s late) while the client's 15 s connect timeout ran on its own
+  queue. Tests now use a long timeout where the timeout is not under test. Under 10 busy loops
+  (load 29 to 47): 4 of 4 suite runs failed before, 0 transport failures in 4 after.
+- VT52's ESC letter commands look like Viewdata attributes to the detector; a VT52 entry is no longer
+  offered Viewdata.

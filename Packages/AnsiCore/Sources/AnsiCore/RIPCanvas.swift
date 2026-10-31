@@ -34,6 +34,8 @@ public struct RIPCanvas {
     var position = (x: 0, y: 0)
     var font = 0, direction = 0, size = 1
     public private(set) var changeCount = 0
+    /// Pixels touched since the last `resetWork()`: the RIP terminal's drawing budget.
+    public private(set) var work = 0
     private var fillMarks: [UInt32] = []
     private var fillGeneration: UInt32 = 0
 
@@ -51,6 +53,8 @@ public struct RIPCanvas {
         self = RIPCanvas()
     }
 
+    mutating func resetWork() { work = 0 }
+
     mutating func setPalette(_ index: Int, ega value: Int) {
         guard (0..<16).contains(index) else { return }
         palette[index] = Self.ega(value & 63)
@@ -60,6 +64,7 @@ public struct RIPCanvas {
     // MARK: Pixels
 
     mutating func plot(_ x: Int, _ y: Int, _ c: UInt8) {
+        work &+= 1
         guard x >= viewport.x0, x <= viewport.x1, y >= viewport.y0, y <= viewport.y1 else { return }
         let i = y * width + x
         pixels[i] = xorMode ? (pixels[i] ^ c) & 15 : c & 15
@@ -74,12 +79,14 @@ public struct RIPCanvas {
         guard y >= viewport.y0, y <= viewport.y1 else { return }
         let a = max(x0, viewport.x0), b = min(x1, viewport.x1)
         guard a <= b else { return }
+        work &+= b - a + 1
         for x in a...b { pixels[y * width + x] = patternPixel(x, y) & 15 }
     }
 
     mutating func erase(x0: Int, y0: Int, x1: Int, y1: Int) {
         let left = max(0, x0), right = min(width - 1, x1), top = max(0, y0), bottom = min(height - 1, y1)
         guard left <= right, top <= bottom else { return }
+        work &+= (right - left + 1) * (bottom - top + 1)
         for y in top...bottom {
             for x in left...right { pixels[y * width + x] = 0 }
         }
@@ -187,6 +194,7 @@ public struct RIPCanvas {
             var right = px
             while right < viewport.x1, pixel(right + 1, py) != border, fillMarks[py * width + right + 1] != mark { right += 1 }
             for cx in left...right { fillMarks[py * width + cx] = mark }
+            work &+= right - left + 1
             box = (min(box.x0, left), min(box.y0, py), max(box.x1, right), max(box.y1, py))
             for ny in [py - 1, py + 1] where ny >= viewport.y0 && ny <= viewport.y1 {
                 var cx = left
@@ -223,12 +231,23 @@ public struct RIPCanvas {
 
     // MARK: Text
 
-    /// Draws text with AnsiView's own 8x8 font (font 0), scaled by `size` for the stroke fonts.
+    /// Draws text: font 0 is AnsiView's 8x8 font scaled by `size`; fonts 1 to 10 are the stroke
+    /// fonts (`RIPStrokeFont`), sized from the RIPscrip font metric tables. Direction 1 runs upwards.
     mutating func text(_ string: [UInt8], x: Int, y: Int) {
-        let scale = font == 0 ? max(1, size) : max(1, size / 2 + 1)
+        if font == 0 {
+            bitmapText(string, x: x, y: y)
+        } else {
+            strokeText(string, x: x, y: y)
+        }
+        changeCount &+= 1
+    }
+
+    private mutating func bitmapText(_ string: [UInt8], x: Int, y: Int) {
+        let scale = max(1, size)
         let glyphs = PlatformFonts.appleII
         var cx = x, cy = y
         for byte in string {
+            if direction == 0 ? cx > width : cy < 0 { break }
             let glyph = glyphs.pixels(glyph: Int(byte & 0x7F))
             for gy in 0..<8 {
                 for gx in 0..<8 where glyph[gy * 8 + gx] {
@@ -246,11 +265,153 @@ public struct RIPCanvas {
             if direction == 0 { cx += 8 * scale } else { cy -= 8 * scale }
         }
         position = (cx, cy)
+    }
+
+    /// Glyph units to pixels for the current stroke font and size.
+    private var strokeScale: Double {
+        let m = RIPStrokeFont.metrics(font: font, size: size)
+        return Double(max(1, m.base - m.top)) / 8
+    }
+
+    private func strokeAdvance(_ byte: UInt8) -> Int {
+        let style = RIPStrokeFont.style(font: font)
+        return max(1, Int((Double(RIPStrokeFont.advance(for: byte)) * style.narrow * strokeScale).rounded()))
+    }
+
+    private mutating func strokeText(_ string: [UInt8], x: Int, y: Int) {
+        let style = RIPStrokeFont.style(font: font)
+        let scale = strokeScale
+        let top = Double(RIPStrokeFont.metrics(font: font, size: size).top)
+        let brush = max(1, Int((style.weight * scale).rounded()))
+        var along = 0
+        for byte in string {
+            // Text past the edge draws nothing: stop there rather than walk the rest of the line.
+            if offCanvas(x: x, y: y, along: along) { along += string.count; break }
+            for stroke in RIPStrokeFont.strokes(for: byte) {
+                // Local offsets: `dx` along the text, `dy` down from the top of the cell.
+                let points: [(Int, Int)] = stroke.map { p in
+                    let dx = Double(along) + (Double(p.x) * style.narrow + style.slant * Double(8 - p.y)) * scale
+                    let dy = top + Double(p.y) * scale
+                    let ix = Int(dx.rounded()), iy = Int(dy.rounded())
+                    return direction == 0 ? (x + ix, y + iy) : (x + iy, y - ix)
+                }
+                for pass in 0..<(style.double ? 2 : 1) {
+                    let shift = pass * max(1, brush)
+                    if points.count == 1 { strokeLine(points[0], points[0], brush: brush, shift: shift) }
+                    for i in points.indices.dropFirst() { strokeLine(points[i - 1], points[i], brush: brush, shift: shift) }
+                }
+            }
+            along += strokeAdvance(byte)
+        }
+        position = direction == 0 ? (x + along, y) : (x, y - along)
+    }
+
+    /// A solid line drawn with a square brush (text ignores the line style).
+    private mutating func strokeLine(_ a: (Int, Int), _ b: (Int, Int), brush: Int, shift: Int) {
+        var x = a.0, y = a.1
+        let dx = abs(b.0 - a.0), dy = -abs(b.1 - a.1)
+        let sx = a.0 < b.0 ? 1 : -1, sy = a.1 < b.1 ? 1 : -1
+        var err = dx + dy, steps = 0
+        let offset = (brush - 1) / 2
+        while true {
+            for by in 0..<brush {
+                for bx in 0..<brush {
+                    if direction == 0 { plot(x + bx - offset + shift, y + by - offset, color) } else { plot(x + bx - offset, y + by - offset - shift, color) }
+                }
+            }
+            if x == b.0, y == b.1 { break }
+            let e2 = 2 * err
+            if e2 >= dy { err += dy; x += sx }
+            if e2 <= dx { err += dx; y += sy }
+            steps += 1
+            if steps > 4000 { break }
+        }
+    }
+
+    /// The longest start of `string` that fits in `width` pixels (one pass over the advances).
+    func fittingPrefix(_ string: [UInt8], width: Int) -> [UInt8] {
+        var used = 0
+        for (i, byte) in string.enumerated() {
+            used += font == 0 ? 8 * max(1, size) : strokeAdvance(byte)
+            if used > width { return Array(string[..<i]) }
+        }
+        return string
+    }
+
+    /// True once text running from (x, y) is wholly past the canvas edge it runs towards.
+    private func offCanvas(x: Int, y: Int, along: Int) -> Bool {
+        direction == 0 ? x + along > width + 8 : y - along < -8
+    }
+
+    /// The width of text in pixels in the current font.
+    func textWidth(_ string: [UInt8]) -> Int {
+        if font == 0 { return string.count * 8 * max(1, size) }
+        return string.reduce(0) { $0 + strokeAdvance($1) }
+    }
+
+    /// The height of a text line in pixels (cell top to the lowest descender).
+    var textHeight: Int {
+        font == 0 ? 8 * max(1, size) : RIPStrokeFont.metrics(font: font, size: size).drop + 1
+    }
+
+    // MARK: Images
+
+    /// RIP_PUT_IMAGE modes: 0 copy, 1 xor, 2 or, 3 and, 4 not.
+    mutating func put(_ source: [UInt8], width w: Int, height h: Int, x: Int, y: Int, mode: Int) {
+        guard w > 0, h > 0, source.count == w * h else { return }
+        for cy in 0..<h {
+            let py = y + cy
+            guard py >= viewport.y0, py <= viewport.y1 else { continue }
+            for cx in 0..<w {
+                let px = x + cx
+                guard px >= viewport.x0, px <= viewport.x1 else { continue }
+                let i = py * width + px, c = source[cy * w + cx] & 15, old = pixels[i]
+                switch mode {
+                case 1: pixels[i] = (old ^ c) & 15
+                case 2: pixels[i] = (old | c) & 15
+                case 3: pixels[i] = old & c
+                case 4: pixels[i] = ~c & 15
+                default: pixels[i] = c
+                }
+            }
+        }
+        work &+= w * h
         changeCount &+= 1
     }
 
-    /// The width of text in pixels.
-    func textWidth(_ count: Int) -> Int { count * 8 * (font == 0 ? max(1, size) : max(1, size / 2 + 1)) }
+    /// A copy of a screen rectangle (clamped), row major.
+    func region(x0: Int, y0: Int, x1: Int, y1: Int) -> (width: Int, height: Int, pixels: [UInt8])? {
+        let a = max(0, x0), b = max(0, y0), c = min(width - 1, x1), d = min(height - 1, y1)
+        guard c >= a, d >= b else { return nil }
+        var out: [UInt8] = []
+        out.reserveCapacity((c - a + 1) * (d - b + 1))
+        for y in b...d { out += pixels[(y * width + a)...(y * width + c)] }
+        return (c - a + 1, d - b + 1, out)
+    }
+
+    /// RIP_COPY_REGION: copies whole scan lines of a band (x widened to multiples of 8) to start at
+    /// `destination`; ignored when the copy would leave the screen. Not clipped to the viewport.
+    mutating func copyLines(x0: Int, y0: Int, x1: Int, y1: Int, destination: Int) {
+        let a = max(0, x0 / 8 * 8), c = min(width - 1, (x1 + 7) / 8 * 8)
+        guard c >= a, y1 >= y0, y0 >= 0, destination >= 0, destination != y0,
+              destination + (y1 - y0) < height, y1 < height else { return }
+        let band = (y0...y1).map { Array(pixels[($0 * width + a)...($0 * width + c)]) }
+        for (k, line) in band.enumerated() {
+            let start = (destination + k) * width + a
+            pixels.replaceSubrange(start..<(start + line.count), with: line)
+        }
+        work &+= band.count * (c - a + 1)
+        changeCount &+= 1
+    }
+
+    /// Inverts a rectangle's colours (selected buttons).
+    mutating func invert(x0: Int, y0: Int, x1: Int, y1: Int) {
+        let a = max(0, x0), b = max(0, y0), c = min(width - 1, x1), d = min(height - 1, y1)
+        guard c >= a, d >= b else { return }
+        for y in b...d { for x in a...c { pixels[y * width + x] ^= 15 } }
+        work &+= (c - a + 1) * (d - b + 1)
+        changeCount &+= 1
+    }
 
     // MARK: Image
 

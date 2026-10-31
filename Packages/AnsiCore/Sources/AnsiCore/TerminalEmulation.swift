@@ -1,13 +1,14 @@
 /// The kind of terminal a BBS expects: the PC ANSI-BBS norm, a DEC VT terminal, or a home computer
 /// of the 1980s with its own character set and control codes. Chosen per dialing directory entry.
 public enum TerminalEmulation: String, Codable, CaseIterable {
-    case ansiBBS, vt100, vt220, avatar, ripscrip, petscii64, petscii128, atascii, viewdata, mode7, appleII, amiga
+    case ansiBBS, vt100, vt220, vt52, avatar, ripscrip, petscii64, petscii128, atascii, viewdata, mode7, appleII, amiga
 
     public var label: String {
         switch self {
         case .ansiBBS: return "ANSI-BBS"
         case .vt100: return "VT100"
         case .vt220: return "VT220"
+        case .vt52: return "VT52 (Atari ST)"
         case .avatar: return "Avatar (AVT/0+)"
         case .ripscrip: return "RIPscrip"
         case .petscii64: return "PETSCII (C64)"
@@ -30,7 +31,7 @@ public enum TerminalEmulation: String, Codable, CaseIterable {
 
     public var defaultRows: Int {
         switch self {
-        case .vt100, .vt220, .atascii, .viewdata, .appleII: return 24
+        case .vt100, .vt220, .vt52, .atascii, .viewdata, .appleII: return 24
         case .amiga: return 25
         default: return 25
         }
@@ -43,6 +44,7 @@ public enum TerminalEmulation: String, Codable, CaseIterable {
         case .ansiBBS: return ["ANSI", "ANSI-BBS", "VT100"]
         case .vt100: return ["VT100", "VT102", "ANSI"]
         case .vt220: return ["VT220", "VT100", "ANSI"]
+        case .vt52: return ["VT52", "ATARI-ST", "DUMB"]
         case .avatar: return ["AVATAR", "ANSI"]
         case .ripscrip: return ["RIP", "ANSI"]
         case .petscii64: return ["PETSCII", "C64"]

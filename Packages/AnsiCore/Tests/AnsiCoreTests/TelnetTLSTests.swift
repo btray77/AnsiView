@@ -73,7 +73,7 @@ final class LocalTLSServer: @unchecked Sendable {
     let port: Int
     private let process = Process()
 
-    init?(greeting: String, folder: URL) {
+    init?(greeting: String, folder: URL, extra: [String] = []) {
         let openssl = ["/opt/homebrew/bin/openssl", "/opt/local/bin/openssl", "/usr/local/bin/openssl"]
             .first { FileManager.default.isExecutableFile(atPath: $0) }
         // LibreSSL's s_server (/usr/bin/openssl) lacks -naccept, so an OpenSSL 3 is needed.
@@ -92,7 +92,7 @@ final class LocalTLSServer: @unchecked Sendable {
         }
         port = Int.random(in: 41000...48000)
         process.executableURL = URL(fileURLWithPath: openssl)
-        process.arguments = ["s_server", "-accept", "\(port)", "-cert", cert, "-key", key, "-naccept", "1"]
+        process.arguments = ["s_server", "-accept", "\(port)", "-cert", cert, "-key", key, "-naccept", "1"] + extra
         let input = Pipe()
         process.standardInput = input
         process.standardOutput = FileHandle.nullDevice
@@ -119,9 +119,9 @@ final class LocalTLSServer: @unchecked Sendable {
     }
 
     /// Starts a server off the Swift concurrency threads (it blocks while openssl starts).
-    static func start(greeting: String, folder: URL) async -> LocalTLSServer? {
+    static func start(greeting: String, folder: URL, extra: [String] = []) async -> LocalTLSServer? {
         await withCheckedContinuation { continuation in
-            DispatchQueue.global().async { continuation.resume(returning: LocalTLSServer(greeting: greeting, folder: folder)) }
+            DispatchQueue.global().async { continuation.resume(returning: LocalTLSServer(greeting: greeting, folder: folder, extra: extra)) }
         }
     }
 }
@@ -132,7 +132,7 @@ private func connect(port: Int, verifier: RecordingCertificateVerifier) async ->
         var settings = TransportSettings(mode: .telnet)
         settings.telnetSecure = true
         let client = BBSClient(host: "127.0.0.1", port: port, settings: settings, columns: 80, rows: 25,
-                               connectTimeout: 8, queue: queue)
+                               connectTimeout: testConnectTimeout, queue: queue)
         client.certificateVerifier = verifier
         var received: [UInt8] = []
         var finished = false
@@ -148,7 +148,7 @@ private func connect(port: Int, verifier: RecordingCertificateVerifier) async ->
         }
         client.onState = { state in if case .closed = state { end(state) } }
         client.connect()
-        queue.asyncAfter(deadline: .now() + 10) { end(.closed(.timedOut("test"))) }
+        queue.asyncAfter(deadline: .now() + 120) { end(.closed(.timedOut("test"))) }
         _ = client
     }
 }

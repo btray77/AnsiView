@@ -53,6 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // RIPscrip files in the viewer use the chosen icon folder; the entry form lists Keychain identities.
+        ArtFile.ripFiles = RIPIconFolder.provider()
+        EntryForm.clientIdentities = TLSClientIdentities.list
         if DialingDirectoryStore.shared.directory.showAtLaunch { DialingDirectoryWindowController.show() }
     }
 
@@ -347,6 +350,12 @@ struct AnsiViewApp: App {
                     }
                     Button("Reveal Concealed Text") { TerminalWindowController.focused?.toggleReveal() }
                         .help("Teletext and Viewdata: shows or hides text the page conceals, such as quiz answers.")
+                    Button("Atari Inverse Video Key") { TerminalWindowController.focused?.toggleAtariInverse() }
+                        .help("ATASCII: types the next characters in inverse video, like the Atari's inverse key. Choose again to stop.")
+                    Button("RIP Icon Folder...") {
+                        if let terminal = TerminalWindowController.focused { terminal.chooseRIPIconFolder() } else { RIPIconFolder.choose() }
+                    }
+                    .help("RIPscrip: the folder your icons (.ICN) and scenes (.RIP) are read from. A BBS never writes to it.")
                     Menu("Size") {
                         ForEach(TerminalViewController.sizes.indices, id: \.self) { index in
                             let size = TerminalViewController.sizes[index]

@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import Network
 
 /// Releases received bytes at a modem speed, the way the file player does: baud / 10 bytes a
@@ -170,6 +171,8 @@ public final class BBSClient {
 
     /// Asks about TLS certificates macOS does not trust (telnet over TLS).
     public weak var certificateVerifier: CertificateVerifying?
+    /// The client certificate for telnet over TLS (`TLSClientIdentities.identity(reference:)`).
+    public var clientIdentity: SecIdentity?
 
     public private(set) var state = BBSClientState.idle
     public private(set) var telnet: TelnetSession
@@ -260,8 +263,10 @@ public final class BBSClient {
     private func makeTransport() -> BBSTransport? {
         switch settings.mode {
         case .telnet, .raw:
-            return TCPTransport(host: host, port: port, connectTimeout: connectTimeout, queue: queue,
-                                tls: settings.mode == .telnet && settings.telnetSecure, verifier: certificateVerifier)
+            let tcp = TCPTransport(host: host, port: port, connectTimeout: connectTimeout, queue: queue,
+                                   tls: settings.mode == .telnet && settings.telnetSecure, verifier: certificateVerifier)
+            tcp.clientIdentity = clientIdentity
+            return tcp
         case .rlogin:
             return RLoginTransport(host: host, port: port, settings: settings, connectTimeout: connectTimeout, queue: queue)
         case .webSocket:

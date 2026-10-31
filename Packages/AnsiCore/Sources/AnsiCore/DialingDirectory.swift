@@ -194,6 +194,7 @@ public struct DialingDirectory: Equatable {
             var copy = entry
             copy.captureFolderBookmark = nil
             copy.sshKeyBookmark = nil
+            copy.tlsClientIdentity = nil
             copy.sshKeyName = nil
             copy.captureFolderName = nil
             copy.captureOnConnect = false
