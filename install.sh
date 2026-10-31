@@ -11,8 +11,12 @@ mkdir -p ~/Applications
 rm -rf ~/Applications/AnsiView.app
 cp -R build/Build/Products/Release/AnsiView.app ~/Applications/
 
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
-  -f ~/Applications/AnsiView.app
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+# Forget the build folder's copy (and its Sparkle updater) so Finder and Dock open only the installed app.
+BUILT=build/Build/Products/Release/AnsiView.app
+$LSREGISTER -u "$PWD/$BUILT" >/dev/null 2>&1 || true
+$LSREGISTER -u "$PWD/$BUILT/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app" >/dev/null 2>&1 || true
+$LSREGISTER -f ~/Applications/AnsiView.app
 # Register the extensions now rather than whenever LaunchServices gets to them.
 for appex in ~/Applications/AnsiView.app/Contents/PlugIns/*.appex; do pluginkit -a "$appex"; done
 # Ask Spotlight to (re)load the embedded importer and reindex art files.
