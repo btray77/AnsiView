@@ -40,10 +40,10 @@ geometry. No ROM dump or third party font was copied or traced. MIT like the res
 
 | Font | Coverage | Used by |
 |---|---|---|
-| AnsiView PETSCII | 256 glyphs: C64 screen codes 0-127 of the upper case/graphics set and of the lower/upper case set (reverse video is drawn by swapping colours) | PETSCII (C64), PETSCII (C128 80 col) |
+| AnsiView PETSCII | 512 glyphs: C64 screen codes 0-127 of the upper case/graphics set and of the lower/upper case set (reverse video is drawn by swapping colours), then the same 256 with the bottom row lit for the C128's underline | PETSCII (C64), PETSCII (C128 80 col) |
 | AnsiView ATASCII | 128 glyphs: ATASCII 0-127 with its graphics (inverse by colour swap) | ATASCII |
 | AnsiView Teletext | 672 glyphs in 12x20 cells: the UK teletext set as 5x9 characters doubled with SAA5050 style diagonal rounding (an algorithm, implemented here), 64 contiguous and 64 separated mosaics, and top and bottom halves of every glyph for double height | Viewdata, Mode 7 |
-| AnsiView Apple II | 128 glyphs, single stroke | Apple II, RIPscrip font 0 |
+| AnsiView Apple II | 160 glyphs: 128 single stroke characters and 32 MouseText pictures drawn from their descriptions (`MouseText.swift`) | Apple II, RIPscrip font 0 |
 | AnsiView Topaz | 256 glyphs, ISO 8859-1 with generated accents | Amiga ANSI |
 
 ### Candidates researched for the terminal (2026-10-30) and why none was bundled
@@ -59,6 +59,13 @@ geometry. No ROM dump or third party font was copied or traced. MIT like the res
 | Trueschool Topaz (dMG) | GPL with font exception; "Topaz is (c) AmigaInc." | not bundled (earlier owner ruling) |
 | Topaz Unicode (Screwtape) | ISC per Debian and Arch packaging; upstream LICENSE not read | not bundled: unconfirmed and a Topaz reproduction |
 | BESCII, sadiec64ex | CC0 / 0BSD per search results, repositories not read | not bundled: unverified |
+
+RIPscrip stroke fonts (fonts 1 to 10: Triplex, Small, Sans Serif, Gothic, Script, Simplex, Triplex
+Script, Complex, European, Bold): one original single stroke alphabet drawn for AnsiView as point
+lists (`RIPStrokeFont.swift`), styled per font (stroke weight, slant, a doubled stroke, width) and
+sized from the RIPscrip 1.54 font metric tables (top, baseline and lowest pixel per font and size).
+No Borland .CHR data was read or copied. The shapes are not Borland's; boards that measure text by
+pixel get the spec's heights, and widths that are close (inferred, not compared with RIPterm).
 
 Character ROMs: Cloanto states the Commodore 8-bit and Amiga ROMs are copyrighted and licensed
 (https://www.c64forever.com/kb/13-122); US regulation does not protect "typeface as typeface"
