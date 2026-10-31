@@ -80,9 +80,7 @@ final class CompareViewController: NSViewController {
         let next = NSButton(image: NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Next difference")!,
                             target: self, action: #selector(nextPressed(_:)))
         next.toolTip = "Next row with a difference (Cmd-G)"
-        let help = Hint.button("Compare looks at the finished art cell by cell: a cell differs when its character, colours or "
-            + "blink differ. Blank cells only compare their background, since their text colour cannot be seen. "
-            + "For animations the last frame is compared.", title: "Compare")
+        let help = Hint.button(.compare)
         let bar = NSStackView(views: [summaryLabel, highlightBox, previous, next, help])
         bar.spacing = 10
         bar.appearance = NSAppearance(named: .darkAqua)

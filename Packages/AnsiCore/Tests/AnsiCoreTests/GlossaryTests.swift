@@ -29,6 +29,8 @@ import Testing
             "legacy SSH", "TLS", "host key", "fingerprint", "dialing directory", "terminal type", "ANSI-BBS", "VT100",
             "VT52", "Avatar", "PETSCII", "ATASCII", "Viewdata", "Mode 7", "Apple II", "Amiga", "RIPscrip", "IEMSI",
             "display codes", "pipe codes", "MCI codes", "BBS package", "sixel", "door game",
+            // AnsiView's own features that the (?) buttons explain.
+            "library", "smart folder", "duplicates", "same art", "compare", "auto scroll", "minimap",
         ]
         for word in wanted {
             #expect(!Glossary.search(word).isEmpty, "no entry for \(word)")
@@ -92,6 +94,14 @@ import Testing
     @Test func sortedIsAlphabeticalIgnoringCase() {
         let titles = Glossary.sorted.map(\.title)
         #expect(titles == titles.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending })
+    }
+
+    @Test func appFeaturesHaveTheirOwnCategory() {
+        for term in [GlossaryTerm.library, .smartFolder, .duplicates, .compare, .autoScroll, .minimap] {
+            #expect(Glossary.entry(term).category == .usingAnsiView, "\(term)")
+            #expect(Glossary.entry(term).whereInApp != nil, "\(term)")
+        }
+        #expect(GlossaryCategory.usingAnsiView.label == "Using AnsiView")
     }
 
     @Test func termsRoundTripThroughTheirIDs() {

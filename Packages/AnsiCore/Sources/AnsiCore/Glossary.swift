@@ -22,14 +22,17 @@ public enum GlossaryTerm: String, CaseIterable, Sendable {
     case dialingDirectory, telnet, ssh, legacySSH, tls, hostKey, rlogin, webSocket, rawTCP
     // File transfers
     case fileTransfer, xmodem, ymodem, zmodem, kermit, checksum
+    // Using AnsiView
+    case library, smartFolder, duplicates, compare, autoScroll, minimap
 }
 
 /// What an entry is about, for grouping.
 public enum GlossaryCategory: String, CaseIterable, Sendable {
-    case art, drawing, playback, terminal, connecting, transfers
+    case art, drawing, playback, terminal, connecting, transfers, usingAnsiView
 
     public var label: String {
         switch self {
+        case .usingAnsiView: return "Using AnsiView"
         case .art: return "Art and files"
         case .drawing: return "Drawing"
         case .playback: return "Playback"
@@ -416,6 +419,32 @@ public enum Glossary {
                       hint: "A short fingerprint of a file, to check that two copies are identical",
                       explanation: "A checksum is a number calculated from every byte of a file. If two files have the same SHA-256 checksum they are, for all practical purposes, identical. AnsiView's transfer log records one for every file sent or received.",
                       related: [.fileTransfer, .hostKey], whereInApp: "Terminal > Transfer Log.", category: .transfers),
+
+        // MARK: Using AnsiView
+        GlossaryEntry(term: .library, title: "Library", aliases: ["art library", "index", "tags", "ratings", "favourites"],
+                      hint: "All your art folders and packs in one searchable place, with tags and ratings",
+                      explanation: "The library indexes the folders you add (and the ZIP art packs in them) in the background: each piece's text, its SAUCE record and a thumbnail. Tags, ratings and favourites stay with a piece even if you rename or move it. Keys: 0 to 5 rate, F favourite, T tags, Return or Space opens.",
+                      related: [.smartFolder, .duplicates, .sauce, .artScene], whereInApp: "Window > Library.", category: .usingAnsiView),
+        GlossaryEntry(term: .smartFolder, title: "Smart folder", aliases: ["smart folders", "saved search", "rules"],
+                      hint: "A saved search in the library that keeps itself up to date",
+                      explanation: "A smart folder lists every piece that matches its rules, for example every piece rated 4 stars or more, or tagged \"logos\" from 1995 on, and updates as the library changes. Tag rules match your tags (case does not matter); SAUCE rules look at the title, author and group in the file; year rules use the SAUCE date, so pieces without one never match.",
+                      related: [.library, .sauce], whereInApp: "Library sidebar > + button.", category: .usingAnsiView),
+        GlossaryEntry(term: .duplicates, title: "Duplicates (exact and same art)", aliases: ["duplicate", "exact copies", "same art", "dupes"],
+                      hint: "Copies of the same art across your folders: byte for byte, or the same picture",
+                      explanation: "Exact copies have the same bytes. \"Same art\" means the finished pictures are cell for cell the same (same characters, colours and blink) although the files differ, usually because of a different SAUCE record, other line endings or redundant colour codes. Blank space at the end does not count.",
+                      related: [.library, .compare, .checksum], whereInApp: "Window > Duplicates in Library.", category: .usingAnsiView),
+        GlossaryEntry(term: .compare, title: "Compare", aliases: ["diff", "compare with", "differences"],
+                      hint: "Shows two pieces side by side with the cells that differ tinted red",
+                      explanation: "Compare looks at the finished art cell by cell: a cell differs when its character, colours or blink differ. Blank cells only compare their background, since their text colour cannot be seen. For animations the last frame is compared.",
+                      related: [.duplicates, .frames], whereInApp: "File > Compare With.", category: .usingAnsiView),
+        GlossaryEntry(term: .autoScroll, title: "Auto scroll", aliases: ["autoscroll", "scrolling", "reading mode"],
+                      hint: "Moves tall art up the window at a steady speed, so you can sit back and read",
+                      explanation: "Auto scroll moves tall art up the window at a steady speed, the way a BBS showed it line by line. Speed is in lines of the art per second and is remembered. Keys while it runs: + or Up faster, - or Down slower, Space pauses, Escape stops.",
+                      related: [.minimap, .baud], whereInApp: "View > Auto Scroll.", category: .usingAnsiView),
+        GlossaryEntry(term: .minimap, title: "Minimap", aliases: ["overview", "mini map"],
+                      hint: "A strip beside tall art showing the whole piece; click or drag in it to jump",
+                      explanation: "Much ANSI art is far taller than a window. The minimap draws the whole piece small at the right edge with a box for the part you are looking at, so you can jump anywhere with one click.",
+                      related: [.autoScroll, .columns], whereInApp: "View > Show Minimap.", category: .usingAnsiView),
     ]
     // swiftlint:enable line_length
 }
