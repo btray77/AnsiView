@@ -8,3 +8,4 @@ Packaging/appstore/AnsiViewAppStore.xcodeproj/
 
 # Agent worktrees
 .claude/
+build-ios/
