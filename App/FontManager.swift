@@ -63,14 +63,14 @@ final class FontManagerViewController: NSViewController, NSTableViewDataSource, 
         favouritesBox.action = #selector(reload(_:))
         favouritesBox.toolTip = "Show only starred fonts"
         let importButton = NSButton(title: "Import...", target: self, action: #selector(importFonts(_:)))
-        importButton.toolTip = FontHelp.import_
+        importButton.toolTip = String(localized: "Import TheDraw (.tdf) and FIGlet (.flf, .tlf) fonts, folders of them or .zip packs. AnsiView copies them; the originals stay as they are.")
         removeButton.target = self
         removeButton.action = #selector(remove(_:))
         removeButton.toolTip = "Remove the selected font's file from AnsiView's font folder (fonts that come with AnsiView stay)"
         revealButton.target = self
         revealButton.action = #selector(reveal(_:))
         revealButton.toolTip = "Show the font file in the Finder"
-        let typesHelp = TextArtImages.helpButton(FontHelp.tdfTypes, tooltip: "About TheDraw font kinds")
+        let typesHelp = Hint.button(.theDrawFonts, detail: FontHelp.tdfTypes)
         let top = NSStackView(views: [searchField, favouritesBox, NSView(), importButton, removeButton, revealButton, typesHelp])
         top.spacing = 8
         searchField.widthAnchor.constraint(equalToConstant: 220).isActive = true

@@ -162,7 +162,7 @@ final class LibraryViewController: NSViewController, NSOutlineViewDataSource, NS
         remoteButton.action = #selector(remotePressed(_:))
         remoteButton.bezelStyle = .rounded
         remoteButton.controlSize = .small
-        remoteButton.toolTip = "Asks 16colo.rs (the online ANSI art archive) for packs under this name. Double click a pack to download and open it."
+        remoteButton.toolTip = String(localized: "Asks 16colo.rs, the online ANSI art archive, for packs under this name. Double click a pack to open it.")
         remoteStatus.textColor = .secondaryLabelColor
         remoteStatus.font = .systemFont(ofSize: 11)
         let pageHelp = Hint.button(.artScene, detail: String(localized: "Artist and group pages come from the author and group in your files' SAUCE records, merged when only case or spacing differ. 16colo.rs may spell a name differently, in which case it shows nothing."))
@@ -831,11 +831,13 @@ final class SmartFolderEditor: NSViewController {
         nameField.stringValue = folder?.name ?? ""
         matchPopup.addItems(withTitles: ["all of these rules", "any of these rules"])
         matchPopup.selectItem(at: folder?.matchAll == false ? 1 : 0)
+        matchPopup.toolTip = String(localized: "All: a piece must match every rule. Any: one matching rule is enough.")
         let matchRow = NSStackView(views: [NSTextField(labelWithString: "Pieces matching"), matchPopup])
         rowsStack.orientation = .vertical
         rowsStack.alignment = .leading
         rowsStack.spacing = 6
         let add = NSButton(title: "Add Rule", target: self, action: #selector(addPressed(_:)))
+        add.toolTip = String(localized: "Adds another rule: a tag, rating, SAUCE field, year or format to match")
         let help = Hint.button(.smartFolder, detail: String(localized: "Format is a name such as ANSI, XBin or BinaryText."))
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelPressed(_:)))
         cancel.keyEquivalent = "\u{1B}"
@@ -869,6 +871,7 @@ final class SmartFolderEditor: NSViewController {
         popup.selectItem(at: field.rawValue)
         popup.target = self
         popup.action = #selector(fieldChanged(_:))
+        popup.toolTip = String(localized: "What this rule looks at: your tags, rating or favourites, or the file's SAUCE, year or format")
         let box = NSComboBox()
         box.stringValue = value
         box.completes = true
@@ -878,6 +881,7 @@ final class SmartFolderEditor: NSViewController {
         let remove = NSButton(image: NSImage(systemSymbolName: "minus.circle", accessibilityDescription: "Remove rule")!,
                               target: self, action: #selector(removePressed(_:)))
         remove.isBordered = false
+        remove.toolTip = String(localized: "Removes this rule")
         let row = NSStackView(views: [popup, box, remove])
         rowsStack.addArrangedSubview(row)
         rows.append((popup, box, row))

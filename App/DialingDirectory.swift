@@ -260,7 +260,11 @@ final class DialingDirectoryViewController: NSViewController {
         editButtons = [
             button("Save and Back", "Save this BBS and go back to the list. Same as Esc.", #selector(saveAndBack(_:))),
             button("Cancel", "Go back to the list without saving the changes.", #selector(cancelEdit(_:))),
+            // The entry form's jargon: terminal types and connection protocols (item 62).
+            Hint.button(.terminalType),
+            Hint.button(.telnet, detail: String(localized: "The Protocol field picks telnet, SSH, RLogin, raw TCP or WebSocket; see the related terms below.")),
         ]
+        browseButtons.append(Hint.button(.dialingDirectory))
         let help = NSButton(title: "?", target: self, action: #selector(showHelp(_:)))
         help.bezelStyle = .helpButton
         help.title = ""

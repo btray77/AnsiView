@@ -96,10 +96,11 @@ final class CallerPreviewViewController: NSViewController, NSTableViewDataSource
         let replayButton = NSButton(title: "Replay", target: self, action: #selector(replay))
         replayButton.toolTip = "Clears the caller's screen and sends the screen again"
         let samples = NSButton(title: "Sample Values...", target: self, action: #selector(showSamples))
+        samples.toolTip = String(localized: "The made up caller name, dates and numbers the preview puts in place of display codes")
         let help = TextArtImages.helpButton(
             "This is what a caller sees: the screen goes through the BBS package (its codes become the sample values), then over a line at the chosen speed into AnsiView's terminal emulator. The warnings come from following the cursor as a terminal that wraps at once (ANSI.SYS) would; AnsiView's own terminal waits at the edge, so a column 80 problem may not show above but would on such a caller.",
             tooltip: "About the caller preview")
-        let top = ScreenDesigner.row([packagePopup, nativeBox, baudPopup, sizePopup, encodingPopup, iceBox, NSView(), samples, replayButton, help])
+        let top = ScreenDesigner.row([packagePopup, nativeBox, baudPopup, sizePopup, encodingPopup, iceBox, Hint.button(.iceColours), NSView(), samples, replayButton, help])
         screenView.imageScaling = .scaleProportionallyUpOrDown
         screenView.wantsLayer = true
         screenView.layer?.backgroundColor = NSColor.black.cgColor

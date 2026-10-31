@@ -962,9 +962,12 @@ final class TerminalViewController: NSViewController {
         suggestionLabel.font = .systemFont(ofSize: 12)
         let switchButton = NSButton(title: "Switch", target: self, action: #selector(acceptSuggestion))
         let ignore = NSButton(title: "Not Now", target: self, action: #selector(dismissSuggestion))
+        switchButton.toolTip = String(localized: "Changes the terminal type for this session, so the BBS's screens draw correctly")
+        ignore.toolTip = String(localized: "Keeps the current terminal type")
         suggestionBar.addArrangedSubview(suggestionLabel)
         suggestionBar.addArrangedSubview(switchButton)
         suggestionBar.addArrangedSubview(ignore)
+        suggestionBar.addArrangedSubview(Hint.button(.terminalType))
         suggestionBar.isHidden = true
     }
 

@@ -229,7 +229,7 @@ final class MusicEditorViewController: NSViewController, NSTextFieldDelegate, NS
         warningLabel.textColor = .systemOrange
         warningLabel.font = .systemFont(ofSize: 11)
         warningLabel.toolTip = "Characters PLAY does not understand are skipped; they are listed here."
-        let textRow = row([label("PLAY"), playField, help(MusicHelp.playString, tip: "The PLAY string language in brief.")])
+        let textRow = row([label("PLAY"), playField, Hint.button(.ansiMusic, detail: MusicHelp.playString)])
         playField.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         // Piano roll.
@@ -311,7 +311,7 @@ final class MusicEditorViewController: NSViewController, NSTextFieldDelegate, NS
         shiftInCheckbox.state = .on
         shiftInCheckbox.toolTip = "Follow the music with 0x0F so terminals without ANSI music recover."
         let bottom = row([importButton, NSView(), label("Introducer"), introducerPopup,
-                          help(MusicHelp.introducer, tip: "What ESC[M, ESC[N and ESC[| mean."),
+                          Hint.button(.bansi, detail: MusicHelp.introducer),
                           shiftInCheckbox, help(MusicHelp.shiftIn, tip: "Why Shift In follows the music."), exportPopup])
 
         let main = NSStackView(views: [transport, entry, textRow, warningLabel, middle, bottom])

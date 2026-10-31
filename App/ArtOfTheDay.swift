@@ -166,6 +166,7 @@ private struct PieceView: View {
             Text(piece.title).font(.body.weight(.semibold)).lineLimit(1)
             Text(piece.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             Button("Open") { piece.open() }
+                .help("Opens this piece in a viewer window")
         }
     }
 }

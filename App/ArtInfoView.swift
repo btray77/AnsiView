@@ -18,11 +18,16 @@ struct ArtInfoView: View {
                 ForEach(Array(info.rows.enumerated()), id: \.offset) { _, row in
                     GridRow {
                         Text(row.label).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
-                        Text(row.value).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            .help(Self.terms[row.label].map { Glossary.entry($0).hint } ?? "")
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(row.value).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            if let term = Self.terms[row.label] { GlossaryLink(term: term) }
+                        }
                     }
                 }
             }
             HStack {
+                GlossaryLink(term: .sauce, title: String(localized: "What is SAUCE?"))
                 Spacer()
                 Button("Done", action: close)
                     .keyboardShortcut(.defaultAction)
@@ -31,6 +36,34 @@ struct ArtInfoView: View {
         .padding(20)
         .frame(width: 420)
         .onExitCommand(perform: close)
+    }
+
+    /// Rows whose label is jargon, by `ArtInfo` label (item 62).
+    static let terms: [String: GlossaryTerm] = [
+        "Font": .textModeFont, "iCE Colors": .iceColours, "Letter Spacing": .letterSpacing,
+        "Aspect": .aspectRatio, "Columns": .columns,
+    ]
+}
+
+/// A small (?) that opens a glossary entry; its tooltip is the entry's one line hint.
+struct GlossaryLink: View {
+    let term: GlossaryTerm
+    var title: String?
+
+    var body: some View {
+        let entry = Glossary.entry(term)
+        Button {
+            GlossaryWindowController.show(term: term)
+        } label: {
+            if let title {
+                Label(title, systemImage: "questionmark.circle")
+            } else {
+                Image(systemName: "questionmark.circle")
+            }
+        }
+        .buttonStyle(.borderless)
+        .help(entry.hint)
+        .accessibilityLabel(Text(String(localized: "Help: \(entry.title)")))
     }
 }
 

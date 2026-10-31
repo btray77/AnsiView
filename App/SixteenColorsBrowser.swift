@@ -487,6 +487,7 @@ final class SixteenColorsBrowser: NSViewController, NSTableViewDataSource, NSTab
         retryButton.target = self
         retryButton.action = #selector(retryPressed(_:))
         retryButton.isHidden = true
+        retryButton.toolTip = String(localized: "Asks 16colo.rs again for what failed to load")
         openPackButton.target = self
         openPackButton.action = #selector(openPackPressed(_:))
         openPackButton.isEnabled = false

@@ -13,7 +13,7 @@ public enum ImageImportHelp {
         "preset": "A starting point for the kind of picture. Auto tries several methods and shows the three that look closest to your image.",
         "method": "How each character cell is drawn. Best character tries blocks, half blocks and shades for every cell and keeps the closest.",
         "width": "Width of the result in characters (1 to 1000). 80 fits a classic DOS screen.",
-        "palette": "16 VGA colours work everywhere. Fitted colours make an XBin file with its own 16 colour palette. Truecolor uses any colour (24 bit ANSI), which not every viewer shows.",
+        "palette": "16 VGA colours work everywhere; Fitted makes an XBin file with its own 16 colour palette. Truecolor (24 bit ANSI) is not shown by every viewer.",
         "dither": "Mixes neighbouring colours to suggest shades the palette lacks. None gives flat, clean areas.",
         "strength": "How much dithering to apply: 0% is none, 100% is full strength.",
         "ice": "Allow bright background colours (iCE colours). Turn off for viewers that blink instead.",

@@ -11,6 +11,23 @@ enum Hint {
     }
 }
 
+/// The (?) button of an alert opens a glossary entry (NSAlert.showsHelp; the term rides in helpAnchor).
+final class GlossaryAlertHelp: NSObject, NSAlertDelegate {
+    static let shared = GlossaryAlertHelp()
+
+    static func attach(_ term: GlossaryTerm, to alert: NSAlert) {
+        alert.showsHelp = true
+        alert.helpAnchor = term.rawValue
+        alert.delegate = shared
+    }
+
+    func alertShowHelp(_ alert: NSAlert) -> Bool {
+        guard let id = alert.helpAnchor, let term = GlossaryTerm(rawValue: id) else { return false }
+        GlossaryWindowController.show(term: term)
+        return true
+    }
+}
+
 final class HintButton: NSButton {
     let term: GlossaryTerm
     let detail: String?
