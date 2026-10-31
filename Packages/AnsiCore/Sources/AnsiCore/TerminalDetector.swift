@@ -30,6 +30,12 @@ public struct TerminalDetector {
 
     public var isFinished: Bool { suggested || seen >= Self.window }
 
+    /// Whether a suggestion is worth showing for the entry's current type: not the same type, not the
+    /// C64 for a C128 entry, and not Viewdata for VT52 (its ESC letter commands look like attributes).
+    public static func shouldSuggest(_ suggestion: TerminalEmulation, current: TerminalEmulation) -> Bool {
+        suggestion != current && !(suggestion == .petscii64 && current == .petscii128) && !(suggestion == .viewdata && current == .vt52)
+    }
+
     private static let petsciiCodes: Set<UInt8> = [0x93, 0x05, 0x1C, 0x1E, 0x1F, 0x81, 0x90, 0x95, 0x96, 0x97, 0x98, 0x99,
                                                    0x9A, 0x9B, 0x9C, 0x9E, 0x9F, 0x11, 0x91, 0x1D, 0x9D, 0x12, 0x92, 0x0E, 0x8E]
 

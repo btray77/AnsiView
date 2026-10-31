@@ -11,6 +11,8 @@ final class TerminalView: NSView {
     /// Rows rendered since the view was made (for measuring).
     private(set) var rowRenderCount = 0
     private var rowCache: [Int: (cells: [AnsiCell], blinkOn: Bool, image: CGImage)] = [:]
+    /// Pictures already turned into images, by position and size.
+    private var imageCache: [String: CGImage] = [:]
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -91,6 +93,28 @@ final class TerminalView: NSView {
             context.draw(image, in: CGRect(origin: .zero, size: rect.size))
             context.restoreGState()
         }
+        // Sixel and iTerm2 pictures, over the cells they cover.
+        let placed = controller.emulator.images(scrollOffset: controller.scrollOffset)
+        if !placed.isEmpty {
+            let cellWidth = art.width / CGFloat(controller.emulator.columns)
+            context.saveGState()
+            context.clip(to: art)
+            var kept: [String: CGImage] = [:]
+            for picture in placed {
+                let key = "\(picture.line + controller.scrollOffset):\(picture.column):\(picture.image.width)x\(picture.image.height):\(picture.image.rgba.count)"
+                guard let image = imageCache[key] ?? picture.image.cgImage else { continue }
+                kept[key] = image
+                let rect = CGRect(x: art.minX + CGFloat(picture.column) * cellWidth, y: art.minY + CGFloat(picture.line) * rowHeight,
+                                  width: CGFloat(picture.columns) * cellWidth, height: CGFloat(picture.rows) * rowHeight)
+                context.saveGState()
+                context.translateBy(x: rect.minX, y: rect.maxY)
+                context.scaleBy(x: 1, y: -1)
+                context.draw(image, in: CGRect(origin: .zero, size: rect.size))
+                context.restoreGState()
+            }
+            imageCache = kept
+            context.restoreGState()
+        }
         // A VGA style underline cursor, in the colour of the text under it.
         let emulator = controller.emulator
         if controller.cursorOn, emulator.cursorVisible, controller.scrollOffset == 0 {
@@ -130,8 +154,41 @@ final class TerminalView: NSView {
         controller?.scrollBack(by: lines)
     }
 
+    /// The cell under a mouse event (zero based), when it is on the art.
+    private func cell(at event: NSEvent) -> (column: Int, row: Int)? {
+        guard let controller else { return nil }
+        let point = convert(event.locationInWindow, from: nil)
+        let art = artRect
+        guard art.contains(point), art.width > 0, art.height > 0 else { return nil }
+        return (Int((point.x - art.minX) / art.width * CGFloat(controller.emulator.columns)),
+                Int((point.y - art.minY) / art.height * CGFloat(controller.emulator.rows)))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if let controller, !(controller.emulator is RIPTerminal), let cell = cell(at: event) {
+            controller.mouseReport(column: cell.column, row: cell.row, button: 0, pressed: false)
+        }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        if let controller, let cell = cell(at: event) {
+            controller.mouseReport(column: cell.column, row: cell.row, button: 2, pressed: true)
+        }
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        if let controller, let cell = cell(at: event) {
+            controller.mouseReport(column: cell.column, row: cell.row, button: 2, pressed: false)
+        }
+    }
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        // A BBS that asked for mouse reports (CSI ? 1000 h) hears the click on its cell.
+        if let controller, !(controller.emulator is RIPTerminal), let cell = cell(at: event) {
+            controller.mouseReport(column: cell.column, row: cell.row, button: 0, pressed: true)
+            return
+        }
         // RIPscrip mouse fields and buttons: the click in the graphics screen's own pixels.
         // Not while scrolled back: the picture (and its buttons) is hidden then.
         guard let controller, controller.scrollOffset == 0, controller.emulator is RIPTerminal else { return }
@@ -237,8 +294,8 @@ final class TerminalViewController: NSViewController {
         self.entry = entry
         self.globalMacros = globalMacros
         self.passwords = passwords
-        emulator = TerminalEngines.make(entry.emulation, columns: entry.columns, rows: entry.rows,
-                                        encoding: entry.encoding, iceColors: entry.iceColors)
+        emulator = Self.configured(TerminalEngines.make(entry.emulation, columns: entry.columns, rows: entry.rows,
+                                                        encoding: entry.encoding, iceColors: entry.iceColors), entry: entry)
         baud = entry.baud
         pacer = LinePacer(baud: entry.baud)
         super.init(nibName: nil, bundle: nil)
@@ -312,8 +369,8 @@ final class TerminalViewController: NSViewController {
         transfers.reset()
         pacer = LinePacer(baud: baud)
         music.reset(mode: entry.musicMode)
-        emulator = TerminalEngines.make(entry.emulation, columns: emulator.columns, rows: emulator.rows,
-                                        encoding: entry.encoding, iceColors: entry.iceColors)
+        emulator = Self.configured(TerminalEngines.make(entry.emulation, columns: emulator.columns, rows: emulator.rows,
+                                                        encoding: entry.encoding, iceColors: entry.iceColors), entry: entry)
         terminalView.font = emulator.font ?? BitmapFont.named(entry.fontName)
         detector = TerminalDetector(encoding: entry.encoding)
         sessionStart = []
@@ -339,6 +396,8 @@ final class TerminalViewController: NSViewController {
                                columns: emulator.columns, rows: emulator.rows, terminalTypes: entry.terminalTypes,
                                transport: makeTransport())
         client.certificateVerifier = certificates
+        // A client certificate from the Keychain, for TLS boards that ask for one.
+        client.clientIdentity = entry.tlsClientIdentity.flatMap(TLSClientIdentities.identity(reference:))
         client.onData = { [weak self] bytes in self?.receive(bytes) }
         client.onState = { [weak self] state in self?.clientChanged(state) }
         self.client = client
@@ -540,8 +599,8 @@ final class TerminalViewController: NSViewController {
         }
         // Prompts are matched as they arrive, not as the speed emulation shows them.
         watch(bytes)
-        if !detector.isFinished, let suggestion = detector.feed(bytes), suggestion != entry.emulation,
-           !(suggestion == .petscii64 && entry.emulation == .petscii128) {
+        if !detector.isFinished, let suggestion = detector.feed(bytes),
+           TerminalDetector.shouldSuggest(suggestion, current: entry.emulation) {
             suggest(suggestion)
         }
         if iemsi != nil, var client = iemsi {
@@ -570,6 +629,10 @@ final class TerminalViewController: NSViewController {
             if !replies.isEmpty { client?.send(replies) }
             applySpeedRequest()
         }
+        pumpRIP()
+        // A CTerm loadable font the BBS selected (or went back from).
+        let font = emulator.font ?? BitmapFont.named(entry.fontName)
+        if font.name != terminalView.font.name || font.height != terminalView.font.height { terminalView.font = font }
         if emulator.bells != shownBells {
             shownBells = emulator.bells
             NSSound.beep()
@@ -729,6 +792,10 @@ final class TerminalViewController: NSViewController {
                 key = nil
             }
         }
+        if key == .returnKey, let command = ripHotkey(0x0D) {
+            send(command)
+            return
+        }
         if let key {
             send(emulator.bytes(for: key, backspaceSendsDelete: entry.backspaceSendsDelete))
             return
@@ -739,11 +806,83 @@ final class TerminalViewController: NSViewController {
         }
         guard let characters = event.characters, !characters.isEmpty,
               !characters.unicodeScalars.contains(where: { (0xF700...0xF8FF).contains($0.value) }) else { return }
+        // A RIPscrip button's hotkey sends the button's command instead of the key.
+        if characters.utf8.count == 1, let byte = characters.utf8.first, let command = ripHotkey(byte) {
+            send(command)
+            return
+        }
         sendText(characters)
+    }
+
+    /// The host command of the RIPscrip button a key belongs to; nil when none (or not RIP).
+    private func ripHotkey(_ byte: UInt8) -> [UInt8]? {
+        guard scrollOffset == 0, var rip = emulator as? RIPTerminal else { return nil }
+        emulator = TerminalEmulator(columns: 1, rows: 1)
+        let command = rip.hotkey(byte)
+        emulator = rip
+        terminalView.needsDisplay = true
+        return command
     }
 
     func sendText(_ text: String) {
         send(emulator.text(text, encoding: entry.encoding))
+    }
+
+    /// The entry's extras for a new engine: the RIP icon folder; the picture cell size.
+    static func configured(_ engine: any TerminalEngine, entry: BBSEntry) -> any TerminalEngine {
+        if var rip = engine as? RIPTerminal {
+            rip.files = RIPIconFolder.provider()
+            return rip
+        }
+        if var ansi = engine as? TerminalEmulator {
+            let font = ansi.font ?? BitmapFont.named(entry.fontName)
+            ansi.imageCellSize = (font.width, font.height)
+            return ansi
+        }
+        return engine
+    }
+
+    /// RIPscrip: continues drawing that waited for the next frame, and reports block transfers.
+    private func pumpRIP() {
+        guard let peek = emulator as? RIPTerminal, peek.hasPendingWork || peek.hasBlockTransfer else { return }
+        var rip = peek
+        // The engine is taken out first so the canvas is not copied when it changes.
+        emulator = TerminalEmulator(columns: 1, rows: 1)
+        if rip.hasPendingWork { rip.feed([]) }
+        let request = rip.takeBlockTransfer()
+        emulator = rip
+        if let request {
+            let what = request.upload ? "send \(request.fileName ?? "a file")" : "send you \(request.fileName ?? "files")"
+            ripNotice = request.protocolCode == 7
+                ? "RIP: the BBS will \(what) with Zmodem; it starts by itself"
+                : "RIP: the BBS wants to \(what) with \(request.protocolName); use Transfer to start it"
+            updateStatus()
+        }
+    }
+
+    /// The last RIPscrip block transfer request, shown in the status line.
+    private(set) var ripNotice: String?
+
+    /// A mouse button on a cell, reported when the BBS asked for mouse reports.
+    func mouseReport(column: Int, row: Int, button: Int, pressed: Bool) {
+        guard scrollOffset == 0, !transfers.isActive else { return }
+        let bytes = emulator.mouse(column: column, row: row, button: button, pressed: pressed)
+        if !bytes.isEmpty { send(bytes) }
+    }
+
+    /// Atari: the inverse video key, for typing in inverse characters.
+    func toggleAtariInverse() {
+        guard var atari = emulator as? ATASCIITerminal else { NSSound.beep(); return }
+        atari.inverseTyping.toggle()
+        emulator = atari
+        updateStatus()
+    }
+
+    /// Asks for the RIPscrip icon folder and gives it to a running RIP session.
+    func chooseRIPIconFolder() {
+        guard RIPIconFolder.choose(), var rip = emulator as? RIPTerminal else { return }
+        rip.files = RIPIconFolder.provider()
+        emulator = rip
     }
 
     /// A click on the RIPscrip screen: a mouse field or button sends its host command.
@@ -785,9 +924,9 @@ final class TerminalViewController: NSViewController {
             entry.terminalType = emulation.terminalNames[0]
         }
         entry.emulation = emulation
-        emulator = TerminalEngines.make(emulation, columns: sizeChangedHere ? sessionSize.0 : entry.columns,
-                                        rows: sizeChangedHere ? sessionSize.1 : entry.rows, encoding: entry.encoding,
-                                        iceColors: entry.iceColors)
+        emulator = Self.configured(TerminalEngines.make(emulation, columns: sizeChangedHere ? sessionSize.0 : entry.columns,
+                                                        rows: sizeChangedHere ? sessionSize.1 : entry.rows, encoding: entry.encoding,
+                                                        iceColors: entry.iceColors), entry: entry)
         terminalView.font = emulator.font ?? BitmapFont.named(entry.fontName)
         emulator.feed(sessionStart)
         _ = emulator.takeReplies()
@@ -948,6 +1087,8 @@ final class TerminalViewController: NSViewController {
         if let captureProblem { parts.append(captureProblem) }
         if let loginText { parts.append(loginText) }
         if let transferText = transfers.statusText { parts.append(transferText) }
+        if let ripNotice { parts.append(ripNotice) }
+        if (emulator as? ATASCIITerminal)?.inverseTyping == true { parts.append("Inverse typing") }
         statusText = parts.joined(separator: "  |  ")
         statusLabel.stringValue = statusText
         statusLabel.toolTip = legacyNote == nil ? statusText

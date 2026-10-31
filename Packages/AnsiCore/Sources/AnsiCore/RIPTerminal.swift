@@ -181,6 +181,8 @@ public struct RIPTerminal: TerminalEngine {
         return out
     }
 
+    public var hasBlockTransfer: Bool { blockTransfer != nil }
+
     /// The block transfer the BBS asked for, once.
     public mutating func takeBlockTransfer() -> RIPBlockTransfer? {
         defer { blockTransfer = nil }

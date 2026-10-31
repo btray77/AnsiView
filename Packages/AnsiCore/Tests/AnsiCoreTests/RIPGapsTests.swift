@@ -122,6 +122,7 @@ private func rip(_ text: String, files: RIPFileProvider? = nil) -> RIPTerminal {
 
 @Test func blockTransferIsReported() throws {
     var t = rip("!|9\u{1B}00010000ICONFILE.ICN<>\r\n")
+    #expect(t.hasBlockTransfer)
     let taken = t.takeBlockTransfer()
     let request = try #require(taken)
     #expect(request.upload == false && request.protocolCode == 0 && request.fileType == 1)
