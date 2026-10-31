@@ -809,6 +809,35 @@ ProBoard, QuickBBS, Spitfire, Searchlight, DayDream, Talisman and Maximus (MECCA
 covers, its sources, and what is still missing for others are in `docs/BBS-COMPAT.md`; the design
 and rulings are in `docs/superpowers/plans/2026-10-30-ansiview-2.0-screen-designer.md`.
 
+### iPhone and iPad
+
+AnsiView for iPhone and iPad (iOS and iPadOS 17 or later, target `AnsiViewiOS`) is a viewer built
+on the same AnsiCore renderer as the Mac app:
+
+- Opens .ans .asc .ice .nfo .diz .txt .bin .xb .adf .idf .pcb .avt: the bundled samples, files in
+  the app's own folder (the Files app shows it as On My iPhone or On My iPad > AnsiView), files
+  picked with Open from Files, and files sent to AnsiView from other apps (read in place, with
+  security scoped access while reading).
+- The real VGA and other bundled bitmap fonts, iCE colours, blink, 24 bit colour, XBin fonts and
+  palettes. Pinch to zoom (up to 8 points per font pixel), drag to scroll, double tap for fit or
+  2x. Animated art replays at modem speed when opened (speed menu: 300 baud to 115200 and
+  Instant); tap to skip, or to replay a finished animation. Tall art plays in a 25 line window.
+- Info shows the SAUCE record. Share sends a PNG or an animated GIF to the share sheet.
+- A Quick Look preview extension (the Files app and any app that previews files) plays the art
+  at 2400 baud, and a thumbnail extension draws Files thumbnails for ANSI art. Neither extension
+  has any entitlements.
+- Universal layout, dark mode, Dynamic Type for the lists and sheets, VoiceOver reads the art's
+  title and its text.
+
+Not on iPhone and iPad (Mac only): the BBS terminal, the editor, file transfers, SSH, ANSI music,
+modem sounds and 16colo.rs browsing.
+
+Build for the simulator: `xcodegen generate`, then
+`xcodebuild -project AnsiView.xcodeproj -scheme AnsiViewiOS -destination 'generic/platform=iOS Simulator' build`.
+Running on a device, TestFlight and the App Store need the owner's Apple developer account
+(automatic signing with team 47HEHK53W5; bundle ids `com.traynham.AnsiView.iOS`, `.iOS.Preview`,
+`.iOS.Thumbnail` registered on first device build).
+
 ## Build from source
 
 Needs Xcode 16 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
