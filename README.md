@@ -709,6 +709,16 @@ folder, removes and reveals them. AnsiView comes with four original fonts (AV Ou
 AV Ember, AV Contour) and the 18 fonts of the FIGlet 2.2.5 distribution (New BSD); import your own
 collections for the rest. Formats, rulings and sources: [docs/FONTS.md](docs/FONTS.md).
 
+Tools > TDF Font Editor... creates a TheDraw font (outline, block or colour) or opens a .tdf file,
+and Font Manager's Edit Font... opens the selected one. The window lists the fonts in the file (add,
+duplicate, rename, delete, reorder), shows the 94 characters as a grid (copy, paste, clear, or copy
+a glyph from another installed font), and draws the selected glyph on the editor's own canvas with
+all its tools, at the glyph's size (up to 30 by 12, TheDraw's limit). Outline fonts get buttons for
+the outline codes and a strip with the glyph in all 19 outline styles. The preview draws your text
+with the font as you edit, with the renderer Text to ASCII uses. Save writes the .tdf (fonts saved
+into AnsiView's font folder update Font Manager and Text to ASCII at once; Install in Font Manager
+copies other files there). Rulings: docs/superpowers/plans/2026-10-30-ansiview-2.0-tdf-editor.md.
+
 ### ANSI music
 
 BBS terminals such as Qmodem, Telix and TeleMate played music sent as an escape sequence: `ESC [ M`,
