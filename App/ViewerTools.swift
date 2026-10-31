@@ -356,9 +356,7 @@ final class ViewerTools: NSObject, NSSearchFieldDelegate {
         pauseButton.action = #selector(pausePressed(_:))
         pauseButton.toolTip = "Pause or continue (Space)"
         let stop = button("stop.fill", "Stop auto scroll (Escape, a click, or View > Auto Scroll)", #selector(stopPressed(_:)))
-        let help = Hint.button("Auto scroll moves tall art up the window at a steady speed, the way a BBS showed it "
-            + "line by line, so you can sit back and read. Speed is in lines of the art per second and is remembered. "
-            + "Keys while it runs: + or Up faster, - or Down slower, Space pauses, Escape stops.", title: "Auto scroll")
+        let help = Hint.button(.autoScroll)
         let stack = NSStackView(views: [title, slower, speedLabel, faster, pauseButton, stop, help])
         stack.spacing = 6
         stack.edgeInsets = NSEdgeInsets(top: 5, left: 10, bottom: 5, right: 8)

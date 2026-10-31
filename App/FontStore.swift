@@ -111,6 +111,11 @@ enum TextArtImages {
         return popup
     }
 
+    /// A (?) glossary hint for `term` with `text` as this window's own explanation (item 62).
+    static func helpButton(_ text: String, term: GlossaryTerm) -> NSButton {
+        Hint.button(term, detail: text)
+    }
+
     /// A (?) button that shows `text` in a popover.
     static func helpButton(_ text: String, tooltip: String) -> NSButton {
         let button = HelpPopoverButton(text: text)

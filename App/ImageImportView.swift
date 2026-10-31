@@ -410,7 +410,13 @@ final class ImageImportViewController: NSViewController {
         return l
     }
 
+    /// Topics that are glossary terms get a glossary hint (item 62); the window's own text follows the explanation.
+    static let glossaryTopics: [String: GlossaryTerm] = ["xbin": .xbin, "ice": .iceColours, "aspect": .aspectRatio, "glyph": .halfBlocks]
+
     private func helpButton(_ topic: String) -> NSButton {
+        if let term = Self.glossaryTopics[topic] {
+            return Hint.button(term, detail: ImageImportHelp.explanations[topic]?.text)
+        }
         let b = NSButton(title: "", target: self, action: #selector(showHelp(_:)))
         b.bezelStyle = .helpButton
         b.identifier = NSUserInterfaceItemIdentifier(topic)

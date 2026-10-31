@@ -1056,7 +1056,7 @@ final class EditorViewController: NSViewController {
         transparentBox.toolTip = "Spaces in a pasted or moved block leave the art underneath (T while it floats)"
         insertLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
         insertLabel.toolTip = "Overwrite (OVR) replaces characters; insert (INS) shifts the row right (\(ShortcutStore.shared.shortcuts.combo(for: .toggleInsert).display) switches)"
-        let bottomRow = NSStackView(views: [colourLabel] + swatches + [preview, iceBox, transparentBox, insertLabel])
+        let bottomRow = NSStackView(views: [colourLabel] + swatches + [preview, iceBox, Hint.button(.iceColours), transparentBox, insertLabel])
         bottomRow.spacing = 2
         bottomRow.setCustomSpacing(10, after: swatches.last!)
         bottomRow.setCustomSpacing(12, after: preview)

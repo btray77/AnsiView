@@ -61,7 +61,7 @@ final class ExportOptionsView {
         includeMusic.state = hasMusic ? .on : .off
         includeMusic.toolTip = MusicPlaybackHelp.export
         includeModem.state = PlaybackSpeed.modemSounds ? .on : .off
-        includeModem.toolTip = "The video starts with AnsiView's synthesized dial tone and modem handshake over an empty screen, then line noise while the art arrives, as Playback > Modem Sounds does. All of it is generated, no recordings."
+        includeModem.toolTip = String(localized: "Starts the video with a synthesized dial tone and modem handshake, then line noise while the art arrives (no recordings).")
 
         musicNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         musicNote.textColor = .secondaryLabelColor
@@ -73,6 +73,12 @@ final class ExportOptionsView {
         frameRate = Self.popup(Self.frameRates.map { "\(Int($0)) fps" }, selected: 2)
         palette = Self.popup(GIFPalette.allCases.map(\.label), selected: 0)
         limit = Self.popup(Self.limits.map(\.0), selected: 0)
+        format.toolTip = String(localized: "The kind of file to make: a picture, an animation of the art being drawn, or text")
+        size.toolTip = String(localized: "Picture size: each step multiplies the DOS screen's 640 pixel width")
+        speed.toolTip = String(localized: "The modem speed the animation plays at: lower draws more slowly, as callers saw it")
+        frameRate.toolTip = String(localized: "Frames per second of the animation: more is smoother and larger")
+        palette.toolTip = String(localized: "GIF only: how the 256 colour GIF palette is chosen")
+        limit.toolTip = String(localized: "Keeps the file under a size or within a picture size, by shrinking it if needed")
         let target = PopupTarget { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -125,8 +131,7 @@ final class ExportOptionsView {
     /// The music rows (a checkbox with its (?) and the note), when the art has music.
     var musicRows: [[NSView]] {
         guard hasMusic else { return [] }
-        let help = HelpButton(text: MusicPlaybackHelp.export + "\n\n" + MusicPlaybackHelp.about)
-        help.toolTip = "What ANSI music is, and which export formats carry it"
+        let help = Hint.button(.ansiMusic, detail: MusicPlaybackHelp.export)
         let line = NSStackView(views: [includeMusic, help])
         line.orientation = .horizontal
         line.spacing = 6

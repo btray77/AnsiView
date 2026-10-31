@@ -115,9 +115,8 @@ enum MusicIndicator {
     static let foreground = "\u{266A} ANSI music"
     static let background = "\u{266A} ANSI music (background)"
     static let paused = "\u{266A} ANSI music (paused)"
-    static let tip = "This art is playing ANSI music: a BASIC PLAY tune sent inside the file, as BBS terminals played it. "
-        + "Foreground music (MF) pauses the drawing until it ends; background music (MB) plays while it draws. "
-        + "Click to mute this window. Playback > Play ANSI Music turns it off everywhere."
+    /// Two short sentences (item 62); Playback > About ANSI Music has the rest.
+    static let tip = String(localized: "This art plays ANSI music, a tune sent inside the file as BBS terminals played it. Click to mute this window.")
 }
 
 /// Shows an ANSI file in a scroll view. Animated files replay at modem speed and blinking text blinks.

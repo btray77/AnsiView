@@ -164,10 +164,10 @@ final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSS
         favouritesBox.action = #selector(queryChanged(_:))
         favouritesBox.toolTip = "Show only fonts you starred"
         let importButton = NSButton(title: "Import Fonts...", target: self, action: #selector(importFonts(_:)))
-        importButton.toolTip = FontHelp.import_
+        importButton.toolTip = String(localized: "Import TheDraw (.tdf) and FIGlet (.flf, .tlf) fonts, folders of them or .zip packs. AnsiView copies them; the originals stay as they are.")
         let managerButton = NSButton(title: "Font Manager", target: self, action: #selector(openManager(_:)))
         managerButton.toolTip = "List, preview, remove and reveal installed fonts"
-        let typesHelp = TextArtImages.helpButton(FontHelp.tdfTypes, tooltip: "About TheDraw font kinds")
+        let typesHelp = Hint.button(.theDrawFonts, detail: FontHelp.tdfTypes)
         countLabel.textColor = .secondaryLabelColor
         countLabel.font = NSFont.systemFont(ofSize: 11)
         let controlsTop = NSStackView(views: [searchField, categoryPopup, sortPopup])
@@ -313,7 +313,7 @@ final class TextToASCIIViewController: NSViewController, NSTextViewDelegate, NSS
             stack.spacing = 6
             return stack
         }
-        let layoutHelp = TextArtImages.helpButton(FontHelp.figletLayouts, tooltip: "About FIGlet layouts and smushing")
+        let layoutHelp = Hint.button(.figlet, detail: FontHelp.figletLayouts)
         let outlineHelp = TextArtImages.helpButton(FontHelp.outlineStyles, tooltip: "About outline styles")
 
         // Output.

@@ -85,10 +85,7 @@ final class DuplicatesViewController: NSViewController, NSOutlineViewDataSource,
         trashButton.action = #selector(trashPressed(_:))
         trashButton.bezelStyle = .rounded
         trashButton.toolTip = "Moves the ticked files to the Trash after asking. Nothing is deleted: you can put them back from the Trash."
-        let help = Hint.button("Exact copies have the same bytes. \u{201C}Same art\u{201D} means the finished pictures are cell for "
-            + "cell the same (same characters, colours and blink) although the files differ, usually because of a different "
-            + "SAUCE record, other line endings or redundant colour codes. Blank space at the end does not count.",
-            title: "How duplicates are found")
+        let help = Hint.button(.duplicates)
         let bar = NSStackView(views: [tickAll, untick, compare, reveal, NSView(), help, trashButton])
         bar.spacing = 8
         let stack = NSStackView(views: [summaryLabel, scroll, bar])

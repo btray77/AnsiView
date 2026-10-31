@@ -566,7 +566,7 @@ enum TransferChooser {
     static func protocolRow(selected: TransferProtocolKind) -> (NSView, NSPopUpButton) {
         let label = NSTextField(labelWithString: "Protocol:")
         let popup = protocolPopup(selected: selected)
-        let help = TransferHelpButton(text: TransferHelp.chooser + "\n\n" + TransferHelp.allProtocols)
+        let help = Hint.button(.fileTransfer, detail: TransferHelp.chooser + "\n\n" + TransferHelp.allProtocols)
         let row = NSStackView(views: [label, popup, help])
         row.orientation = .horizontal
         row.spacing = 8
@@ -658,53 +658,6 @@ final class ClosureTarget: NSObject {
     @objc func run() { action() }
 }
 
-/// A (?) button that shows its text in a popover.
-final class TransferHelpButton: NSButton {
-    let text: String
-
-    init(text: String) {
-        self.text = text
-        super.init(frame: .zero)
-        bezelStyle = .helpButton
-        title = ""
-        toolTip = "Explain"
-        target = self
-        action = #selector(showHelp)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    @objc func showHelp() {
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentViewController = TransferHelpPopover(text: text)
-        popover.show(relativeTo: bounds, of: self, preferredEdge: .maxY)
-    }
-}
-
-final class TransferHelpPopover: NSViewController {
-    let text: String
-    init(text: String) {
-        self.text = text
-        super.init(nibName: nil, bundle: nil)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    override func loadView() {
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.preferredMaxLayoutWidth = 380
-        label.frame = NSRect(x: 12, y: 12, width: 380, height: 10)
-        let size = label.fittingSize
-        label.frame.size = NSSize(width: 380, height: size.height)
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 404, height: size.height + 24))
-        container.addSubview(label)
-        view = container
-    }
-}
-
 // MARK: - Ask bar
 
 /// The non-modal bar that asks about a detected transfer start (ruling 1).
@@ -714,7 +667,7 @@ final class TransferOfferBar: NSView {
     let message = NSTextField(labelWithString: "")
     let acceptButton = NSButton(title: "Receive", target: nil, action: nil)
     let ignoreButton = NSButton(title: "Ignore", target: nil, action: nil)
-    let help = TransferHelpButton(text: TransferHelp.autoStart + "\n\n" + TransferHelp.hint(.zmodem) + "\n\nIgnore draws what arrived as text and lets the BBS give up by itself; typing Ctrl-X five times stops it sooner.")
+    let help = Hint.button(.zmodem, detail: TransferHelp.autoStart + "\n\n" + TransferHelp.hint(.zmodem) + "\n\nIgnore draws what arrived as text and lets the BBS give up by itself; typing Ctrl-X five times stops it sooner.")
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -785,7 +738,7 @@ final class TransferPanelView: NSView {
     let closeButton = NSButton(title: "Close", target: nil, action: nil)
     let summaryText = NSTextView()
     let summaryScroll = NSScrollView()
-    let help = TransferHelpButton(text: TransferHelp.allProtocols + "\n\n" + TransferHelp.resume)
+    let help = Hint.button(.fileTransfer, detail: TransferHelp.allProtocols + "\n\n" + TransferHelp.resume)
     private let stack = NSStackView()
 
     static let rows: [(id: String, label: String, tip: String)] = [

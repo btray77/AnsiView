@@ -79,6 +79,7 @@ final class HostKeyPrompt: HostKeyVerifying {
 
     static func alert(for question: Question) -> NSAlert {
         let alert = NSAlert()
+        GlossaryAlertHelp.attach(.hostKey, to: alert)
         switch question {
         case .new(let host, let type, let fingerprint):
             alert.messageText = "Trust the SSH host key of \(host)?"

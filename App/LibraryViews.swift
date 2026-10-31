@@ -112,9 +112,7 @@ final class LibraryViewController: NSViewController, NSOutlineViewDataSource, NS
                               target: self, action: #selector(removeSelectedSource(_:)))
         remove.bezelStyle = .texturedRounded
         remove.toolTip = "Remove the selected smart folder, or take the selected folder out of the library (its files stay where they are)."
-        let help = Hint.button("A smart folder is a saved search that keeps itself up to date: for example every piece "
-            + "rated 4 stars or more, or every piece tagged \u{201C}logos\u{201D} from 1995 on. The built in ones cannot be removed.",
-            title: "Smart folders")
+        let help = Hint.button(.smartFolder, detail: String(localized: "The built in smart folders cannot be removed."))
         let buttons = NSStackView(views: [add, remove, NSView(), help])
         buttons.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 6, right: 8)
         let box = NSStackView(views: [scroll, buttons])
@@ -149,10 +147,7 @@ final class LibraryViewController: NSViewController, NSOutlineViewDataSource, NS
         compareButton.bezelStyle = .rounded
         compareButton.controlSize = .small
         compareButton.toolTip = "Select two pieces, then Compare shows them side by side with the cells that differ tinted red."
-        let help = Hint.button("The library indexes the folders you add (and the ZIP art packs in them) in the background: "
-            + "each piece's text, its SAUCE record (the title, author, group and date stored at the end of the file) and "
-            + "a thumbnail. Tags, ratings and favourites stay with a piece even if you rename or move it. "
-            + "Keys: 0 to 5 rate, F favourite, T tags, Return or Space opens.", title: "Library")
+        let help = Hint.button(.library)
         let bar = NSStackView(views: [searchField, statusLabel, NSView(), addFolder, rescan, duplicates, compareButton, help])
         bar.spacing = 8
         bar.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
@@ -167,12 +162,10 @@ final class LibraryViewController: NSViewController, NSOutlineViewDataSource, NS
         remoteButton.action = #selector(remotePressed(_:))
         remoteButton.bezelStyle = .rounded
         remoteButton.controlSize = .small
-        remoteButton.toolTip = "Asks 16colo.rs (the online ANSI art archive) for packs under this name. Double click a pack to download and open it."
+        remoteButton.toolTip = String(localized: "Asks 16colo.rs, the online ANSI art archive, for packs under this name. Double click a pack to open it.")
         remoteStatus.textColor = .secondaryLabelColor
         remoteStatus.font = .systemFont(ofSize: 11)
-        let pageHelp = Hint.button("Artist and group pages come from the SAUCE records in your files: the author and group "
-            + "fields, merged when only case or spacing differ. 16colo.rs may spell a name differently, in which case it shows nothing.",
-            title: "Artist and group pages")
+        let pageHelp = Hint.button(.artScene, detail: String(localized: "Artist and group pages come from the author and group in your files' SAUCE records, merged when only case or spacing differ. 16colo.rs may spell a name differently, in which case it shows nothing."))
         let remoteRow = NSStackView(views: [remoteButton, remoteStatus, NSView(), pageHelp])
         for (id, title, width) in [("year", "Year", 60.0), ("pack", "Pack", 200.0), ("group", "Group", 160.0), ("files", "Files", 300.0)] {
             let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
@@ -243,8 +236,7 @@ final class LibraryViewController: NSViewController, NSOutlineViewDataSource, NS
         tagsField.target = self
         tagsField.action = #selector(tagsChanged(_:))
         tagsField.toolTip = "Tags are your own labels, such as logos or favourites from a BBS. Type a tag and press Return or a comma."
-        let sauceHelp = Hint.button("SAUCE is a 128 byte record many ANSI files carry at the end: the piece's title, author, "
-            + "group, date and display settings. The library reads it to build artist and group pages.", title: "SAUCE")
+        let sauceHelp = Hint.button(.sauce, detail: String(localized: "The library reads it to build artist and group pages."))
         let info = NSStackView(views: [nameLabel, sauceLabel])
         info.orientation = .vertical
         info.alignment = .leading
@@ -839,14 +831,14 @@ final class SmartFolderEditor: NSViewController {
         nameField.stringValue = folder?.name ?? ""
         matchPopup.addItems(withTitles: ["all of these rules", "any of these rules"])
         matchPopup.selectItem(at: folder?.matchAll == false ? 1 : 0)
+        matchPopup.toolTip = String(localized: "All: a piece must match every rule. Any: one matching rule is enough.")
         let matchRow = NSStackView(views: [NSTextField(labelWithString: "Pieces matching"), matchPopup])
         rowsStack.orientation = .vertical
         rowsStack.alignment = .leading
         rowsStack.spacing = 6
         let add = NSButton(title: "Add Rule", target: self, action: #selector(addPressed(_:)))
-        let help = Hint.button("Tag rules match your tags (case does not matter). SAUCE rules look at the title, author "
-            + "and group stored in the file. Year rules use the SAUCE date, so pieces without one never match them. "
-            + "Format is a name such as ANSI, XBin or BinaryText.", title: "Smart folder rules")
+        add.toolTip = String(localized: "Adds another rule: a tag, rating, SAUCE field, year or format to match")
+        let help = Hint.button(.smartFolder, detail: String(localized: "Format is a name such as ANSI, XBin or BinaryText."))
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelPressed(_:)))
         cancel.keyEquivalent = "\u{1B}"
         let save = NSButton(title: folder == nil ? "Create" : "Save", target: self, action: #selector(savePressed(_:)))
@@ -879,6 +871,7 @@ final class SmartFolderEditor: NSViewController {
         popup.selectItem(at: field.rawValue)
         popup.target = self
         popup.action = #selector(fieldChanged(_:))
+        popup.toolTip = String(localized: "What this rule looks at: your tags, rating or favourites, or the file's SAUCE, year or format")
         let box = NSComboBox()
         box.stringValue = value
         box.completes = true
@@ -888,6 +881,7 @@ final class SmartFolderEditor: NSViewController {
         let remove = NSButton(image: NSImage(systemSymbolName: "minus.circle", accessibilityDescription: "Remove rule")!,
                               target: self, action: #selector(removePressed(_:)))
         remove.isBordered = false
+        remove.toolTip = String(localized: "Removes this rule")
         let row = NSStackView(views: [popup, box, remove])
         rowsStack.addArrangedSubview(row)
         rows.append((popup, box, row))

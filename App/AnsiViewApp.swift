@@ -56,6 +56,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // RIPscrip files in the viewer use the chosen icon folder; the entry form lists Keychain identities.
         ArtFile.ripFiles = RIPIconFolder.provider()
         EntryForm.clientIdentities = TLSClientIdentities.list
+        // Help menu search lists glossary terms (item 62).
+        NSApp.registerUserInterfaceItemSearchHandler(GlossaryHelpSearch.shared)
         if DialingDirectoryStore.shared.directory.showAtLaunch { DialingDirectoryWindowController.show() }
     }
 
@@ -381,6 +383,13 @@ struct AnsiViewApp: App {
                         if let terminal = TerminalWindowController.focused { TransferLogWindowController.show(entry: terminal.entry) }
                     }
                     .help("Every file transfer with this BBS: protocol details, retries, results and SHA-256 checksums.")
+                }
+                // Item 62: the glossary replaces "AnsiView Help" (there is no help book); the Help
+                // menu's search field also lists glossary terms (GlossaryHelpSearch).
+                CommandGroup(replacing: .help) {
+                    Button("AnsiView Glossary") { GlossaryWindowController.show() }
+                        .keyboardShortcut("?", modifiers: [.command])
+                        .help("Every term in AnsiView explained in plain English: iCE colours, SAUCE, ZMODEM and more.")
                 }
                 CommandGroup(after: .windowArrangement) {
                     Button("Dialing Directory") { DialingDirectoryWindowController.show() }

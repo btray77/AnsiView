@@ -171,6 +171,13 @@ Requires macOS 14 or later, on Apple silicon or Intel.
 | Next palette | Option Command P |
 | Show or hide pack info (gallery) | Option Command I |
 | Library | Shift Command L; in it 0 to 5 rate, F favourite, T tags, Return or Space open |
+| Glossary (what is iCE, SAUCE, ZMODEM...) | Help > AnsiView Glossary (Command ?), or type a term in the Help menu's search field |
+
+New to BBS art? **Help > AnsiView Glossary** explains every term AnsiView uses (iCE colours,
+SAUCE, CP437, baud, art packs, PETSCII, ZMODEM, host keys: 78 terms in all) in plain English,
+with related terms as links and where each one shows up in the app. The round (?) buttons beside
+jargon controls open the same entries, every button and popup has a tooltip, and the Help menu's
+search field lists glossary terms. The text lives in `Packages/AnsiCore/Sources/AnsiCore/Glossary.swift`.
 
 The playback speeds you choose in the app (per file and default) are also used by the Quick Look preview.
 

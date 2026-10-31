@@ -59,6 +59,7 @@ final class CertificatePrompt: CertificateVerifying {
 
     static func alert(for question: Question) -> NSAlert {
         let alert = NSAlert()
+        GlossaryAlertHelp.attach(.tls, to: alert)
         switch question {
         case .new(let host, let c):
             alert.messageText = "Trust the TLS certificate of \(host)?"

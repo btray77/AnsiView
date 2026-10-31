@@ -29,7 +29,14 @@ enum AnimationSettings {
 
 /// Shows one of `AnimationHelp.explanations` in a popover next to a (?) button.
 enum AnimationHelpPopover {
+    /// Topics that are glossary terms get a glossary hint (item 62).
+    static let glossaryTopics: [String: GlossaryTerm] = ["onionSkin": .onionSkin, "padding": .crPadding]
+
     static func button(_ topic: String, target: AnyObject, action: Selector) -> NSButton {
+        if let term = glossaryTopics[topic] {
+            let detail = AnimationHelp.explanations[topic]?.text
+            return Hint.button(term, detail: term == .onionSkin ? nil : detail)
+        }
         let button = NSButton(title: "", target: target, action: action)
         button.bezelStyle = .helpButton
         button.identifier = NSUserInterfaceItemIdentifier("help." + topic)

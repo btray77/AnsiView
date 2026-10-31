@@ -38,9 +38,7 @@ final class PackInfoPane: NSViewController {
         picker.action = #selector(picked(_:))
         picker.toolTip = "The pack's own description files: FILE_ID.DIZ (the short description BBSes showed in file lists) and NFO files (release notes)."
         picker.isHidden = indexes.count < 2
-        let help = Hint.button("FILE_ID.DIZ is the short description an art pack carried for BBS file lists; NFO files are "
-            + "the group's release notes. AnsiView shows them when a pack or folder opens. View > Show Pack Info hides this pane.",
-            title: "Pack info")
+        let help = Hint.button(.fileIDDiz, detail: String(localized: "AnsiView shows a pack's FILE_ID.DIZ and NFO files when it opens. View > Show or Hide Pack Info hides this pane."))
         let bar = NSStackView(views: [title, picker, NSView(), help])
         bar.spacing = 8
         bar.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 8)

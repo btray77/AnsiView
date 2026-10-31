@@ -82,6 +82,7 @@ final class ExportProfilesViewController: NSViewController, NSTableViewDataSourc
         encodingPopup.toolTip = "CP437 is what DOS era packages read; UTF-8 only where the package documents it"
         lineEndingPopup.addItems(withTitles: LineEnding.allCases.map(\.label))
         lineEndingPopup.toolTip = "No BBS package documents its line ends; CR LF is what DOS era files use"
+        coloursPopup.toolTip = String(localized: "ANSI escapes work on every package; the package's own codes keep files editable in its own tools")
         sauceBox.toolTip = "SAUCE records title, author and width. Synchronet and ENiGMA are documented to stop at it; others may show its bytes"
         widthBox.toolTip = "Synchronet main.132col.ans, Mystic main.c132.ans: the BBS shows them to callers with that width"
         let choose = NSButton(title: "Choose Folder...", target: self, action: #selector(chooseFolder))
@@ -93,7 +94,7 @@ final class ExportProfilesViewController: NSViewController, NSTableViewDataSourc
         }
         let help = TextArtImages.helpButton(
             "A profile says how screens are written for one BBS install: the package (which decides the file names and codes), the install folder, the theme folder for packages with themes, the character set, whether colours are ANSI escapes or the package's own codes, line ends and SAUCE. Names marked \"suggested\" are not documented by the package; set the same name in your BBS's menu configuration.",
-            tooltip: "About export profiles")
+            term: .bbsPackage)
         let grid = NSGridView(views: [
             [ScreenDesigner.label("Name:"), nameField],
             [ScreenDesigner.label("BBS package:"), packagePopup],
@@ -451,6 +452,7 @@ final class ScreenSetWindowController: NSWindowController, NSWindowDelegate, NST
         let upload = NSButton(title: "Upload via Terminal...", target: self, action: #selector(upload))
         upload.toolTip = "Sends the exported file to the BBS with the dialing directory entry's protocol"
         let reveal = NSButton(title: "Reveal in Finder", target: self, action: #selector(reveal))
+        reveal.toolTip = String(localized: "Shows the exported file in the BBS folder")
         let remove = NSButton(title: "Remove", target: self, action: #selector(remove))
         remove.toolTip = "Removes the screen from the set (the file stays in the BBS folder)"
         let help = TextArtImages.helpButton(

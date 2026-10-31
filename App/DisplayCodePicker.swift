@@ -52,7 +52,7 @@ final class DisplayCodePickerViewController: NSViewController, NSTableViewDataSo
         searchField.toolTip = "Finds codes by their text, name or what they show"
         let help = TextArtImages.helpButton(
             "Display codes are text the BBS replaces as it sends the screen: the caller's name, the time left, the node, a clear screen, a colour. They go into the art as the exact characters the BBS reads, so they show as typed in the editor. Screen > Sample Values Preview and Preview as Caller show them replaced by sample values. Codes of another package are flagged in the caller preview, because the chosen BBS would print them as text.",
-            tooltip: "About display codes")
+            term: .displayCodes)
         for (id, title, width) in [("code", "Code", 110.0), ("shows", "Shows", 330.0)] {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
             column.title = title
@@ -172,6 +172,8 @@ final class SampleValuesWindowController: NSWindowController {
         let reset = NSButton(title: "Defaults", target: self, action: #selector(resetDefaults))
         let save = NSButton(title: "Save", target: self, action: #selector(save))
         save.keyEquivalent = "\r"
+        reset.toolTip = String(localized: "Puts back AnsiView's own sample values")
+        save.toolTip = String(localized: "Keeps these values for every preview")
         let stack = ScreenDesigner.column([grid, note, ScreenDesigner.row([NSView(), reset, save])], spacing: 12)
         stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
         window.contentView = ScreenDesigner.container(stack)

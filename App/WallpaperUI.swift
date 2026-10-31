@@ -44,6 +44,8 @@ final class WallpaperExport {
         tileSize.addItems(withTitles: ["1x", "2x", "3x", "4x"])
         setDesktop.state = .off
         setDesktop.toolTip = "After saving, macOS uses the picture as this display's wallpaper. Keep the file where you saved it: macOS reads it from there."
+        displayPopup.toolTip = String(localized: "The display whose exact pixel size the picture is made for")
+        tileSize.toolTip = String(localized: "Tiled only: how large each copy of the art is drawn")
         modePopup.toolTip = "Centred: the art as large as whole pixels allow, in the middle, on its own background colour. Tiled: copies of the art side by side."
         let target = PopupTarget { [weak self] _ in MainActor.assumeIsolated { self?.updateEnabled() } }
         modePopup.target = target
