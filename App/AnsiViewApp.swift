@@ -50,6 +50,8 @@ private func send(_ action: Selector) {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         AnsiCanvasView.imageDropHandler = { ImageImportWindowController.open(url: $0) }
+        // System, Light, Dark or Retro (AnsiView > Settings, final gaps ruling 9).
+        AppearanceController.shared.apply()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -412,6 +414,7 @@ struct AnsiViewApp: App {
                 }
             }
         }
+        Settings { SettingsView() }
         MenuBarExtra("Art of the Day", systemImage: "photo.artframe", isInserted: $showArtOfTheDay) {
             ArtOfTheDayView(model: artOfTheDay)
         }

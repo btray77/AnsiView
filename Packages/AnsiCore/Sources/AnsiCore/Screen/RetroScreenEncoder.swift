@@ -194,6 +194,12 @@ public enum RetroScreenEncoder {
             switch code {
             case 0x23: return 0x5F
             case 0x9C: return 0x23
+            // UK teletext has arrows and fractions where ASCII has brackets: the nearest readable ones.
+            case 0x5B, 0x7B: return 0x28
+            case 0x5D, 0x7D: return 0x29
+            case 0x5C: return 0x2F
+            case 0x5F: return 0x2D
+            case 0x60: return 0x27
             case 0x20...0x22, 0x24...0x5A, 0x61...0x7A: return code
             default: return nil
             }

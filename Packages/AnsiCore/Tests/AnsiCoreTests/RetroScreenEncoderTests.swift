@@ -107,6 +107,11 @@ import Testing
         #expect(block.filter { $0 }.count * 10 >= block.count * 9)
         #expect(screen.rows[3][5].fg == TeletextTerminal.colours[2])
         #expect(Self.text(screen, row: 22).contains("Press # to continue"))
+        // Teletext has no square brackets: hotkeys keep readable round ones.
+        var menu = EditCanvas(columns: 40, height: 24)
+        Self.write("[M]essages", on: &menu, x: 2, y: 2, fg: 15)
+        let brackets = RetroScreenEncoder.play(RetroScreenEncoder.encode(menu, for: .viewdata).bytes, on: .viewdata)
+        #expect(Self.text(brackets, row: 2).contains("(M)essages"))
     }
 
     @Test func viewdataReportsCellsLostToAttributes() {

@@ -82,7 +82,7 @@ public struct BitmapFont: Equatable {
     // MARK: Bundled fonts
 
     /// SAUCE font names and the bundled pixel font that draws them.
-    private static let catalog: [String: (file: String, width: Int, height: Int)] = [
+    static let catalog: [String: (file: String, width: Int, height: Int)] = [
         "IBM VGA": ("Px437_IBM_VGA_8x16", 8, 16),
         "IBM VGA50": ("Px437_IBM_EGA_8x8", 8, 8),
         "IBM EGA": ("Px437_IBM_EGA_8x14", 8, 14),
