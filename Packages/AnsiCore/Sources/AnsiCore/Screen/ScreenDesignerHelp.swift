@@ -24,6 +24,12 @@ public enum ScreenDesignerHelp {
             return "No source documents colour codes of this BBS package's own, so the profile's choice of package codes cannot be used. ANSI escape codes are written instead; every package listed shows ANSI files."
         case .animatedAsANSI:
             return "Animated screens are sent as ANSI cursor movements with padding for the delays. BBS colour codes cannot move the cursor, so this screen is exported with ANSI colours whatever the profile says."
+        case .platformCropped:
+            return "Home computer screens are small: 40 x 25 on a Commodore 64, 40 x 24 on an Atari or a Viewdata set, 80 x 25 on a C128. What lies outside is not exported. Design the screen at that size (File > New ANSI Art, then Canvas Size) to keep all of it."
+        case .platformApproximated:
+            return "The platform has other characters and fewer colours than a PC. AnsiView picks the character whose shape is closest to each CP437 character and the nearest colours the platform can put on that cell: a Commodore has one screen background (other backgrounds become reverse video), an Atari text screen has one colour, Viewdata has 8 colours."
+        case .platformLost:
+            return "Viewdata colours are set by attribute characters that take a cell of their own (shown as a space). AnsiView puts them in spaces before the text where it can; where colours change between two characters with no space, a character is lost. Leave a space before each colour change."
         }
     }
 }

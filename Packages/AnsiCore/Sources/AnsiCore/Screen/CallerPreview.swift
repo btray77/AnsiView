@@ -21,7 +21,7 @@ public struct CallerTerminalSize: Equatable, Hashable, Codable {
 public struct PreviewWarning: Equatable {
     public enum Kind: String, Equatable, CaseIterable {
         case lineTooLong, wrapAtLastColumn, bottomRightScroll, tallerThanScreen, unsupportedCode, needsIce, encodingUndocumented, noColourCodes,
-             notRepresentable, animatedAsANSI
+             notRepresentable, animatedAsANSI, platformCropped, platformApproximated, platformLost
     }
 
     public var kind: Kind
