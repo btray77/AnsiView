@@ -4,6 +4,9 @@
     "%@  ·  click to skip" : {
 
     },
+    "%@ files carry no SAUCE record: the title, author and group are not saved." : {
+
+    },
     "%lld baud" : {
 
     },
@@ -84,6 +87,9 @@
 
     },
     "AnsiView shows a pack's FILE_ID.DIZ and NFO files when it opens. View > Show or Hide Pack Info hides this pane." : {
+
+    },
+    "Appearance:" : {
 
     },
     "Art" : {
@@ -266,6 +272,9 @@
     "Export Wallpaper..." : {
 
     },
+    "Export for Retro Platform..." : {
+
+    },
     "Export to BBS..." : {
 
     },
@@ -342,6 +351,9 @@
 
     },
     "Hold Final Frame" : {
+
+    },
+    "How AnsiView's own windows look. The art is always drawn in its own colours." : {
 
     },
     "Image" : {
@@ -449,6 +461,9 @@
     "Next Palette" : {
 
     },
+    "No BBS package documents ATASCII display files: AnsiView writes the screen as plain ATASCII bytes." : {
+
+    },
     "No terms match. Try a shorter word." : {
 
     },
@@ -477,6 +492,9 @@
 
     },
     "Opens this piece in a viewer window" : {
+
+    },
+    "PC (ANSI-BBS)" : {
 
     },
     "PNG" : {
@@ -539,6 +557,9 @@
     "Reconnect" : {
 
     },
+    "Redraws the screen as PETSCII (Commodore), ATASCII (Atari) or a Telstar Viewdata frame." : {
+
+    },
     "Related" : {
 
     },
@@ -582,6 +603,9 @@
 
     },
     "Save Selection as Component..." : {
+
+    },
+    "Saves with a SAUCE record (title, author, group, width, iCE colours)." : {
 
     },
     "Scale" : {
@@ -710,10 +734,22 @@
     "The Protocol field picks telnet, SSH, RLogin, raw TCP or WebSocket; see the related terms below." : {
 
     },
+    "The Telstar page number the frame is stored as (frame a)" : {
+
+    },
     "The built in smart folders cannot be removed." : {
 
     },
+    "The caller's computer: a PC terminal gets the BBS package's ANSI; a Commodore, Atari or Viewdata caller gets the screen redrawn for that platform" : {
+
+    },
     "The display whose exact pixel size the picture is made for" : {
+
+    },
+    "The file is written for the platform chosen here; Preview as Caller shows it through that platform's terminal." : {
+
+    },
+    "The home computer or videotex service the screen is redrawn for" : {
 
     },
     "The kind of file to make: a picture, an animation of the art being drawn, or text" : {

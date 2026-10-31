@@ -69,6 +69,9 @@ public struct ArtProject: Equatable {
         var sauceDate: String?
         /// A fitted 16 colour palette as [r, g, b] triples (image imports saved as XBin).
         var palette: [[Int]]?
+        /// An embedded 8 pixel wide font (XBin, ADF, IDF) as base64 of its glyph bytes, and its height.
+        var font: String?
+        var fontHeight: Int?
         /// The current frame's active layer.
         var activeLayer: Int
         /// Version 2: the frame being edited.
@@ -108,6 +111,8 @@ public struct ArtProject: Equatable {
                 return String(format: "%04d%02d%02d", y, m, day)
             },
             palette: base.palette.map { $0.map { [Int($0.r), Int($0.g), Int($0.b)] } },
+            font: base.embeddedFont?.rawGlyphBytes.map { Data($0).base64EncodedString() },
+            fontHeight: base.embeddedFont?.rawGlyphBytes == nil ? nil : base.embeddedFont?.height,
             activeLayer: activeLayer,
             currentFrame: animated ? currentFrame : nil,
             frames: frames.map { frame in
@@ -180,6 +185,10 @@ public struct ArtProject: Equatable {
         canvas.sauceTInfo34 = file.sauceTInfo34.prefix(2).map { UInt16(clamping: $0) }
         if let triples = file.palette, triples.count == 16, triples.allSatisfy({ $0.count == 3 }) {
             canvas.palette = triples.map { RGB(r: UInt8(clamping: $0[0]), g: UInt8(clamping: $0[1]), b: UInt8(clamping: $0[2])) }
+        }
+        if let text = file.font, let height = file.fontHeight, (1...32).contains(height),
+           let bytes = Data(base64Encoded: text), bytes.count == 256 * height {
+            canvas.embeddedFont = BitmapFont(rawGlyphs: [UInt8](bytes), height: height)
         }
         if let text = file.sauceDate, text.count == 8, let value = Int(text) {
             canvas.sauceDate = DateComponents(year: value / 10000, month: value / 100 % 100, day: value % 100)

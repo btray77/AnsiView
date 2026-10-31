@@ -143,7 +143,11 @@ enum EditorTheme: String {
     static let defaultsKey = "EditorTheme"
 
     static var current: EditorTheme {
-        get { EditorTheme(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .native }
+        get {
+            // The app wide Retro appearance (Settings) makes every editor retro.
+            if AppAppearance.current() == .retro { return .retro }
+            return EditorTheme(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .native
+        }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
     }
 

@@ -929,6 +929,8 @@ final class EditorViewController: NSViewController {
     private let iceBox = NSButton(checkboxWithTitle: "iCE colours", target: nil, action: nil)
     private let transparentBox = NSButton(checkboxWithTitle: "Transparent paste", target: nil, action: nil)
     private let status = NSTextField(labelWithString: "")
+    /// The status line colour (for the harness).
+    var statusColourForHarness: NSColor? { status.textColor }
     private let hintLabel = NSTextField(labelWithString: "")
     private let preview = NSTextField(labelWithString: " Aa ")
     private let insertLabel = NSTextField(labelWithString: "OVR")
@@ -937,6 +939,7 @@ final class EditorViewController: NSViewController {
     private var root = NSView()
     private var chrome: [NSView] = []
     private var shortcutObserver: NSObjectProtocol?
+    private var appearanceObserver: NSObjectProtocol?
     private var loadedCharacterPanel: CharacterPickerPanel?
     var characterPanel: CharacterPickerPanel {
         if let loadedCharacterPanel { return loadedCharacterPanel }
@@ -1008,6 +1011,7 @@ final class EditorViewController: NSViewController {
 
     deinit {
         if let shortcutObserver { NotificationCenter.default.removeObserver(shortcutObserver) }
+        if let appearanceObserver { NotificationCenter.default.removeObserver(appearanceObserver) }
     }
 
     @available(*, unavailable)
@@ -1122,6 +1126,10 @@ final class EditorViewController: NSViewController {
         hints.show = { [weak self] text in self?.hoverHint = text }
         shortcutObserver = NotificationCenter.default.addObserver(forName: ShortcutStore.changed, object: nil, queue: .main) { [weak self] _ in
             self?.palette.refreshTooltips()
+        }
+        // The app wide Retro appearance turns the editor's retro theme on too (final gaps ruling 9).
+        appearanceObserver = NotificationCenter.default.addObserver(forName: AppearanceController.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.applyTheme()
         }
         setTool(.draw)
         applyTheme()
@@ -1285,6 +1293,13 @@ final class EditorViewController: NSViewController {
     // MARK: Theme (ruling 14)
 
     func toggleTheme() {
+        // Under the app wide Retro appearance the editor is always retro; turning it off here
+        // switches the app to Dark (the same controls, without the blue).
+        if AppearanceController.shared.current == .retro {
+            EditorTheme.current = .native
+            AppearanceController.shared.choose(.dark)
+            return
+        }
         EditorTheme.current = EditorTheme.current == .retro ? .native : .retro
         applyTheme()
     }
@@ -1297,9 +1312,11 @@ final class EditorViewController: NSViewController {
         root.appearance = retro ? NSAppearance(named: .darkAqua) : nil
         status.textColor = retro ? EditorTheme.dosYellow : .secondaryLabelColor
         hintLabel.textColor = retro ? .white : .secondaryLabelColor
-        let font = retro ? NSFont.monospacedSystemFont(ofSize: 11, weight: .bold) : NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        // Retro status lines use the bundled IBM VGA font at its pixel size when it loads.
+        let vga = retro ? AppearanceController.vgaFont : nil
+        let font = vga ?? (retro ? NSFont.monospacedSystemFont(ofSize: 11, weight: .bold) : NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular))
         status.font = font
-        hintLabel.font = retro ? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular) : NSFont.systemFont(ofSize: 11)
+        hintLabel.font = vga ?? (retro ? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular) : NSFont.systemFont(ofSize: 11))
         insertLabel.textColor = retro ? EditorTheme.dosCyan : .labelColor
         for view in chrome {
             view.wantsLayer = true
@@ -1572,7 +1589,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         panel.allowedContentTypes = [Self.contentType(format)]
         panel.allowsOtherFileTypes = false
         panel.isExtensionHidden = false
-        panel.message = "Saves with a SAUCE record (title, author, group, width, iCE colours)."
+        panel.message = Self.saveMessage(format)
         let popup = NSPopUpButton()
         popup.addItems(withTitles: SaveFormat.allCases.map(\.label))
         popup.selectItem(at: SaveFormat.allCases.firstIndex(of: format) ?? 0)
@@ -1637,6 +1654,13 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    /// What the save panel says about the chosen format (ADF, iCE Draw and Wildcat files carry no SAUCE).
+    static func saveMessage(_ format: SaveFormat) -> String {
+        [.adf, .idf, .wildcat].contains(format)
+            ? String(localized: "\(format.name) files carry no SAUCE record: the title, author and group are not saved.")
+            : String(localized: "Saves with a SAUCE record (title, author, group, width, iCE colours).")
+    }
+
     static func contentType(_ format: SaveFormat) -> UTType {
         UTType(filenameExtension: format.fileExtension) ?? .data
     }
@@ -1655,6 +1679,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             panel.allowedContentTypes = [EditorWindowController.contentType(format)]
             let base = (panel.nameFieldStringValue as NSString).deletingPathExtension
             panel.nameFieldStringValue = "\(base).\(format.fileExtension)"
+            panel.message = EditorWindowController.saveMessage(format)
         }
     }
 }

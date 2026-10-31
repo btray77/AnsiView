@@ -17,13 +17,13 @@ public enum GlossaryTerm: String, CaseIterable, Sendable {
     case baud, crPadding, ansiMusic, bansi, crtEffect
     // Terminal
     case bbs, terminal, terminalType, ansiBBS, vt100, vt52, petscii, atascii, viewdata, mode7, appleII, amigaAnsi
-    case iemsi, displayCodes, bbsPackage, sixel, doorGames, scrollback, sessionCapture
+    case iemsi, displayCodes, bbsPackage, sixel, doorGames, scrollback, sessionCapture, retroExport
     // Connecting
     case dialingDirectory, telnet, ssh, legacySSH, tls, hostKey, rlogin, webSocket, rawTCP
     // File transfers
     case fileTransfer, xmodem, ymodem, zmodem, kermit, checksum
     // Using AnsiView
-    case library, smartFolder, duplicates, compare, autoScroll, minimap
+    case library, smartFolder, duplicates, compare, autoScroll, minimap, appearance
 }
 
 /// What an entry is about, for grouping.
@@ -343,6 +343,10 @@ public enum Glossary {
                       hint: "Short codes a BBS replaces with colours or live values, such as |01 or @USER@",
                       explanation: "BBS screens are templates. Codes like |14 (yellow), @USER@ (the caller's name) or %UN are swapped by the BBS for colours or live values when the screen is shown. Each BBS package has its own codes. AnsiView's screen designer inserts them, previews them with sample values and exports for the package you pick.",
                       related: [.bbsPackage, .pcboard, .bbs], whereInApp: "Editor > Insert Display Code; Sample Values.", category: .terminal),
+        GlossaryEntry(term: .retroExport, title: "Export for a retro platform", aliases: ["seq file", "petscii export", "atascii export", "telstar frame", "viewdata frame", ".seq", ".ata"],
+                      hint: "Writes a designed screen as PETSCII, ATASCII or a Viewdata frame for home computer boards",
+                      explanation: "Commodore, Atari and Viewdata boards do not show PC ANSI. AnsiView redraws the screen with each platform's own characters and colours: the nearest character shape for each cell and the colours the machine can show there. A Commodore screen becomes a .seq file (Synchronet shows .seq files to PETSCII callers), an Atari screen an .ata file, and a Viewdata screen a Telstar frame. Preview as Caller plays the result through AnsiView's own terminal for that platform, and counts the cells that could not be kept.",
+                      related: [.petscii, .atascii, .viewdata, .bbsPackage], whereInApp: "Screen > Export for Retro Platform...; Screen > Preview as Caller, Terminal.", category: .terminal),
         GlossaryEntry(term: .bbsPackage, title: "BBS package", aliases: ["bbs software", "synchronet", "mystic", "wwiv", "renegade", "enigma", "pcboard"],
                       hint: "The software that runs a BBS, such as Synchronet, Mystic, WWIV or Renegade",
                       explanation: "Sysops run a BBS package: the program that handles callers, menus, messages and files. Each one reads screens from its own folders with its own file names and display codes, so AnsiView's export profiles know where each package expects its files.",
@@ -453,6 +457,10 @@ public enum Glossary {
                       hint: "A strip beside tall art showing the whole piece; click or drag in it to jump",
                       explanation: "Much ANSI art is far taller than a window. The minimap draws the whole piece small at the right edge with a box for the part you are looking at, so you can jump anywhere with one click.",
                       related: [.autoScroll, .columns], whereInApp: "View > Show Minimap.", category: .usingAnsiView),
+        GlossaryEntry(term: .appearance, title: "Appearance (System, Light, Dark, Retro)", aliases: ["theme", "dark mode", "light mode", "retro theme", "dos theme"],
+                      hint: "How AnsiView's own windows look: follow macOS, always light, always dark, or Retro",
+                      explanation: "System follows the macOS setting; Light and Dark fix one look for AnsiView only. Retro is AnsiView's own DOS and BBS inspired look: dark controls on a deep blue, light grey text, yellow highlights and the bundled IBM VGA font for status lines and hints. Every text colour in it has a contrast of at least 4.5 to 1 against its background. The art itself is never changed by the appearance.",
+                      related: [.textModeFont, .cp437], whereInApp: "AnsiView > Settings > Appearance.", category: .usingAnsiView),
     ]
     // swiftlint:enable line_length
 }

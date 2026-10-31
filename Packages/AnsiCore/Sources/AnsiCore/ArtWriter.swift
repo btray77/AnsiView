@@ -2,29 +2,58 @@ import Foundation
 
 /// File formats the editor saves.
 public enum SaveFormat: String, CaseIterable {
-    case ansi, bin, xbin
+    case ansi, ice, bin, xbin, adf, idf, pcboard, wildcat, avatar, avatarPlus
 
     public var fileExtension: String {
         switch self {
         case .ansi: return "ans"
+        case .ice: return "ice"
         case .bin: return "bin"
         case .xbin: return "xb"
+        case .adf: return "adf"
+        case .idf: return "idf"
+        case .pcboard: return "pcb"
+        case .wildcat: return "bbs"
+        case .avatar, .avatarPlus: return "avt"
         }
     }
 
     public var label: String {
         switch self {
         case .ansi: return "ANSI (.ans)"
+        case .ice: return "iCE colour ANSI (.ice)"
         case .bin: return "BinaryText (.bin)"
         case .xbin: return "XBin (.xb)"
+        case .adf: return "Artworx ADF (.adf)"
+        case .idf: return "iCE Draw (.idf)"
+        case .pcboard: return "PCBoard @X codes (.pcb)"
+        case .wildcat: return "Wildcat! @ codes (.bbs)"
+        case .avatar: return "Avatar/0 (.avt)"
+        case .avatarPlus: return "Avatar AVT/0+ (.avt)"
         }
     }
 
-    /// The format an opened file is saved in by default: binary formats keep theirs.
+    /// The format's name in sentences ("Wildcat!", "Artworx ADF").
+    public var name: String {
+        switch self {
+        case .pcboard: return "PCBoard"
+        case .wildcat: return "Wildcat!"
+        case .avatar: return "Avatar/0"
+        case .avatarPlus: return "AVT/0+"
+        default: return label.components(separatedBy: " (").first ?? label
+        }
+    }
+
+    /// The format an opened file is saved in by default: formats AnsiView writes keep theirs.
     public static func suggested(for format: ArtFormat) -> SaveFormat {
         switch format {
         case .bin: return .bin
         case .xbin: return .xbin
+        case .adf: return .adf
+        case .idf: return .idf
+        case .pcboard: return .pcboard
+        case .wildcat: return .wildcat
+        case .avatar: return .avatar
         default: return .ansi
         }
     }
@@ -35,11 +64,14 @@ public enum SaveFormat: String, CaseIterable {
 public enum ArtWriter {
     public enum WriteError: Error, LocalizedError {
         case tooWideForBinaryText(columns: Int)
+        case tooWideForADF(columns: Int)
 
         public var errorDescription: String? {
             switch self {
             case .tooWideForBinaryText(let columns):
                 return "BinaryText files can be at most 510 columns wide; this art is \(columns). Save it as ANSI or XBin."
+            case .tooWideForADF(let columns):
+                return "Artworx ADF files are always 80 columns wide; this art is \(columns). Save it as iCE Draw (.idf) or XBin."
             }
         }
     }
@@ -64,14 +96,36 @@ public enum ArtWriter {
             var header = Array("XBIN".utf8) + [0x1A]
             header += le16(canvas.columns) + le16(canvas.height)
             let palette = canvas.palette.flatMap { $0.count == 16 ? $0 : nil }
-            header += [16, (canvas.iceColors ? 0x08 : 0x00) | (palette != nil ? 0x01 : 0x00)]
+            // An embedded 8 pixel font of 1 to 32 rows is written with its height (ruling 7).
+            let font = canvas.embeddedFont.flatMap { (1...32).contains($0.height) ? $0.rawGlyphBytes.map { ($0, canvas.embeddedFont!.height) } : nil }
+            header += [UInt8(font?.1 ?? 16), (canvas.iceColors ? 0x08 : 0x00) | (palette != nil ? 0x01 : 0x00) | (font != nil ? 0x02 : 0x00)]
             if let palette {
-                for c in palette { header += [c.r, c.g, c.b].map { UInt8((Int($0) * 63 + 127) / 255) } }
+                for c in palette { header += sixBits(c) }
             }
+            if let font { header += font.0 }
             body = header + pairs(canvas, columns: canvas.columns, palette: palette)
             sauce.dataType = 6
             sauce.fileType = 0
             sauce.tInfo = [UInt16(canvas.columns), UInt16(canvas.height)] + canvas.sauceTInfo34.prefix(2)
+        case .ice:
+            body = ansiBody(iced(canvas))
+            sauce.dataType = 1
+            sauce.fileType = 1
+            sauce.flags |= 0x01
+            sauce.tInfo = [UInt16(canvas.columns), UInt16(canvas.screen(trimmed: true).rows.count)] + canvas.sauceTInfo34.prefix(2)
+        case .adf:
+            return Data(try adfBody(canvas))
+        case .idf:
+            return Data(idfBody(canvas))
+        case .wildcat:
+            return Data(wildcatBody(canvas))
+        case .pcboard, .avatar, .avatarPlus:
+            body = format == .pcboard ? pcboardBody(canvas) : avatarBody(canvas, plus: format == .avatarPlus)
+            sauce.dataType = 1
+            sauce.fileType = format == .pcboard ? 4 : 5
+            // SAUCE 00.5 has no font name for PCBoard and Avatar files.
+            sauce.fontName = ""
+            sauce.tInfo = [UInt16(canvas.columns), UInt16(canvas.screen(trimmed: true).rows.count), 0, 0]
         }
         return Data(body + sauce.encoded(fileSize: body.count))
     }
@@ -106,12 +160,12 @@ public enum ArtWriter {
                      fontName: canvas.fontName, comments: canvas.comments)
     }
 
-    private static func le16(_ value: Int) -> [UInt8] {
+    static func le16(_ value: Int) -> [UInt8] {
         [UInt8(value & 0xFF), UInt8(value >> 8 & 0xFF)]
     }
 
     /// Character and attribute pairs for every row, `columns` wide (extra columns blank).
-    private static func pairs(_ canvas: EditCanvas, columns: Int, palette: [RGB]? = nil) -> [UInt8] {
+    static func pairs(_ canvas: EditCanvas, columns: Int, palette: [RGB]? = nil) -> [UInt8] {
         var out: [UInt8] = []
         out.reserveCapacity(columns * canvas.height * 2)
         for y in 0..<canvas.height {

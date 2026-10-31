@@ -201,6 +201,8 @@ struct ScreenDesignerCommands: Commands {
             Button("Preview as Caller...") { CallerPreviewWindowController.showForFocusedEditor() }
                 .keyboardShortcut("p", modifiers: [.command, .option])
             Button("Export to BBS...") { ScreenExportController.exportFocusedEditor() }
+            Button("Export for Retro Platform...") { RetroExportController.exportFocusedEditor() }
+                .help("Redraws the screen as PETSCII (Commodore), ATASCII (Atari) or a Telstar Viewdata frame.")
             Button("Export Profiles...") { ExportProfilesWindowController.show() }
             Button("Screen Set...") { ScreenSetWindowController.show() }
             Divider()
