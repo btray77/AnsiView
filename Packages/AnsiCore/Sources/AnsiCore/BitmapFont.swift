@@ -3,8 +3,10 @@ import CoreText
 import Foundation
 
 /// A fixed size 256 glyph font for code page 437 text, one bit per pixel.
-public struct BitmapFont {
+public struct BitmapFont: Equatable {
     public let name: String
+    /// The name of a font that came inside an art file.
+    public static let embeddedName = "Embedded"
     public let width: Int
     public let height: Int
     /// 256 glyphs, each `width * height` pixels, row major, top row first.
@@ -32,7 +34,7 @@ public struct BitmapFont {
 
     /// A font embedded in an XBin, ADF or IDF file: 8 pixels wide, `height` bytes per glyph,
     /// most significant bit leftmost. Missing bytes are blank.
-    public init(rawGlyphs: [UInt8], height: Int, name: String = "Embedded") {
+    public init(rawGlyphs: [UInt8], height: Int, name: String = BitmapFont.embeddedName) {
         self.name = name
         self.width = 8
         self.height = height
@@ -59,6 +61,23 @@ public struct BitmapFont {
     }
 
     private var declaredCount: Int?
+
+    /// The 256 glyphs as an XBin, ADF or IDF file stores them (`height` bytes each, leftmost
+    /// pixel the high bit); nil unless the font is 8 pixels wide.
+    public var rawGlyphBytes: [UInt8]? {
+        guard width == 8 else { return nil }
+        var out: [UInt8] = []
+        out.reserveCapacity(256 * height)
+        for code in 0..<256 {
+            let glyph = glyphs[code]
+            for row in 0..<height {
+                var byte: UInt8 = 0
+                for x in 0..<8 where glyph[row * 8 + x] { byte |= 0x80 >> UInt8(x) }
+                out.append(byte)
+            }
+        }
+        return out
+    }
 
     // MARK: Bundled fonts
 

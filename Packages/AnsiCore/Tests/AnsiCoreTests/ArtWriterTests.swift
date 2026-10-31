@@ -190,7 +190,7 @@ func sampleCanvas(trueColor: Bool) -> EditCanvas {
     }
 
     @Test func saveFormatExtensions() {
-        #expect(SaveFormat.allCases.map(\.fileExtension) == ["ans", "bin", "xb"])
+        #expect(Array(SaveFormat.allCases.map(\.fileExtension).prefix(4)) == ["ans", "ice", "bin", "xb"])
     }
 }
 

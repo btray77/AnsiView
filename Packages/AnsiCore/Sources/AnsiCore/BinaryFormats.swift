@@ -59,6 +59,7 @@ public enum BinaryFormats {
         let font = BitmapFont(rawGlyphs: Array(bytes[fontStart..<dataStart]), height: 16)
         var result = screen(pairs: bytes[dataStart...], columns: 80, palette: palette, ice: true)
         result.font = font
+        if palette != Palette.vga { result.palette = palette }
         return (result, font)
     }
 
@@ -88,6 +89,7 @@ public enum BinaryFormats {
         }
         var result = screen(pairs: pairs[...], columns: columns, palette: palette, ice: true)
         result.font = font
+        if palette != Palette.vga { result.palette = palette }
         return (result, font)
     }
 

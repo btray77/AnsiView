@@ -17,6 +17,8 @@ import UniformTypeIdentifiers
 // ansirender --batch <format> [options] [--overwrite] <output-folder> <input>...
 //   inputs are art files, folders or .zip art packs; exits 1 if any piece failed
 // ansirender --roundtrip <input>...   (checks that ANSI conversion reads back as the same cells)
+// ansirender --save ans|ice|bin|xb|adf|idf|pcb|wildcat|avt|avt0plus <input> <output>   (the editor's Save As formats)
+// ansirender --save-check [--formats a,b] <input>...   (saves in each format, opens again, counts differing cells)
 // ansirender --from-image <image|folder|->... [options] [-o file|folder]   (options: ImageCommand.usage;
 //   one image goes to stdout without -o; several images or a folder need -o <folder>)
 // ansirender --music [--mode off|pipe|bananacom|all] <input>...   (lists ANSI music sequences with byte offsets)
@@ -307,6 +309,65 @@ if args[1] == "--roundtrip" {
         }
     }
     exit(failures == 0 ? 0 : 1)
+}
+
+// MARK: Save formats (final gaps T6)
+
+/// The editor's save formats by command name: ans ice bin xb adf idf pcb wildcat avt avt0plus.
+let saveFormatNames: [String: SaveFormat] = [
+    "ans": .ansi, "ice": .ice, "bin": .bin, "xb": .xbin, "adf": .adf, "idf": .idf, "pcb": .pcboard,
+    "wildcat": .wildcat, "avt": .avatar, "avt0plus": .avatarPlus,
+]
+let saveFormatList = "ans ice bin xb adf idf pcb wildcat avt avt0plus"
+
+if args[1] == "--save" {
+    guard args.count == 5, let format = saveFormatNames[args[2]] else {
+        fail("usage: ansirender --save \(saveFormatList.replacingOccurrences(of: " ", with: "|")) <input> <output>", 2)
+    }
+    let canvas = EditCanvas(file: loadArt(args[3]))
+    for note in SaucePreservation.saveReport(canvas, format: format) {
+        FileHandle.standardError.write("note: \(note)\n".data(using: .utf8)!)
+    }
+    do {
+        let data = try ArtWriter.data(canvas, format: format)
+        try data.write(to: URL(fileURLWithPath: args[4]))
+        print("wrote \(args[4]): \(format.label), \(data.count) bytes")
+    } catch { fail(error.localizedDescription, 1) }
+    exit(0)
+}
+
+if args[1] == "--save-check" {
+    // Every input saved in every format (or the formats named with --formats a,b) and opened
+    // again; prints differing cells per file and a total per format. Exits 1 on any difference.
+    var rest = Array(args.dropFirst(2))
+    var formats = SaveFormat.allCases
+    if let i = rest.firstIndex(of: "--formats"), i + 1 < rest.count {
+        formats = rest[i + 1].split(separator: ",").compactMap { saveFormatNames[String($0)] }
+        rest.removeSubrange(i...(i + 1))
+    }
+    var totals: [SaveFormat: (files: Int, refused: Int, cells: Int, differing: Int, bytes: Int)] = [:]
+    for path in rest {
+        let canvas = EditCanvas(file: loadArt(path))
+        var line = (path as NSString).lastPathComponent
+        for format in formats {
+            let r = SaveRoundTrip.check(canvas, format: format)
+            var t = totals[format] ?? (0, 0, 0, 0, 0)
+            t.files += 1
+            if r.refused != nil { t.refused += 1; line += " \(format.rawValue)=refused" } else {
+                t.cells += r.cells; t.differing += r.differing; t.bytes += r.bytes
+                if r.differing > 0 { line += " \(format.rawValue)=\(r.differing)" }
+            }
+            totals[format] = t
+        }
+        print(line)
+    }
+    var failed = false
+    for format in formats {
+        let t = totals[format] ?? (0, 0, 0, 0, 0)
+        print("\(format.rawValue): files=\(t.files) refused=\(t.refused) cells=\(t.cells) differing=\(t.differing) bytes=\(t.bytes)")
+        if t.differing > 0 { failed = true }
+    }
+    exit(failed ? 1 : 0)
 }
 
 // MARK: Text art fonts (fonts plan ruling 18)

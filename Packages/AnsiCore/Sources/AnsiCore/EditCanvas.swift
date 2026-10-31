@@ -86,8 +86,12 @@ public struct EditCanvas: Equatable {
     /// The SAUCE creation date of an opened file, kept on save (new art is dated when saved).
     public var sauceDate: DateComponents?
 
+    /// The font an XBin, ADF or IDF file brought with it (final gaps ruling 7): drawn instead of
+    /// `fontName`'s font and written back by XBin, ADF and IDF saves.
+    public var embeddedFont: BitmapFont?
+
     public var height: Int { rows.count }
-    public var font: BitmapFont { BitmapFont.named(fontName) }
+    public var font: BitmapFont { embeddedFont ?? BitmapFont.named(fontName) }
 
     public init(columns: Int = 80, height: Int = 25) {
         self.columns = Self.clampColumns(columns)
@@ -107,6 +111,7 @@ public struct EditCanvas: Equatable {
         if rows.isEmpty { rows = [Array(repeating: AnsiCell(), count: width)] }
         self.iceColors = iceColors || rows.contains { $0.contains { Self.isBrightVGA($0.bg) } }
         if let palette = screen.palette, palette.count == 16 { self.palette = palette }
+        if screen.font.name == BitmapFont.embeddedName { embeddedFont = screen.font }
         if let sauce = screen.sauce {
             title = sauce.title
             author = sauce.author

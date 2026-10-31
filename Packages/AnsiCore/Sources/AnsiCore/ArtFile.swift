@@ -60,6 +60,9 @@ public enum ArtFormat: Equatable {
         let artExtensions: Set<String> = ["ans", "asc", "nfo", "diz", "ice"]
         if !artExtensions.contains(fileExtension?.lowercased() ?? "") {
             let head = bytes.prefix(65_536)
+            // A Wildcat code as the very first bytes (as AnsiView's Wildcat writer starts) wins over
+            // "@X" text later in the file, which a Wildcat file can hold as "@07@X1F".
+            if isWildcatCode(head, head.startIndex) { return .wildcat }
             if isConvincing(codeOffsets(head, matching: isPCBoardCode)) { return .pcboard }
             if isConvincing(codeOffsets(head, matching: isWildcatCode)) { return .wildcat }
             if isConvincing(codeOffsets(head, matching: isAvatarCode)) { return .avatar }

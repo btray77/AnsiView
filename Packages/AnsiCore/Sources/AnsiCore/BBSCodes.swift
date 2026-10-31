@@ -45,7 +45,8 @@ public enum BBSCodes {
         return out
     }
 
-    /// Avatar level 0: ^L clear, ^Y c n repeat, and ^V commands for attributes and cursor movement.
+    /// Avatar level 0: ^L clear, ^Y c n repeat, and ^V commands for attributes and cursor movement;
+    /// also the AVT/0+ pattern repeat ^V^Y that AnsiView's AVT/0+ writer uses.
     public static func avatarToANSI(_ bytes: [UInt8]) -> [UInt8] {
         var out: [UInt8] = []
         out.reserveCapacity(bytes.count)
@@ -83,6 +84,12 @@ public enum BBSCodes {
                 case 0x08 where i + 3 < bytes.count:
                     out += escape + Array("\(bytes[i + 2]);\(bytes[i + 3])H".utf8)
                     i += 4
+                case 0x19 where i + 2 < bytes.count && i + 3 + Int(bytes[i + 2]) < bytes.count:
+                    // AVT/0+ pattern repeat: ^V ^Y length, the pattern, the count.
+                    let length = Int(bytes[i + 2])
+                    let pattern = bytes[(i + 3)..<(i + 3 + length)]
+                    for _ in 0..<Int(bytes[i + 3 + length]) where out.count + length <= maxOutputBytes { out += pattern }
+                    i += 4 + length
                 default:
                     out.append(b)
                     i += 1
