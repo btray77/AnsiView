@@ -6,7 +6,7 @@ This file is the persistent record. Status values: **done** (merged to main, tes
 
 Each row is updated when work merges. Nothing is marked done without a test or observed evidence named in the plan file it came from.
 
-## 0. What already exists (inspected 2026-10-30, main at ee1763b, 366 tests)
+## 0. What already exists (inspected 2026-10-30, main at ee1763b, 366 tests; stale rows updated by the final gaps plan, `docs/superpowers/plans/2026-10-30-ansiview-2.0-final-gaps.md`)
 
 | Area | Where | Notes |
 |---|---|---|
@@ -15,16 +15,16 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | ANSI parser (file playback) | `AnsiTerminal.swift`, `TextAttributes.swift` | SGR, 256/24-bit, PabloDraw t, cursor, clear |
 | Interactive terminal emulator | `TerminalEmulator.swift` | scroll regions, DSR replies, scrollback |
 | Renderer | `AnsiRenderer.swift` | 8/9 px, aspect, iCE, blink, budgeted memory |
-| Formats | `ArtFile.swift`, `BinaryFormats.swift`, `BBSCodes.swift`, `Sauce.swift`, `ArtWriter.swift` | .ans .asc .txt .nfo .diz .ice .bin .xb .adf .idf, PCBoard/Wildcat/Avatar, SAUCE read and write |
-| Editor (basic) | `EditCanvas.swift`, `CanvasEditor.swift`, `App/AnsiEditor.swift` | typing, F-key block sets, half-block mouse paint, select, fill, undo, iCE, save .ans/.bin/.xb |
+| Formats | `ArtFile.swift`, `BinaryFormats.swift`, `BBSCodes.swift`, `Sauce.swift`, `ArtWriter.swift` | .ans .asc .txt .nfo .diz .ice .bin .xb .adf .idf, PCBoard/Wildcat/Avatar, SAUCE read and write; since final gaps also writes .ice .adf .idf .pcb, Wildcat, Avatar/0 and AVT/0+ (`FormatWriters.swift`) |
+| Editor (basic) | `EditCanvas.swift`, `CanvasEditor.swift`, `App/AnsiEditor.swift` | typing, F-key block sets, half-block mouse paint, select, fill, undo, iCE; Save As in 10 formats (final gaps) |
 | Image to ANSI | `ImageToAnsi.swift`, `App/ImageImport*.swift` | v2 merged (item 61): live preview, OKLab, best character per cell, presets, Auto top 3, XBin fitted palette, batch, image drops |
 | Telnet client | `Telnet.swift`, `BBSClient.swift`, `App/BBSTerminal.swift` | negotiation, NAWS, TTYPE, raw TCP |
 | Playback speed / baud | `Playback.swift` | 300 to 115200 and unlimited |
 | Export | PNG, JPEG, WebP, GIF, APNG, MP4, HTML, text, modern ANSI | |
 | File transfers | XMODEM, YMODEM, ZMODEM, Kermit engines and terminal UI (`App/TerminalTransfers.swift`) | |
-| ANSI music | `AnsiMusic.swift`, `PlayString.swift`, `MusicScheduler.swift`, synth, `App/Music*`, `App/ViewerMusic.swift`, `App/TerminalMusic.swift` | engine and editor merged; playback in viewer, terminal and MP4 export on branch `ansiview-2.0-music-playback` |
+| ANSI music | `AnsiMusic.swift`, `PlayString.swift`, `MusicScheduler.swift`, synth, `App/Music*`, `App/ViewerMusic.swift`, `App/TerminalMusic.swift` | engine, editor and playback in viewer, terminal and MP4 export merged (b15fbf5, face351) |
 | TDF fonts | `TheDrawFont.swift`, `FIGletFont.swift`, `TextArt.swift`, `FontLibrary.swift`, `App/TextToASCII.swift`, `App/FontManager.swift` | TDF read/write, FIGlet, Text to ASCII, Font Manager |
-| Screen designer / templates | none | |
+| Screen designer / templates | `Screen/*`, `App/ScreenDesigner.swift` and its windows | merged b450922; retro platform export added by final gaps |
 
 ## 1. Art editor
 
@@ -33,21 +33,21 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | CP437 full set, VGA fonts, 80 col default, configurable size | done | plan 6 |
 | 16 colours, iCE | done | plan 6 |
 | Character editing, keyboard and mouse | done (harness verified; live keyboard check needs owner) | plan 6 |
-| Insert / overwrite / delete modes | done (harness; live check needs owner), item 60 |
-| Palette management, fg/bg swap | done (harness; live check needs owner), item 60 |
-| CP437 character picker | done (harness; live check needs owner), item 60 |
-| Configurable drawing characters / brushes | done (harness; live check needs owner), item 60 |
+| Insert / overwrite / delete modes | done (harness; live check needs owner) | item 60 |
+| Palette management, fg/bg swap | done (harness; live check needs owner) | item 60 |
+| CP437 character picker | done (harness; live check needs owner) | item 60 |
+| Configurable drawing characters / brushes | done (harness; live check needs owner) | item 60 |
 | Freehand drawing | done (half blocks) | plan 6; character brush in editor v2 |
-| Lines, rectangles, filled rectangles | done (harness; live check needs owner), item 60 |
-| Box drawing, single/double, auto-joining | done (harness; live check needs owner), item 60 |
-| Flood fill, colour replace, character replace | done (harness; live check needs owner), item 60 |
+| Lines, rectangles, filled rectangles | done (harness; live check needs owner) | item 60 |
+| Box drawing, single/double, auto-joining | done (harness; live check needs owner) | item 60 |
+| Flood fill, colour replace, character replace | done (harness; live check needs owner) | item 60 |
 | Text insertion | done | plan 6 |
 | Select, copy, cut, paste (cells, text, ANSI, image; editor and viewer; Copy As; floating and transparent paste; paste images) | done (harness verified; live check needs owner) | copy and paste, merged 39ef769 |
-| Move and resize selection | done (harness; live check needs owner), item 60 |
-| Mirror, flip, rotate (with box-character remapping) | done (harness; live check needs owner), item 60 |
-| Block operations | done (harness; live check needs owner), item 60 |
+| Move and resize selection | done (harness; live check needs owner) | item 60 |
+| Mirror, flip, rotate (with box-character remapping) | done (harness; live check needs owner) | item 60 |
+| Block operations | done (harness; live check needs owner) | item 60 |
 | Undo / redo | done | plan 6 |
-| Layers (flattened on save, kept in a sidecar project file) | done (harness; live check needs owner), item 60 |
+| Layers (flattened on save, kept in a sidecar project file) | done (harness; live check needs owner) | item 60 |
 | TDF font import, preview, insert, manage collection | done (harness; live check needs owner): parser and writer (8,634 collection fonts round trip), 19 outline styles, Text Art insert as a floating paste, Font Manager; TDF font editor (create outline, block or colour fonts, open and manage collections, glyphs drawn with the editor's canvas and tools, 19 style outline preview, live preview, save round trip; harness, live use needs owner) | fonts, tdf-editor |
 | Other font formats (FIGlet .flf) | done (harness; live check needs owner): figlet 2.2.5 layouts matching its reference output, vertical layouts, 18 bundled distribution fonts (New BSD); Text to ASCII gallery (owner request) | fonts |
 
@@ -86,7 +86,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Reusable components (headers, frames, hotkey legends) | done (19 built in plus Save Selection as Component, inserted as a floating paste; harness) | screen designer |
 | BBS display codes insert, preview with sample values | done for 20 packages from cited sources (`docs/BBS-COMPAT.md`); code picker, Sample Values, Sample Values Preview (harness) | screen designer |
 | Colour codes both ways (package codes vs ANSI) | done: native colour export and Open with BBS Codes, round trip tested for every package with colour codes | screen designer |
-| All BBS packages (owner request) | 20 supported as registry data; packages without real sources listed as not yet supported in `docs/BBS-COMPAT.md`; retro platforms (PETSCII, ATASCII, Viewdata) left to the terminal emulation plan with a seam | screen designer |
+| All BBS packages (owner request) | done: 20 supported as registry data; packages without real sources listed as not yet supported in `docs/BBS-COMPAT.md`; retro platforms: Screen > Export for Retro Platform redraws a screen for PETSCII C64 and C128 (`.seq`, `.80col.seq`: Synchronet's documented PETSCII display files), ATASCII (`.ata`; no BBS package documents ATASCII display files) and Viewdata (a Telstar 2 frame, content type rawV); Preview as Caller has a Terminal popup that plays it through the platform's own terminal. Evidence: `RetroScreenEncoderTests` (the 10 templates: 0 lost cells for PETSCII and ATASCII, 74 of 9,600 Viewdata cells lost to attribute cells, all reported), harness PNGs `caller-petscii64`, `caller-petscii128`, `caller-atascii`, `caller-viewdata`, `export-chooser-*`. Not tried on a real board (needs owner) | screen designer; final gaps ruling 8 |
 | Export to BBS packages' text/menu folders with the right file names | done: profiles with folder bookmark, documented names per package (others marked suggested), .bak, never overwrites unasked; end to end export into scratch Synchronet and Mystic layouts (harness); sandboxed write after choosing the folder needs an owner check in the real app | screen designer |
 | Screen set with status | done (harness: exported, changed in the BBS folder) | screen designer |
 | Caller preview at chosen baud with the terminal renderer | done (harness PNG, substituted values; layout warnings) | screen designer |
@@ -96,12 +96,12 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 
 | Requirement | Status | Item / plan |
 |---|---|---|
-| Frame editor, copy previous frame, onion skin, timeline | done (harness verified; live check needs owner), item 59 |
-| Record drawing sequences | done (record mode timestamps edits; As drawn export replays pauses), item 59 |
-| Playback speed, baud 300 to 28800 and more | done for playback (plan 2); animation preview and export at 300 to 115200 baud, item 59 |
-| Edit individual frames / commands | done: each frame is a full editor canvas with layers; per frame delay; the as drawn edit order is kept per frame, item 59 |
-| Import existing animated ANSI into frames | done: 15 of 15 animated corpus files split with exact replay, item 59 |
-| Export compatible sequences; timing via padding only, custom extensions labelled | done: diff export in 3 orders, CR padding delays, frame markers off by default and labelled; GIF and MP4 through the exporters, item 59 |
+| Frame editor, copy previous frame, onion skin, timeline | done (harness verified; live check needs owner) | item 59 |
+| Record drawing sequences | done (record mode timestamps edits; As drawn export replays pauses) | item 59 |
+| Playback speed, baud 300 to 28800 and more | done for playback (plan 2); animation preview and export at 300 to 115200 baud | item 59 |
+| Edit individual frames / commands | done: each frame is a full editor canvas with layers; per frame delay; the as drawn edit order is kept per frame | item 59 |
+| Import existing animated ANSI into frames | done: 15 of 15 animated corpus files split with exact replay | item 59 |
+| Export compatible sequences; timing via padding only, custom extensions labelled | done: diff export in 3 orders, CR padding delays, frame markers off by default and labelled; GIF and MP4 through the exporters | item 59 |
 
 ## 6. Formats
 
@@ -109,7 +109,7 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 |---|---|
 | .ANS .ASC .TXT .BIN .XB SAUCE | done (read and write) |
 | .TDF | done (read and write), .flf read |
-| .ICE .ADF .IDF .PCB, Avatar, Wildcat | read done; write planned where useful |
+| .ICE .ADF .IDF .PCB, Avatar, Wildcat | done (read and write): editor Save As and `ansirender --save`; ADF and IDF keep the palette and embedded font, AVT/0+ adds the pattern repeat. Every save opened again by AnsiView's readers (`ansirender --save-check`): 61 TWSUPP files and 174 16colo.rs cache files in all 10 formats, 0 differing cells, except Wildcat on one 160 column file (Wildcat files carry no width; reported on save). What a format cannot keep is listed before saving (final gaps rulings 1 to 7; `FormatWriterTests`, `SaveRoundTripTests`). No real ADF, IDF, PCB, AVT or Wildcat file exists on this Mac, so files from other tools were not opened |
 | Unsupported data preserved, never silently dropped (SAUCE comments, unknown SAUCE fields, trailing data) | done: SAUCE fields kept, losses shown on open/save (item 60) |
 
 ## 7. Interface
@@ -118,10 +118,10 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 |---|---|
 | Toolbars, palette, zoom | done (basic) |
 | Pan, grid, cursor position indicator | done (item 60) |
-| Full screen editing, retro DOS preview mode | done in harness (full screen not observed), item 60 |
+| Full screen editing, retro DOS preview mode | done in harness (full screen not observed) | item 60 |
 | Configurable keyboard shortcuts | done (item 60) |
-| Context sensitive help, tooltips, glossary | done on branch: Help > AnsiView Glossary (78 terms, searchable, also in Help menu search), (?) hints open glossary entries, tooltip inventory 349 controls 0 uncovered (item 62) |
-| Light and dark themes | system appearance today; retro theme planned |
+| Context sensitive help, tooltips, glossary | done (merged 3ea2b9f): Help > AnsiView Glossary (78 terms, 80 after final gaps, searchable, also in Help menu search), (?) hints open glossary entries, tooltip inventory 349 controls 0 uncovered (item 62) |
+| Light and dark themes | done: AnsiView > Settings > Appearance: System, Light, Dark or Retro (an original DOS and BBS look: dark controls on deep blue, light grey labels, yellow highlights, the bundled IBM VGA font on status lines). Every Retro text pair measures 7.06:1 or more (`AppAppearanceTests`, WCAG AA needs 4.5:1); harness PNGs of the viewer, editor, terminal, dialing directory and Settings in all four appearances; live app check needs owner (final gaps ruling 9) |
 | Font browser, character picker | done: Font Manager and Text to ASCII gallery (fonts); character picker (item 60) |
 
 ## 8. Rendering consistency
@@ -136,11 +136,11 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | Transport | Status |
 |---|---|
 | Telnet, raw TCP | done (plan 7) |
-| SSH (password and key, host key trust on first use) | done (merged) (local NIO SSH test server: password, empty password, Ed25519 key with passphrase, first use and changed key). Classic BBS servers: done on branch ansiview-2.0-ssh-compat (vendored swift-nio-ssh with DH group1/14/16 and group exchange, RSA and DSA host keys, AES-CTR/CBC and 3DES with HMAC, keyboard-interactive, none first, legacy encryption note; every algorithm against OpenSSH 10.2 sshd, keyboard-interactive against the NIO test server, ZMODEM over legacy SSH, read only handshakes with Synchronet and ENiGMA boards up to the host key question; docs/BBS-COMPAT.md) |
+| SSH (password and key, host key trust on first use) | done (merged) (local NIO SSH test server: password, empty password, Ed25519 key with passphrase, first use and changed key). Classic BBS servers: done, merged 9da90e7 (vendored swift-nio-ssh with DH group1/14/16 and group exchange, RSA and DSA host keys, AES-CTR/CBC and 3DES with HMAC, keyboard-interactive, none first, legacy encryption note; every algorithm against OpenSSH 10.2 sshd, keyboard-interactive against the NIO test server, ZMODEM over legacy SSH, read only handshakes with Synchronet and ENiGMA boards up to the host key question; docs/BBS-COMPAT.md) |
 | WebSocket (ws and wss) | done (merged) (local server: binary and text frames, subprotocol, telnet inside, HTTP 404, self signed wss error) |
 | RLogin | done (merged) (local server: handshake bytes, refusal; no window size, see README) |
 | Byte clean channel for transfers | done: all 256 byte values measured end to end over SSH, WebSocket and RLogin |
-| Telnet over TLS (telnets, port 992) | done on branch `ansiview-2.0-terminal-compat` (local OpenSSL 3 s_server: self signed first use asks, same certificate silent, changed refused); no live TLS board answered (the two listed refused or timed out) |
+| Telnet over TLS (telnets, port 992) | done, merged 8a76257 (local OpenSSL 3 s_server: self signed first use asks, same certificate silent, changed refused); no live TLS board answered (the two listed refused or timed out) |
 
 ## Terminal dialing directory
 
@@ -148,11 +148,11 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 |---|---|
 | Retro phonebook (list, tags, search, sort, notes, call stats), per-BBS settings, Keychain passwords, expect/send auto-login, dial queue with redial and busy detection, macros, JSON and SyncTERM import/export | done (local test server; real-BBS logins need owner), merged item 63 |
 | SSH keys, RLogin users, WebSocket fields, per protocol hints, SyncTERM SSH/RLogin import | done (merged) |
-| IEMSI | done on branch `ansiview-2.0-terminal-compat`, opt in per entry (unit tested handshake; a live AmiExpress board was seen sending `**EMSI_IRQ8E08`; not run against a real login) |
-| TLS client certificates | done on branch `ansiview-2.0-terminal-gaps`: per entry Keychain identity (local OpenSSL s_server with -Verify 1 accepts it and refuses a connection without); Keychain access from the sandboxed app not tried with a real identity (needs owner) |
-| Sixel and iTerm2 inline pictures | done on branch `ansiview-2.0-terminal-gaps` (decoders fuzzed, memory bounded, harness PNG `ansi-pictures`); no live board sending pictures was found |
+| IEMSI | done (merged 8a76257), opt in per entry (unit tested handshake; a live AmiExpress board was seen sending `**EMSI_IRQ8E08`; not run against a real login) |
+| TLS client certificates | done (merged 4086d67): per entry Keychain identity (local OpenSSL s_server with -Verify 1 accepts it and refuses a connection without); Keychain access from the sandboxed app not tried with a real identity (needs owner) |
+| Sixel and iTerm2 inline pictures | done (merged 4086d67) (decoders fuzzed, memory bounded, harness PNG `ansi-pictures`); no live board sending pictures was found |
 
-## Terminal emulations (branch `ansiview-2.0-terminal-compat`, docs/BBS-COMPAT.md "Terminal")
+## Terminal emulations (merged 8a76257 and 4086d67, docs/BBS-COMPAT.md "Terminal")
 
 | Family | Status |
 |---|---|
@@ -160,17 +160,17 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 | VT100 / VT220 | done (harness) |
 | Avatar AVT/0+ | done (harness) |
 | PETSCII C64 | done (harness, live Synchronet port 64 and a Color 64 / Image BBS board) |
-| PETSCII C128 80 column | done (live Synchronet port 128; underline and the screen editor ESC codes added on `ansiview-2.0-terminal-gaps`, harness PNG `c128-underline`) |
+| PETSCII C128 80 column | done (live Synchronet port 128; underline and the screen editor ESC codes added in terminal gaps (merged 4086d67), harness PNG `c128-underline`) |
 | ATASCII | done (harness; live boards wait for Return before art); inverse typing key (Terminal > Atari Inverse Video Key) |
 | Viewdata / Prestel | done (harness, live Telstar and NXtel) |
-| BBC Mode 7 | done (harness; live board showed only a bot check); VDU 22 modes 0-6 with text colours and PLOT graphics (move, line, point, filled triangle, GCOL, CLG) on `ansiview-2.0-terminal-gaps`, harness PNG `bbc-mode1`; no VDU 23 character definitions |
-| Apple II | done (harness, live GBBS Pro and Warp Six); MouseText (32 original pictures) on `ansiview-2.0-terminal-gaps`, harness PNG `appleii-mousetext` |
+| BBC Mode 7 | done (harness; live board showed only a bot check); VDU 22 modes 0-6 with text colours and PLOT graphics (move, line, point, filled triangle, GCOL, CLG) in terminal gaps (merged 4086d67), harness PNG `bbc-mode1`; no VDU 23 character definitions |
+| Apple II | done (harness, live GBBS Pro and Warp Six); MouseText (32 original pictures) in terminal gaps (merged 4086d67), harness PNG `appleii-mousetext` |
 | Amiga ANSI | done for what was seen (Topaz style font, ISO 8859-1, live AmiExpress); colour 3 is dark yellow, not VGA brown; other Amiga palette differences are terminal program settings (inferred), not done |
-| RIPscrip 1.54 (roadmap 57 RIPscrip viewing) | done on `ansiview-2.0-terminal-gaps`: icons from a chosen folder, session icons (1W), scenes (1R), file queries (1F), copy region (1G), text variable queries, block transfer requests reported, original stroke fonts 1-10 sized from the spec's metric tables, button styles, radio and check box groups, hotkeys, per feed drawing budget; .RIP files in the viewer, Quick Look (harness PNG) and ansirender. No RIP seen live before login |
+| RIPscrip 1.54 (roadmap 57 RIPscrip viewing) | done in terminal gaps (merged 4086d67): icons from a chosen folder, session icons (1W), scenes (1R), file queries (1F), copy region (1G), text variable queries, block transfer requests reported, original stroke fonts 1-10 sized from the spec's metric tables, button styles, radio and check box groups, hotkeys, per feed drawing budget; .RIP files in the viewer, Quick Look (harness PNG) and ansirender. No RIP seen live before login |
 | First bytes detection (suggest only) | done (harness) |
 | Original platform fonts (PETSCII, ATASCII, teletext, Apple II, Topaz style) | done, MIT, docs/FONTS.md |
-| VT52 (Atari ST extensions) | done on `ansiview-2.0-terminal-gaps` (tests, harness PNG `vt52`); no live VT52 board found |
-| Mouse reporting (CSI ? 9/1000/1006 h), CTerm loadable fonts | done on `ansiview-2.0-terminal-gaps` (unit tests; no live board asked) |
+| VT52 (Atari ST extensions) | done in terminal gaps (merged 4086d67) (tests, harness PNG `vt52`); no live VT52 board found |
+| Mouse reporting (CSI ? 9/1000/1006 h), CTerm loadable fonts | done in terminal gaps (merged 4086d67) (unit tests; no live board asked) |
 
 ## 16colo.rs browsing
 
@@ -182,30 +182,38 @@ Each row is updated when work merges. Nothing is marked done without a test or o
 
 | Requirement | Status |
 |---|---|
-| Search text inside art: viewer find bar, gallery search, library search (item 38) | done on branch `ansiview-2.0-plan-9` (core tests, harness; live app check needs owner) |
-| Side by side compare with differing cells tinted (item 39) | done on branch (core tests, harness PNG) |
-| Smooth auto scroll for tall art (item 40) | done on branch (core tests, harness) |
-| Minimap strip for tall art (item 41) | done on branch (core tests, harness PNG) |
-| Palette files (.pal, .gpl, .act, XBin/ADF/IDF) switched live (item 42) | done on branch (core tests, harness) |
-| Library: tags, favourites, ratings, smart folders (item 43) | done on branch (core tests, harness PNGs) |
-| Artist and group pages from SAUCE plus 16colo.rs (item 44) | done on branch (core tests with API shaped fixtures; live 16colo.rs lookup from the app needs owner) |
-| Duplicate finder, rendered cell hash plus byte hash, Trash only after confirmation (item 45) | done on branch (core tests, harness) |
-| FILE_ID.DIZ and NFO shown when a pack opens (item 46) | done on branch for galleries (harness); 16colo.rs browser FILE_ID preview built, not exercised against the network |
-| Background indexing and thumbnailing of very large folders and packs (item 47) | done on branch (10,000 piece measurement in plan 9) |
+| Search text inside art: viewer find bar, gallery search, library search (item 38) | done (merged 1280843; core tests, harness; live app check needs owner) |
+| Side by side compare with differing cells tinted (item 39) | done (merged 1280843; core tests, harness PNG) |
+| Smooth auto scroll for tall art (item 40) | done (merged 1280843; core tests, harness) |
+| Minimap strip for tall art (item 41) | done (merged 1280843; core tests, harness PNG) |
+| Palette files (.pal, .gpl, .act, XBin/ADF/IDF) switched live (item 42) | done (merged 1280843; core tests, harness) |
+| Library: tags, favourites, ratings, smart folders (item 43) | done (merged 1280843; core tests, harness PNGs) |
+| Artist and group pages from SAUCE plus 16colo.rs (item 44) | done (merged 1280843; core tests with API shaped fixtures; live 16colo.rs lookup from the app needs owner) |
+| Duplicate finder, rendered cell hash plus byte hash, Trash only after confirmation (item 45) | done (merged 1280843; core tests, harness) |
+| FILE_ID.DIZ and NFO shown when a pack opens (item 46) | done for galleries (merged 1280843) (harness); 16colo.rs browser FILE_ID preview built, not exercised against the network |
+| Background indexing and thumbnailing of very large folders and packs (item 47) | done (merged 1280843; 10,000 piece measurement in plan 9) |
 
 ## Output, system integration and formats (plan 10, items 48 to 58)
 
 | Requirement | Status |
 |---|---|
-| Screen saver playing a folder of art, animation included (item 48) | done on branch `ansiview-2.0-plan-10` (core tests; built .saver loaded and stepped in a harness, PNGs; not run by the real screen saver host, needs owner) |
-| Wallpaper at a display's exact pixel size, centred or tiled (item 49) | done on branch (core tests; 2880x1800 and 1920x1080 PNGs measured; Set as Desktop Picture not run) |
-| Copy As Discord ANSI and Slack (item 50) | done on branch (core tests, harness pasteboard; not pasted into Discord, needs owner) |
-| MP4 with the modem sound in step (item 51) | done on branch (ffprobe and decoded audio measured: art starts at 6.39 s, noise ends within one frame of the last change) |
-| Shortcuts and AppleScript render and convert (item 53) | done on branch (App Intents metadata in the built app, intents and script logic run in a harness; not run from Shortcuts or Script Editor, needs owner) |
-| Finder Quick Actions Convert to PNG / GIF (item 54) | done on branch (harness conversion; extensions registered with pluginkit; not clicked in Finder, needs owner) |
-| Menu bar art of the day, optional 16colo.rs (item 55) | done on branch (core tests, harness PNGs, live 16colo.rs: 4 requests) |
-| Localization infrastructure, String Catalogs (item 56) | done on branch (catalogs synced from compiler extraction, pseudolanguage harness PNGs); many AppKit labels still plain strings |
-| Sixel and kitty output from ansirender (item 58) | done on branch (core tests; sixel decoded by an independent decoder, identical pixels; not shown in a real terminal) |
+| Screen saver playing a folder of art, animation included (item 48) | done (merged df8d575; core tests; built .saver loaded and stepped in a harness, PNGs; not run by the real screen saver host, needs owner) |
+| Wallpaper at a display's exact pixel size, centred or tiled (item 49) | done (merged df8d575; core tests; 2880x1800 and 1920x1080 PNGs measured; Set as Desktop Picture not run) |
+| Copy As Discord ANSI and Slack (item 50) | done (merged df8d575; core tests, harness pasteboard; not pasted into Discord, needs owner) |
+| MP4 with the modem sound in step (item 51) | done (merged df8d575; ffprobe and decoded audio measured: art starts at 6.39 s, noise ends within one frame of the last change) |
+| Shortcuts and AppleScript render and convert (item 53) | done (merged df8d575; App Intents metadata in the built app, intents and script logic run in a harness; not run from Shortcuts or Script Editor, needs owner) |
+| Finder Quick Actions Convert to PNG / GIF (item 54) | done (merged df8d575; harness conversion; extensions registered with pluginkit; not clicked in Finder, needs owner) |
+| Menu bar art of the day, optional 16colo.rs (item 55) | done (merged df8d575; core tests, harness PNGs, live 16colo.rs: 4 requests) |
+| Localization infrastructure, String Catalogs (item 56) | done (merged df8d575; catalogs synced from compiler extraction, pseudolanguage harness PNGs); many AppKit labels still plain strings |
+| Sixel and kitty output from ansirender (item 58) | done (merged df8d575; core tests; sixel decoded by an independent decoder, identical pixels; not shown in a real terminal) |
+
+## Distribution
+
+| Requirement | Status |
+|---|---|
+| App Store variant entitlements match the Developer ID build (app scoped bookmarks for library, transfer, capture, export profile and RIP icon folders and SSH keys) | done (final gaps ruling 10): `com.apple.security.files.bookmarks.app-scope` added to `Packaging/appstore/project-appstore.yml` and its entitlements; a store build signed ad hoc showed it with `codesign -d --entitlements`; `EntitlementsTests` checks both variants and that no extension has network access. Store signing and submission need the owner |
 
 ## Running right now
+
+Nothing: the final gaps branch (`ansiview-2.0-final-gaps`) closes the last open rows.
 

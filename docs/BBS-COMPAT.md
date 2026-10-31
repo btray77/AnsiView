@@ -107,7 +107,26 @@ No package documents its line ends; AnsiView writes CR LF by default (a profile 
 
 ### Retro platforms
 
-C64 PETSCII (Color 64, Image BBS), Atari ATASCII, Prestel / Viewdata Mode 7 and Apple II boards are handled by a separate terminal emulation plan. The seam for them: `TextEncoding` and the exporter's encoding step are the only places that assume CP437 bytes, and `ColourSyntax.none` lets a package carry no ANSI colour codes; a PETSCII package would add an encoding and a colour syntax family.
+Commodore, Atari and Viewdata boards do not show PC ANSI, so Screen > Export for Retro Platform redraws a
+designed screen for the platform (final gaps plan, ruling 8; `Screen/RetroScreenEncoder.swift`). Each cell's CP437
+glyph is sampled to the platform font's size and matched against every character the platform's own terminal engine
+draws (found by feeding the engine each byte), together with the colours the platform can put on that cell; text
+characters with a direct equivalent stay text. The result is played back through the same terminal engine and the
+cells that differ are counted.
+
+| Platform | Screen | What AnsiView writes | BBS package documentation | What is lost |
+|---|---|---|---|---|
+| PETSCII C64 | 40 x 25, lower and upper case set | `.seq`: clear, lower case set, colour codes, reverse on/off, CR line ends (a full row wraps) | Synchronet: PETSCII display files are `.seq`, width variants `name.40col.seq` and `name.80col.seq`; `menu()` picks `.seq` for a PETSCII terminal (from docs: wiki.synchro.net howto:petscii, custom:menu_files, ref:files; from source: sbbs3 `prntfile.cpp`) | one screen background: other backgrounds become reverse video in the cell's colour; the bottom right cell is left out (writing it scrolls) |
+| PETSCII C128 80 col | 80 x 25, VDC palette | `name.80col.seq` | Synchronet, as above | as C64 (the VDC palette holds the 16 VGA colours exactly) |
+| ATASCII | 40 x 24 | `.ata`: clear, characters (ESC before the editor codes), inverse video in bit 7, 0x9B line ends | none found: Synchronet's display file types and `prntfile.cpp` have no ATASCII type; `.ata` is the usual extension (third party: Image::TextMode) | colour (the Atari text screen has one colour; light backgrounds become inverse video) |
+| Viewdata / Prestel | 40 x 24, 7 bit | a Telstar 2 frame JSON: `pid` (`page-no`, `frame-id` "a"), `visible`, `content.data` the 7 bit videotex (ESC attributes, CR LF instead of trailing spaces) with `content.type` "rawV" (from docs: github.com/johnnewcombe/telstar-2/wiki Frames, FrameSchema) | Telstar | colour changes take a cell each (placed in spaces before the text where possible); 8 colours; square brackets become round ones (UK teletext has arrows there) |
+
+Measured on the 10 designer templates (`everyTemplateEncodesForEveryPlatform`): 0 lost cells for PETSCII C64, C128 and
+ATASCII; Viewdata 74 of 9,600 cells lost to attribute cells. Templates are 80 columns, so 40 column platforms get
+their left 40 columns and a warning. Preview as Caller has a Terminal popup (PC, or one of the four platforms) and
+shows the warnings. Not tried on a real board: uploading a `.seq` to a Synchronet `text/menu` folder or adding a
+frame to a Telstar server needs the owner. Mode 7 (BBC) and Apple II export are not done: no BBS package
+documentation for their display files was found.
 
 ## Terminal
 

@@ -10,6 +10,9 @@ solid block and shade characters, and box drawing that lines up without gaps.
 - **Authentic fonts.** IBM VGA and EGA bitmap fonts chosen from the SAUCE font name, plus fonts embedded in XBin, ADF and IDF files, 9 pixel VGA mode, and 4:3 CRT aspect when the file asks for it.
 - **Every common format.** ANSI, UTF-8 ANSI, 256 and 24 bit color (xterm and PabloDraw), BIN, XBin, ADF, IDF, PCBoard, Wildcat and Avatar. (`.bin` and `.adf` are not claimed in Finder because macOS already uses them for other file types; open them with File > Open.)
 - **CRT effect.** View > CRT Effect adds scanlines, phosphor glow and screen curvature.
+- **Appearance.** AnsiView > Settings > Appearance: System, Light, Dark, or Retro (dark controls on
+  deep DOS blue, light grey labels, yellow highlights, the IBM VGA font on status lines). The art
+  keeps its own colours in every appearance.
 - **Animations play.** Files that redraw themselves replay at modem speed, from 300 baud
   to 115,200 baud or instantly. The default is 2400 baud, the speed most BBS animations
   were timed for. Click the art to skip to the end or replay.
@@ -116,7 +119,7 @@ solid block and shade characters, and box drawing that lines up without gaps.
 - **Draw your own.** A TheDraw style editor (File > New ANSI Art, or File > Edit Art for a copy
   of the art in front): typing, F1 to F10 block character sets, half block drawing with the
   mouse, the 16 VGA colours with iCE, rectangle copy and paste, fill, undo, and saving as `.ans`,
-  `.bin` or `.xb` with SAUCE. See [Drawing ANSI art](#drawing-ansi-art).
+  `.ice`, `.bin`, `.xb`, `.adf`, `.idf`, PCBoard `.pcb`, Wildcat `.bbs` or Avatar `.avt`. See [Drawing ANSI art](#drawing-ansi-art).
 - **Images to ANSI.** File > Import Image..., File > Open on a picture, or dropping a picture on
   the Dock icon or an art window opens the import window: a live preview of the result next to
   the original, presets (Auto, Photo, Logo, Pixel art, Line art), perceptual colour matching,
@@ -219,8 +222,15 @@ AnsiView has a simple TheDraw style editor (in the app only; Quick Look stays a 
 - **Art menu.** Canvas Size... (1 to 1,000 columns, 1 to 1,500 rows), Edit SAUCE... (title,
   author, group), Toggle iCE Colours, Zoom In / Out (Command = / Command -).
 - **Undo / Redo** in the Edit menu cover every change.
-- **Saving.** File > Save asks for a name and a format the first time: ANSI (`.ans`),
-  BinaryText (`.bin`, at most 510 columns; odd widths gain a blank column) or XBin (`.xb`).
+- **Saving.** File > Save asks for a name and a format the first time: ANSI (`.ans`), iCE colour
+  ANSI (`.ice`), BinaryText (`.bin`, at most 510 columns; odd widths gain a blank column), XBin
+  (`.xb`), Artworx ADF (`.adf`, always 80 columns), iCE Draw (`.idf`), PCBoard `@X` codes
+  (`.pcb`), Wildcat! `@bf@` codes (`.bbs`), Avatar/0 or Avatar AVT/0+ (`.avt`). XBin, ADF and
+  iCE Draw keep the art's own palette and font. What a format cannot hold (ADF and iCE Draw have
+  no SAUCE record, Wildcat files no width or iCE flag, PCBoard's `@X00` means "save the colour")
+  is listed before saving. `ansirender --save <format> in out` writes the same formats and
+  `ansirender --save-check <files>` saves each file in every format, opens it again and counts
+  any cell that changed.
   Every file gets a SAUCE record with the title, author, group, date, width (TInfo1), height
   and the iCE flag, and opens in AnsiView exactly as the editor shows it. ANSI files leave out
   trailing blank rows (as every ANSI viewer does), write colours outside the VGA palette as 24
@@ -801,6 +811,11 @@ screens are exported into your BBS install folder, or uploaded through the termi
 - **Screen > Component Library...**: headers, frames in the box tool's styles, hotkey legends,
   status lines with your package's codes, separators and logos in any installed font. Insert floats
   it in the editor like a paste. **Save Selection as Component...** keeps your own.
+- **Screen > Export for Retro Platform...** redraws the screen for a Commodore (PETSCII `.seq`,
+  `.80col.seq` for the C128, the names Synchronet looks for), an Atari (ATASCII `.ata`) or a
+  Viewdata service (a Telstar frame, `.json`), using the nearest characters and colours each
+  machine has, and lists the cells it could not keep. Preview as Caller's Terminal popup plays it
+  through AnsiView's own terminal for that machine. Design such screens at 40 columns.
 - **Screen > Preview as Caller...**: the screen as the BBS sends it, through AnsiView's terminal
   emulator at 300 to 115200 baud, 80 x 24, 80 x 25 or 132 x 37, CP437 or UTF-8, iCE on or off.
   Warnings: lines wider than the terminal, lines that fill column 80 (an extra blank line on
