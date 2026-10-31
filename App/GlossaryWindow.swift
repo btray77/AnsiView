@@ -28,6 +28,8 @@ final class GlossaryWindowController: NSWindowController, NSWindowDelegate {
         window.contentMinSize = NSSize(width: 640, height: 380)
         window.contentViewController = viewController
         window.setContentSize(NSSize(width: 900, height: 560))
+        // Centred the first time; afterwards the saved frame wins.
+        window.center()
         window.setFrameAutosaveName("AnsiViewGlossary")
         super.init(window: window)
         window.delegate = self

@@ -72,6 +72,39 @@ import Testing
         #expect(Glossary.search("color palette").contains { $0.term == .palette })
     }
 
+    /// Review fix: a hyphen is a space ("9-dot" is "9 dot") or nothing ("z-modem" is "zmodem").
+    @Test func searchTreatsHyphensAsSpacesOrNothing() {
+        #expect(Glossary.search("9-dot").first?.term == .letterSpacing)
+        #expect(Glossary.search("ice-colors").first?.term == .iceColours)
+        #expect(Glossary.search("half-block").contains { $0.term == .halfBlocks })
+        #expect(Glossary.search("mode-7").first?.term == .mode7)
+        #expect(Glossary.search("door-game").first?.term == .doorGames)
+        #expect(Glossary.search("z-modem").first?.term == .zmodem)
+        #expect(Glossary.search("Z MODEM").first?.term == .zmodem)
+    }
+
+    @Test func searchAcceptsAmericanFavorites() {
+        #expect(Glossary.search("favorites").contains { $0.term == .library })
+    }
+
+    /// Review fix: words in hints and explanations match from their start, so "ice" does not find "services".
+    @Test func textMatchesStartAtAWord() {
+        let ice = Glossary.search("ice").map(\.term)
+        #expect(ice.first == .iceColours)
+        #expect(!ice.contains(.viewdata))
+    }
+
+    /// Review fix: the facts the app's own music code states.
+    @Test func bansiMatchesTheMusicCode() {
+        let bansi = Glossary.entry(.bansi)
+        #expect(bansi.explanation.contains("ESC [ N"))
+        #expect(bansi.explanation.contains("Delete Line"))
+        #expect(bansi.hint.contains("ESC [ N"))
+        #expect(Glossary.entry(.onionSkin).explanation.contains("over"))
+        #expect(!Glossary.entry(.adf).explanation.contains("macOS also uses"))
+        #expect(!Glossary.entry(.petscii).explanation.contains("letters codes"))
+    }
+
     @Test func titleMatchesRankFirst() {
         #expect(Glossary.search("sauce").first?.term == .sauce)
         #expect(Glossary.search("telnet").first?.term == .telnet)

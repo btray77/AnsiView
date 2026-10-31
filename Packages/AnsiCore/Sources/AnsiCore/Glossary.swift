@@ -76,33 +76,18 @@ public enum Glossary {
     }
 
     /// Entries matching `query`, best first: every word of the query must appear somewhere in the entry;
-    /// title matches outrank alias matches, which outrank matches in the text. Case, British and
-    /// American spellings and hyphens do not matter. An empty query lists every entry alphabetically.
+    /// title matches outrank alias matches, which outrank matches in the hint and explanation (where a
+    /// query word must start a word, so "ice" does not find "services"). Case, colour/color and
+    /// favourite/favorite do not matter; a hyphen counts as a space ("9-dot") or as nothing ("z-modem").
+    /// An empty query lists every entry alphabetically.
     public static func search(_ query: String) -> [GlossaryEntry] {
-        let words = normalize(query).split(separator: " ").map(String.init)
-        guard !words.isEmpty else { return sorted }
-        let joined = words.joined(separator: " ")
+        let spaced = normalize(query)
+        guard !spaced.isEmpty else { return sorted }
+        let closed = normalize(query.replacingOccurrences(of: "-", with: ""))
         var scored: [(GlossaryEntry, Int)] = []
         for entry in sorted {
-            let title = normalize(entry.title)
-            let aliases = entry.aliases.map(normalize)
-            let hint = normalize(entry.hint)
-            let text = normalize(entry.explanation + " " + (entry.whereInApp ?? ""))
-            var score = 0
-            if title == joined { score += 1000 }
-            if aliases.contains(joined) { score += 600 }
-            if title.hasPrefix(joined) { score += 200 }
-            var missing = false
-            for word in words {
-                var points = 0
-                if title.contains(word) { points += 50 }
-                if aliases.contains(where: { $0.contains(word) }) { points += 30 }
-                if hint.contains(word) { points += 10 }
-                if text.contains(word) { points += 3 }
-                if points == 0 { missing = true; break }
-                score += points
-            }
-            if !missing { scored.append((entry, score)) }
+            let best = [score(entry, spaced), closed == spaced ? nil : score(entry, closed)].compactMap { $0 }.max()
+            if let best { scored.append((entry, best)) }
         }
         // Stable: equal scores keep alphabetical order.
         return scored.enumerated().sorted { a, b in
@@ -110,10 +95,33 @@ public enum Glossary {
         }.map(\.element.0)
     }
 
-    /// Lowercased, "colour" as "color", hyphens and other punctuation dropped, spaces collapsed.
+    /// How well `entry` matches the normalized `query`, or nil when one of its words is missing.
+    private static func score(_ entry: GlossaryEntry, _ query: String) -> Int? {
+        let title = normalize(entry.title)
+        let aliases = entry.aliases.map(normalize)
+        let hintWords = normalize(entry.hint).split(separator: " ")
+        let textWords = normalize(entry.explanation + " " + (entry.whereInApp ?? "")).split(separator: " ")
+        var score = 0
+        if title == query { score += 1000 }
+        if aliases.contains(query) { score += 600 }
+        if title.hasPrefix(query) { score += 200 }
+        for word in query.split(separator: " ") {
+            var points = 0
+            if title.contains(word) { points += 50 }
+            if aliases.contains(where: { $0.contains(word) }) { points += 30 }
+            if hintWords.contains(where: { $0.hasPrefix(word) }) { points += 10 }
+            if textWords.contains(where: { $0.hasPrefix(word) }) { points += 3 }
+            if points == 0 { return nil }
+            score += points
+        }
+        return score
+    }
+
+    /// Lowercased, "colour" as "color" and "favourite" as "favorite", hyphens and other punctuation as
+    /// spaces (a dot stays, for ".ans"), spaces collapsed.
     static func normalize(_ text: String) -> String {
         var result = text.lowercased().replacingOccurrences(of: "colour", with: "color")
-        result = result.replacingOccurrences(of: "-", with: "")
+        result = result.replacingOccurrences(of: "favourite", with: "favorite")
         result = String(result.map { $0.isLetter || $0.isNumber || $0 == "." ? $0 : " " })
         return result.split(separator: " ").joined(separator: " ")
     }
@@ -178,8 +186,8 @@ public enum Glossary {
                       explanation: "XBin (.XB) stores the screen as plain cells, like BIN, but adds a header with the width and height and can include a custom 16 colour palette and a custom font. That lets artists use colours and characters no PC had. AnsiView reads XBin and can save it.",
                       related: [.binFormat, .palette, .textModeFont, .adf], whereInApp: "Save As in the editor; Image Import's fitted colours make XBin.", category: .art),
         GlossaryEntry(term: .adf, title: "ADF (Artworx)", aliases: ["adf", ".adf", "artworx"],
-                      hint: "An art format with its own 64 colour palette and font, from the Artworx group",
-                      explanation: "ADF files hold a palette and a font followed by the screen cells, so art can use custom colours. macOS also uses .adf for Amiga disk images, so AnsiView only offers to open them as an alternate viewer.",
+                      hint: "An art format that carries its own palette and font, from the Artworx group",
+                      explanation: "ADF files hold a palette (64 EGA entries, of which the art uses 16) and a font, followed by the screen cells, so art can use custom colours. Amiga emulators use .adf for Amiga disk images too, so AnsiView is only an alternate viewer for the extension.",
                       related: [.xbin, .idf, .palette], whereInApp: nil, category: .art),
         GlossaryEntry(term: .idf, title: "IDF (iCE Draw)", aliases: ["idf", ".idf", "ice draw"],
                       hint: "The iCE Draw format: screen cells compressed, with a font and palette at the end",
@@ -241,7 +249,7 @@ public enum Glossary {
                       related: [.baud, .onionSkin, .layers, .crPadding], whereInApp: "The editor's animation timeline.", category: .drawing),
         GlossaryEntry(term: .onionSkin, title: "Onion skin", aliases: ["onion skinning", "ghost frame"],
                       hint: "Shows the previous frame faintly while you draw the next one",
-                      explanation: "Animators drew on thin paper so the previous drawing showed through. With onion skin on, the previous frame is drawn faintly under the frame you are editing, so you can see exactly what moved.",
+                      explanation: "Animators drew on thin paper so the previous drawing showed through. With onion skin on, the previous frame is drawn faintly over the frame you are editing: cells that are the same look normal, and cells that differ show a ghost of the previous frame, so you can see exactly what moved.",
                       related: [.frames, .layers], whereInApp: "The animation timeline.", category: .drawing),
         GlossaryEntry(term: .theDrawFonts, title: "TheDraw fonts (TDF)", aliases: ["tdf", ".tdf", "thedraw", "the draw"],
                       hint: "Big lettering fonts made of coloured blocks, from the TheDraw ANSI editor",
@@ -269,9 +277,9 @@ public enum Glossary {
                       hint: "Simple tunes hidden in an art file, played through the PC speaker",
                       explanation: "Some terminals understood a special escape code followed by notes in the BASIC PLAY language (\"T120 O4 C D E\"). Art could carry a tune that played while it drew. AnsiView plays it with a synthesized PC speaker sound and has a music editor.",
                       related: [.bansi, .baud, .escapeCodes], whereInApp: "Playback > Play ANSI Music; Window > ANSI Music Editor.", category: .playback),
-        GlossaryEntry(term: .bansi, title: "BANSI", aliases: ["bansi.sys", "banana ansi"],
-                      hint: "A DOS ANSI driver whose music codes many art files use",
-                      explanation: "BANSI.SYS was a fast replacement for DOS's own ANSI driver. It added an escape code for music, and art made for it starts its tunes with ESC [ M. AnsiView recognises the BANSI form as well as the original.",
+        GlossaryEntry(term: .bansi, title: "BANSI", aliases: ["bananacom", "banana ansi", "esc[n"],
+                      hint: "The BananaCom style of ANSI music, started by ESC [ N instead of ESC [ M",
+                      explanation: "The first ANSI music code, ESC [ M, also means Delete Line, so a terminal can mistake one for the other. The BananaCom terminal started its tunes with ESC [ N instead, and SyncTERM calls that style, together with its own ESC [ |, BANSI. AnsiView plays all three; choose which ones a BBS may use in its dialing directory entry.",
                       related: [.ansiMusic, .escapeCodes], whereInApp: "The music editor's export choices.", category: .playback),
         GlossaryEntry(term: .crtEffect, title: "CRT effect", aliases: ["crt", "scanlines", "glow", "tube"],
                       hint: "Makes the art look as if shown on an old tube monitor, with scanlines and glow",
@@ -305,7 +313,7 @@ public enum Glossary {
                       related: [.vt100, .terminalType, .atascii], whereInApp: "Terminal type VT52 (Atari ST).", category: .terminal),
         GlossaryEntry(term: .petscii, title: "PETSCII", aliases: ["petscii", "c64", "commodore 64", "c128", "commodore"],
                       hint: "The Commodore 64 and 128 character set, with its own graphics and colour codes",
-                      explanation: "Commodore computers used PETSCII instead of ASCII: different letters codes, block graphics on the keyboard, and single byte codes for colours and cursor moves. Commodore BBSes send PETSCII at 40 columns (80 on a C128).",
+                      explanation: "Commodore computers used PETSCII instead of ASCII: different codes for the letters, block graphics on the keyboard, and single byte codes for colours and cursor moves. Commodore BBSes send PETSCII at 40 columns (80 on a C128).",
                       related: [.terminalType, .atascii, .columns], whereInApp: "Terminal type PETSCII.", category: .terminal),
         GlossaryEntry(term: .atascii, title: "ATASCII", aliases: ["atascii", "atari 8 bit", "atari 800", "inverse video"],
                       hint: "The Atari 8 bit computers' character set, with graphics and inverse video",
