@@ -68,6 +68,8 @@ licensed packs with credit, while AnsiView's own code stays MIT.
 32. Telnet BBS terminal using the AnsiView renderer.
 
 ### iOS and iPadOS (plan 8)
+Status: built on branch `ansiview-2.0-plan-8` (see `docs/superpowers/plans/2026-10-30-ansiview-2.0-plan-8-ios.md`);
+verified in the iOS 26.5 simulator. Device builds and App Store upload need the owner's account.
 27. iPhone and iPad app with a Files app Quick Look preview, reusing the core.
 
 ### Browsing, viewing and collections (plan 9)
