@@ -25,7 +25,7 @@ packages:
 settings:
   base:
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "86"
+    CURRENT_PROJECT_VERSION: "87"
     SWIFT_VERSION: "5.0"
     # Localization (plan 10 item 56): String Catalogs, filled from the compiler's extraction.
     SWIFT_EMIT_LOC_STRINGS: YES
