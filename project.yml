@@ -431,6 +431,8 @@ targets:
         buildPhase: resources
     dependencies:
       - package: AnsiCore
+      - target: AnsiPreviewiOS
+      - target: AnsiThumbnailiOS
     info:
       path: iOS/App/Info.plist
       properties:
@@ -479,3 +481,72 @@ targets:
             CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate
             LSItemContentTypes: [public.plain-text]
+  # Files app Quick Look preview (plan 8). No entitlements: no network, no app group.
+  AnsiPreviewiOS:
+    type: app-extension
+    platform: iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.iOS.Preview
+        PRODUCT_NAME: AnsiPreview
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: Apple Development
+        DEVELOPMENT_TEAM: 47HEHK53W5
+        ENABLE_HARDENED_RUNTIME: NO
+        OTHER_CODE_SIGN_FLAGS: ""
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS: YES
+        ARCHS: $(ARCHS_STANDARD)
+        ONLY_ACTIVE_ARCH: YES
+    sources: [iOS/Preview, iOS/Shared]
+    dependencies:
+      - package: AnsiCore
+      # Linked explicitly: the extension host looks up QuickLook's extension context class in the
+      # binary, and Swift auto linking alone did not load it (the service failed to start).
+      - sdk: QuickLook.framework
+    info:
+      path: iOS/Preview/Info.plist
+      properties:
+        CFBundleDisplayName: AnsiView Preview
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.quicklook.preview
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PreviewViewController
+          NSExtensionAttributes:
+            QLIsDataBasedPreview: false
+            QLSupportsSearchableItems: false
+            QLSupportedContentTypes: [com.traynham.ansiview.ans, com.traynham.ansiview.asc]
+  # Files app thumbnails (plan 8): the Mac's provider source, which is platform neutral. No entitlements.
+  AnsiThumbnailiOS:
+    type: app-extension
+    platform: iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.traynham.AnsiView.iOS.Thumbnail
+        PRODUCT_NAME: AnsiThumbnail
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: Apple Development
+        DEVELOPMENT_TEAM: 47HEHK53W5
+        ENABLE_HARDENED_RUNTIME: NO
+        OTHER_CODE_SIGN_FLAGS: ""
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS: YES
+        ARCHS: $(ARCHS_STANDARD)
+        ONLY_ACTIVE_ARCH: YES
+    sources:
+      - path: Thumbnail/ThumbnailProvider.swift
+    dependencies:
+      - package: AnsiCore
+    info:
+      path: iOS/Thumbnail/Info.plist
+      properties:
+        CFBundleDisplayName: AnsiView Thumbnail
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.quicklook.thumbnail
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ThumbnailProvider
+          NSExtensionAttributes:
+            QLSupportedContentTypes: [com.traynham.ansiview.ans]
+            QLThumbnailMinimumDimension: 0
