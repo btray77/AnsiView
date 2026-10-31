@@ -44,6 +44,9 @@
     "ANSI Music Editor" : {
 
     },
+    "ATASCII: types the next characters in inverse video, like the Atari's inverse key. Choose again to stop." : {
+
+    },
     "About ANSI Music..." : {
 
     },
@@ -78,6 +81,9 @@
 
     },
     "At Instant speed the art appears at once; this plays its music once from the start." : {
+
+    },
+    "Atari Inverse Video Key" : {
 
     },
     "Auto Advance" : {
@@ -150,6 +156,9 @@
 
     },
     "Copy As" : {
+
+    },
+    "Create or open a TheDraw font (.tdf) and draw its letters with the editor's tools." : {
 
     },
     "Crop to Selection" : {
@@ -434,6 +443,12 @@
     "Previous Frame" : {
 
     },
+    "RIP Icon Folder..." : {
+
+    },
+    "RIPscrip: the folder your icons (.ICN) and scenes (.RIP) are read from. A BBS never writes to it." : {
+
+    },
     "Receives files from the BBS. ZMODEM and Kermit downloads usually start by themselves." : {
 
     },
@@ -558,6 +573,9 @@
 
     },
     "Swap Foreground and Background" : {
+
+    },
+    "TDF Font Editor..." : {
 
     },
     "Teletext and Viewdata: shows or hides text the page conceals, such as quiz answers." : {
